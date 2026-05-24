@@ -1,0 +1,84 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openccu-loom-client"
+version = "0.0.1"
+description = "Async Python REST + WebSocket client for the openccu-loom daemon"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "OpenCCU-Loom authors" }]
+requires-python = ">=3.11"
+dependencies = [
+    "aiohttp>=3.9",
+    "openccu-loom-types>=0.1.3,<0.2",
+    "pydantic>=2.6",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: AsyncIO",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Home Automation",
+    "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://github.com/SukramJ/py-openccu-loom-client"
+"Bug Tracker" = "https://github.com/SukramJ/py-openccu-loom-client/issues"
+"Daemon Repo" = "https://github.com/SukramJ/openccu-loom"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "pytest-asyncio>=0.23",
+    "aioresponses>=0.7.6",
+    "ruff>=0.6",
+    "mypy>=1.10",
+]
+
+[tool.setuptools.packages.find]
+include = ["openccu_loom_client*"]
+
+[tool.setuptools.package-data]
+openccu_loom_client = ["py.typed"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # flake8-bugbear
+    "UP",   # pyupgrade
+    "ASYNC",
+    "SIM",  # flake8-simplify
+    "PL",   # pylint
+    "RUF",  # ruff-specific
+]
+ignore = [
+    "PLR0913",  # too-many-arguments — common for constructors with many config knobs
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Magic numbers ok in tests; per-test imports are an idiomatic way to
+# scope import-time errors to the test that triggers them.
+"tests/**" = ["PLR2004", "PLC0415"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unused_ignores = true

@@ -1,0 +1,82 @@
+# SPDX-License-Identifier: MIT
+# Copyright (C) 2026 OpenCCU-Loom authors.
+
+"""Channel domain model — wraps ChannelSummary."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from openccu_loom_types.rest import ChannelSummary
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from openccu_loom_client.model.data_point import DataPoint
+    from openccu_loom_client.model.device import Device
+    from openccu_loom_client.store import LoomStore
+
+
+class Channel:
+    """Store-aware wrapper around one channel of one device."""
+
+    __slots__ = ("_store", "_summary")
+
+    def __init__(self, *, summary: ChannelSummary, store: LoomStore) -> None:
+        self._summary = summary
+        self._store = store
+
+    @property
+    def summary(self) -> ChannelSummary:
+        return self._summary
+
+    @property
+    def address(self) -> str:
+        """The full channel address, e.g. ``"VCU0001:1"``."""
+        return self._summary.address
+
+    @property
+    def number(self) -> int:
+        return self._summary.number
+
+    @property
+    def paramset_key(self) -> str:
+        return self._summary.paramset_key
+
+    @property
+    def custom_dp_name(self) -> str | None:
+        return self._summary.custom_dp_name
+
+    # ---- graph navigation ----
+
+    @property
+    def device_address(self) -> str:
+        """The owning device's address (channel-address minus ``:N``)."""
+        return self._summary.address.split(":", 1)[0]
+
+    @property
+    def device(self) -> Device | None:
+        """Return the parent Device, if it's loaded in the store."""
+        return self._store.get_device(address=self.device_address)
+
+    @property
+    def data_points(self) -> Iterator[DataPoint]:
+        return iter(
+            self._store.data_points_of(
+                address=self.device_address,
+                channel=self.number,
+            )
+        )
+
+    def get_data_point(self, *, parameter: str) -> DataPoint | None:
+        return self._store.get_data_point(
+            address=self.device_address,
+            channel=self.number,
+            parameter=parameter,
+        )
+
+    def __repr__(self) -> str:
+        return (
+            f"Channel(address={self.address!r}, number={self.number}, "
+            f"paramset_key={self.paramset_key!r})"
+        )
