@@ -242,7 +242,10 @@ class _QueryFacade:
     def get_event_groups(self, **_kwargs: Any) -> tuple[Any, ...]:
         raise _not_implemented(
             "query_facade.get_event_groups",
-            "device trigger (keypress) events are not yet broadcast by the daemon",
+            "device trigger (keypress/impulse) events ARE now broadcast "
+            "(device.trigger → DeviceTriggerEvent), but the HA event-group "
+            "surface that groups them per device is not modelled yet — see "
+            "docs/optimization-needs.md",
         )
 
     def get_state_paths(self, **_kwargs: Any) -> tuple[Any, ...]:
@@ -401,9 +404,14 @@ class _Configuration:
 class LoomCentralAdapter:
     """Presents the ``aiohomematic.CentralUnit`` surface over ``LoomClient``."""
 
-    def __init__(self, *, client: LoomClient, name: str) -> None:
+    def __init__(self, *, client: LoomClient, name: str, serial: str | None = None) -> None:
         self._client = client
         self._name = name
+        # CCU serial injected by the integration (HA's ``entry.unique_id``).
+        # When set it fills the central-id slot of canonical HA routing
+        # keys and wins over the serial reported on ``/system/ccu`` — so
+        # the live keys match the one-time HA registry migration.
+        self._serial = serial
         self._state: CentralState = CentralState.Stopped
         self._system_information = SystemInformation()
         # Make the store build categorised Dp* / CustomDp* instances so
@@ -482,7 +490,11 @@ class LoomCentralAdapter:
         self._refresh_group = self._client.events.create_subscription_group(
             name="loom-compat-refresh"
         )
-        install_refresh_bridge(bus=self._client.events, group=self._refresh_group)
+        install_refresh_bridge(
+            bus=self._client.events,
+            group=self._refresh_group,
+            store=self._client.store,
+        )
         self._state = CentralState.Running
 
     async def _bootstrap_custom_data_points(self) -> None:
@@ -536,7 +548,14 @@ class LoomCentralAdapter:
         except Exception:
             _LOGGER.debug("system/ccu unavailable during system-information refresh")
             ccus = []
-        serial = ccus[0].serial if ccus and getattr(ccus[0], "serial", None) else None
+        daemon_serial = ccus[0].serial if ccus and getattr(ccus[0], "serial", None) else None
+        # An injected serial (HA's entry.unique_id) wins over the daemon's,
+        # so the live keys match the HA registry migration exactly.
+        serial = self._serial or daemon_serial
+        # The serial is the central-id slot of every canonical HA routing
+        # key (hub / internal / virtual-remote); record it before bootstrap
+        # so the categorised data-point layer builds matching unique_ids.
+        self._client.store.set_serial(serial)
         interfaces: tuple[str, ...] = ()
         try:
             interfaces = tuple(i.id for i in await self._client.system.list_interfaces())

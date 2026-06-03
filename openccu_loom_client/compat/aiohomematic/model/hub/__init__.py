@@ -18,23 +18,34 @@ from __future__ import annotations
 
 from typing import Any, ClassVar
 
+from aiohomematic_contract import canonical_unique_id, hub_slug
+from aiohomematic_contract.unique_id import PROGRAM_ADDRESS, SYSVAR_ADDRESS
 from openccu_loom_types.enums import DataPointCategory
 
 from openccu_loom_client.model import Program, Sysvar
 
 
-def _clean(text: str) -> str:
-    return text.replace(":", "_").replace("-", "_").replace(" ", "_").lower()
+def sysvar_unique_id(*, serial_suffix: str, name: str) -> str:
+    """Canonical HA unique id for a sysvar, matched by the refresh bridge.
+
+    ``loom_<serial>_sysvar_<hub-slug(name)>``: the daemon ``name`` is the
+    CCU legacy name, ``hub_slug`` is python-slugify (the contract's slug
+    rule), and the serial suffix fills the central-id slot.
+    """
+    return canonical_unique_id(
+        serial_suffix=serial_suffix, address=SYSVAR_ADDRESS, parameter=hub_slug(name)
+    )
 
 
-def sysvar_unique_id(name: str) -> str:
-    """Stable HA unique id for a sysvar, matched by the refresh bridge."""
-    return f"sysvar_{_clean(name)}"
+def program_unique_id(*, serial_suffix: str, name: str) -> str:
+    """Canonical HA unique id for a program.
 
-
-def program_unique_id(program_id: str) -> str:
-    """Stable HA unique id for a program."""
-    return f"program_{_clean(program_id)}"
+    Keyed on ``hub_slug(legacy_name)`` (not the program id), with the
+    serial suffix in the central-id slot — ``loom_<serial>_program_<slug>``.
+    """
+    return canonical_unique_id(
+        serial_suffix=serial_suffix, address=PROGRAM_ADDRESS, parameter=hub_slug(name)
+    )
 
 
 class _HubEntitySurface:
@@ -75,7 +86,10 @@ class _HubEntitySurface:
 class _SysvarEntitySurface(_HubEntitySurface):
     @property
     def unique_id(self) -> str:
-        return sysvar_unique_id(self.name)  # type: ignore[attr-defined]
+        return sysvar_unique_id(
+            serial_suffix=self._store.serial_suffix,  # type: ignore[attr-defined]
+            name=self.name,  # type: ignore[attr-defined]
+        )
 
     @property
     def data_type(self) -> str | None:
@@ -135,7 +149,7 @@ class ProgramDpButton(_HubEntitySurface, Program):
 
     @property
     def unique_id(self) -> str:
-        return program_unique_id(self.id)
+        return program_unique_id(serial_suffix=self._store.serial_suffix, name=self.name)
 
     async def press(self) -> None:
         await self.execute()
@@ -148,7 +162,7 @@ class ProgramDpSwitch(_HubEntitySurface, Program):
 
     @property
     def unique_id(self) -> str:
-        return program_unique_id(self.id)
+        return program_unique_id(serial_suffix=self._store.serial_suffix, name=self.name)
 
 
 # ---- updates ----

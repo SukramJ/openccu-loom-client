@@ -31,6 +31,7 @@ import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Final
 
+from aiohomematic_contract import serial_suffix as contract_serial_suffix
 from openccu_loom_types.rest import (
     ChannelSummary,
     CustomDPSummary,
@@ -73,6 +74,17 @@ class LoomStore:
 
     def __init__(self, *, transport: HttpTransport | None = None) -> None:
         self._transport = transport
+        # The daemon central *name* (``snapshot.interfaces[].central_id``,
+        # == ``payload.central``). Used to scope/annotate events, NOT as a
+        # routing-key prefix.
+        self._central_id: str = ""
+        # The CCU serial suffix (last 10 chars, lower-cased). This is the
+        # central-id slot of every canonical HA routing key for hub /
+        # internal / virtual-remote addresses (see
+        # ``aiohomematic_contract.canonical_unique_id``); the categorised
+        # data-point layer reads it back off the store to build
+        # ``unique_id``s bit-identical to the daemon's.
+        self._serial_suffix: str = ""
         self._devices: dict[str, Device] = {}
         self._channels: dict[tuple[str, int], Channel] = {}
         self._data_points: dict[tuple[str, int, str], DataPoint] = {}
@@ -90,6 +102,30 @@ class LoomStore:
         # Same hook for Custom Data Points — the compat layer injects a
         # factory that returns the right categorised ``CustomDp*`` class.
         self._cdp_factory: Callable[..., CustomDataPoint] | None = None
+
+    # ---- central identity ----
+
+    @property
+    def central_id(self) -> str:
+        """The daemon central *name* (for event scoping, not key prefixing)."""
+        return self._central_id
+
+    def set_central_id(self, central_id: str | None) -> None:
+        """Record the daemon central name (from the bootstrap snapshot)."""
+        self._central_id = central_id or ""
+
+    @property
+    def serial_suffix(self) -> str:
+        """CCU serial suffix — the central-id slot of canonical HA keys."""
+        return self._serial_suffix
+
+    def set_serial(self, serial: str | None) -> None:
+        """Record the CCU serial; stored as its canonical suffix.
+
+        The serial comes from ``GET /system/ccu`` (``SystemCCUEntry.serial``)
+        or is injected by the integration (HA's ``entry.unique_id``).
+        """
+        self._serial_suffix = contract_serial_suffix(serial) if serial else ""
 
     # ---- transport wiring ----
 
@@ -304,13 +340,28 @@ class LoomStore:
         :meth:`attach_channel_data_points`. Programs and sysvars
         come along in the same response so they load here in one
         pass.
+
+        The ``central_id`` is taken from the snapshot's interface list
+        (it is a component of every hub / internal / virtual-remote
+        routing key), unless one was already pinned via
+        :meth:`set_central_id`.
         """
+        if not self._central_id:
+            self.set_central_id(self._infer_central_id(snapshot))
         for summary in snapshot.devices:
             self._upsert_device_summary(summary)
         for prog in snapshot.programs or ():
             self._upsert_program(prog)
         for sysvar in snapshot.sysvars or ():
             self._upsert_sysvar(sysvar)
+
+    @staticmethod
+    def _infer_central_id(snapshot: Snapshot) -> str | None:
+        """Derive the central id from the first interface that carries one."""
+        for iface in snapshot.interfaces or ():
+            if iface.central_id:
+                return iface.central_id
+        return None
 
     def attach_device_detail(self, detail: DeviceDetail) -> None:
         """Apply a full ``GET /devices/{addr}`` detail record.

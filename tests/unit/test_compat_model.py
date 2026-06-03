@@ -10,6 +10,7 @@ from openccu_loom_types.rest import CustomDPSummary, Kind, Snapshot
 from openccu_loom_types.ws import (
     CustomDataPointStateChangedPayload,
     DataPointValueChangedPayload,
+    OptimisticRollbackPayload,
     SysvarChangedPayload,
 )
 
@@ -29,8 +30,10 @@ from openccu_loom_client.events import (
     CustomDataPointStateChangedEvent,
     DataPointValueChangedEvent,
     EventBus,
+    OptimisticRollbackEvent,
     SysvarChangedEvent,
 )
+from openccu_loom_client.events.types import DataPointOptimisticRolledBackEvent
 from openccu_loom_client.store import LoomStore
 
 
@@ -94,7 +97,10 @@ class TestCustomDataPointModel:
         assert isinstance(cover, CustomDpCover)
         assert cover.current_position == 42
         assert cover.is_closed is False
-        assert cover.unique_id == "vcu1_cdp_cover"
+        # Custom DP keys on its primary channel address; canonical
+        # ``loom_`` namespace, and VCU1 (a normal device) carries no
+        # serial prefix.
+        assert cover.unique_id == "loom_vcu1_1"
 
     async def test_climate_kind_maps_to_thermostat(self) -> None:
         central = await _adapter()
@@ -222,9 +228,11 @@ class TestRefreshBridge:
         return seen
 
     async def test_value_change_becomes_state_changed(self) -> None:
+        # Payload without unique_id → the bridge rebuilds the canonical key
+        # from the store's serial suffix. A normal device carries no prefix.
         bus = EventBus()
         group = bus.create_subscription_group(name="t")
-        install_refresh_bridge(bus=bus, group=group)
+        install_refresh_bridge(bus=bus, group=group, store=LoomStore())
         seen = await self._collect(bus)
         await bus.publish(
             DataPointValueChangedEvent(
@@ -244,12 +252,42 @@ class TestRefreshBridge:
                 ),
             )
         )
-        assert seen == ["vcu1_1_state"]
+        assert seen == ["loom_vcu1_1_state"]
+
+    async def test_value_change_consumes_payload_unique_id(self) -> None:
+        # When the daemon supplies unique_id, the bridge uses it verbatim
+        # (no rebuild) — the drift-free path.
+        bus = EventBus()
+        group = bus.create_subscription_group(name="t")
+        install_refresh_bridge(bus=bus, group=group, store=LoomStore())
+        seen = await self._collect(bus)
+        await bus.publish(
+            DataPointValueChangedEvent(
+                seq=1,
+                kind=Kind.change,
+                ts="2026-05-24T08:00:00Z",
+                payload=DataPointValueChangedPayload.model_validate(
+                    {
+                        "central": "home",
+                        "device_address": "VCU1",
+                        "channel": 1,
+                        "parameter": "STATE",
+                        "paramset_key": "VALUES",
+                        "value": True,
+                        "modified_at": "2026-05-24T08:00:00Z",
+                        "unique_id": "loom_vcu1_1_state",
+                    }
+                ),
+            )
+        )
+        assert seen == ["loom_vcu1_1_state"]
 
     async def test_custom_and_sysvar_changes_become_state_changed(self) -> None:
         bus = EventBus()
         group = bus.create_subscription_group(name="t")
-        install_refresh_bridge(bus=bus, group=group)
+        store = LoomStore()
+        store.set_serial("3014F711A0001234")  # serial suffix → 11a0001234
+        install_refresh_bridge(bus=bus, group=group, store=store)
         seen = await self._collect(bus)
         await bus.publish(
             CustomDataPointStateChangedEvent(
@@ -277,4 +315,48 @@ class TestRefreshBridge:
                 ),
             )
         )
-        assert seen == ["vcu1_cdp_cover", "sysvar_my_var"]
+        # Rebuilt canonical keys: a custom DP keys on its primary channel
+        # address (no serial prefix for the non-virtual VCU1); a sysvar on
+        # ``loom_<serial>_sysvar_<hub_slug(name)>`` (space folds to a dash).
+        assert seen == ["loom_vcu1_1", "loom_11a0001234_sysvar_my-var"]
+
+    async def test_optimistic_rollback_broadcast_becomes_public_event(self) -> None:
+        bus = EventBus()
+        group = bus.create_subscription_group(name="t")
+        install_refresh_bridge(bus=bus, group=group, store=LoomStore())
+        seen: list[OptimisticRollbackEvent] = []
+
+        async def recorder(event: OptimisticRollbackEvent) -> None:
+            seen.append(event)
+
+        bus.subscribe(event_type=OptimisticRollbackEvent, handler=recorder)
+        await bus.publish(
+            DataPointOptimisticRolledBackEvent(
+                seq=7,
+                kind=Kind.change,
+                ts="2026-05-24T08:00:00Z",
+                payload=OptimisticRollbackPayload.model_validate(
+                    {
+                        "central": "home",
+                        "device_address": "VCU1",
+                        "channel": 1,
+                        "parameter": "LEVEL",
+                        "paramset_key": "VALUES",
+                        "reason": "timeout",
+                        "sent": 0.8,
+                        "present": 0.5,
+                    }
+                ),
+            )
+        )
+        assert len(seen) == 1
+        ev = seen[0]
+        # Raw daemon broadcast → public aiohomematic-shaped event, with
+        # field mapping (sent→rolled_back, present→restored) and the
+        # envelope seq preserved (not reset to 0 by local synthesis).
+        assert ev.device_address == "VCU1"
+        assert ev.parameter == "LEVEL"
+        assert ev.rolled_back_value == 0.8
+        assert ev.restored_value == 0.5
+        assert ev.reason == "timeout"
+        assert ev.seq == 7

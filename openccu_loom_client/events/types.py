@@ -21,6 +21,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, ClassVar, Final
 
+from aiohomematic_contract import canonical_unique_id
 from openccu_loom_types.rest import Kind
 from openccu_loom_types.ws import (
     CentralStateChangedPayload,
@@ -28,6 +29,7 @@ from openccu_loom_types.ws import (
     DataPointValueChangedPayload,
     DeviceCreatedPayload,
     DeviceRemovedPayload,
+    DeviceTriggerPayload,
     InstallModeChangedPayload,
     MatterCommissioningProgressPayload,
     MatterCommissioningWindowResponse,
@@ -35,6 +37,7 @@ from openccu_loom_types.ws import (
     MatterExposureUpdate,
     MatterFabric,
     MatterFabricRemovedPayload,
+    OptimisticRollbackPayload,
     ProgramExecutedPayload,
     SystemStatusChangedPayload,
     SysvarChangedPayload,
@@ -45,20 +48,26 @@ _LOGGER: Final = logging.getLogger(__name__)
 
 
 def data_point_event_key(
-    *, device_address: str, channel: int | str, parameter: str
+    *, serial_suffix: str, device_address: str, channel: int | str, parameter: str
 ) -> str:
-    """Per-data-point routing key, matching the aiohomematic unique-id form.
+    """Rebuild a generic data point's canonical HA routing key.
 
     ``homematicip_local`` subscribes to value-change events with
-    ``event_key=data_point.unique_id`` (one subscription per HA entity),
-    so the value-changed event must carry that exact key. The compat
-    data-point layer derives its ``unique_id`` from the same function,
-    keeping the two ends in lock-step. Format mirrors aiohomematic:
-    ``{address}_{channel}_{parameter}`` lower-cased with ``:`` and ``-``
-    folded to ``_``.
+    ``event_key=data_point.unique_id`` (one subscription per HA entity).
+    The compat data-point layer derives its ``unique_id`` from the same
+    function, keeping the two ends in lock-step.
+
+    The key is built by the shared ``aiohomematic_contract`` reference —
+    the loom-namespaced canonical key ``loom_<routing-key>``, with the CCU
+    ``serial_suffix`` in the central-id slot (devices carry no prefix;
+    internal/virtual-remote addresses do). This is the rebuild path; when
+    a daemon payload carries ``unique_id`` directly, callers prefer that.
     """
-    raw = f"{device_address}_{channel}_{parameter}"
-    return raw.replace(":", "_").replace("-", "_").lower()
+    return canonical_unique_id(
+        serial_suffix=serial_suffix,
+        address=f"{device_address}:{channel}",
+        parameter=parameter,
+    )
 
 
 @dataclass(slots=True, kw_only=True)
@@ -100,17 +109,15 @@ class DataPointValueChangedEvent(LoomEvent):
     type_id: ClassVar[str] = "datapoint.value_changed"
 
     def __post_init__(self) -> None:
-        # Keyed by the per-data-point unique id (not the central) so a
+        # Keyed by the daemon-supplied canonical ``unique_id`` so a
         # homematicip_local entity that subscribes with
         # ``event_key=data_point.unique_id`` receives exactly its own
         # value changes. The store→bridge handler subscribes without an
-        # event_key, so it still sees every value change.
+        # event_key, so it still sees every value change. (For a daemon
+        # that omits ``unique_id``, the compat refresh bridge rebuilds the
+        # key from the store's serial suffix.)
         if self.event_key is None:
-            self.event_key = data_point_event_key(
-                device_address=self.payload.device_address,
-                channel=self.payload.channel,
-                parameter=self.payload.parameter,
-            )
+            self.event_key = self.payload.unique_id
 
     @property
     def device_address(self) -> str:
@@ -228,6 +235,45 @@ class DeviceRemovedEvent(LoomEvent):
 
 
 @dataclass(slots=True, kw_only=True)
+class DeviceTriggerEvent(LoomEvent):
+    """A non-state device event (keypress, impulse, device error).
+
+    Rides the ``device.{address}.channels.{channel}.trigger`` topic.
+    Distinct from a value change: the CCU reports a momentary event
+    (``event_type`` is one of ``DeviceTriggerEventType``) rather than a
+    persisted value. Keyed by the per-data-point routing key so a
+    subscriber can scope to one (device, channel, parameter).
+    """
+
+    payload: DeviceTriggerPayload
+    type_id: ClassVar[str] = "device.trigger"
+
+    def __post_init__(self) -> None:
+        if self.event_key is None:
+            self.event_key = self.payload.unique_id
+
+
+@dataclass(slots=True, kw_only=True)
+class DataPointOptimisticRolledBackEvent(LoomEvent):
+    """An optimistic write was rolled back (TTL expiry or CCU rejection).
+
+    The raw daemon broadcast. Rides the same per-data-point topic as
+    ``datapoint.value_changed``, so it is keyed identically. The compat
+    refresh bridge translates it into the public, aiohomematic-shaped
+    :class:`~openccu_loom_client.events.synthetic.OptimisticRollbackEvent`
+    that HA subscribes to (mirroring how ``datapoint.value_changed`` is
+    bridged to ``DataPointStateChangedEvent``).
+    """
+
+    payload: OptimisticRollbackPayload
+    type_id: ClassVar[str] = "datapoint.optimistic_rolled_back"
+
+    def __post_init__(self) -> None:
+        if self.event_key is None:
+            self.event_key = self.payload.unique_id
+
+
+@dataclass(slots=True, kw_only=True)
 class MatterCommissioningProgressEvent(LoomEvent):
     payload: MatterCommissioningProgressPayload
     type_id: ClassVar[str] = "matter.commissioning_progress"
@@ -293,6 +339,11 @@ _EVENT_REGISTRY: Final[dict[str, tuple[type[LoomEvent], type]]] = {
     InstallModeChangedEvent.type_id: (InstallModeChangedEvent, InstallModeChangedPayload),
     DeviceCreatedEvent.type_id: (DeviceCreatedEvent, DeviceCreatedPayload),
     DeviceRemovedEvent.type_id: (DeviceRemovedEvent, DeviceRemovedPayload),
+    DeviceTriggerEvent.type_id: (DeviceTriggerEvent, DeviceTriggerPayload),
+    DataPointOptimisticRolledBackEvent.type_id: (
+        DataPointOptimisticRolledBackEvent,
+        OptimisticRollbackPayload,
+    ),
     MatterCommissioningProgressEvent.type_id: (
         MatterCommissioningProgressEvent,
         MatterCommissioningProgressPayload,

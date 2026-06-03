@@ -56,6 +56,7 @@ class _GenericEntitySurface:
     @property
     def unique_id(self) -> str:
         return data_point_event_key(
+            serial_suffix=self._store.serial_suffix,  # type: ignore[attr-defined]
             device_address=self.device_address,  # type: ignore[attr-defined]
             channel=self.channel_number,  # type: ignore[attr-defined]
             parameter=self.parameter,  # type: ignore[attr-defined]

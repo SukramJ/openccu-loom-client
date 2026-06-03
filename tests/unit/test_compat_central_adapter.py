@@ -125,6 +125,38 @@ class TestSystemInformation:
         assert central.version == "1.2.3"
 
 
+_CCU_ENTRY = {
+    "name": "home",
+    "host": "ccu.local",
+    "available": True,
+    "is_ha_app": False,
+    "configured_interfaces": [],
+    "serial": "0000DAEMON1234",  # daemon-reported serial → suffix daemon1234
+}
+
+
+class TestSerialInjection:
+    """An injected serial (HA entry.unique_id) fills the key central-id slot."""
+
+    async def _refresh(self, *, serial: str | None) -> str:
+        with aioresponses() as mock:
+            mock.get(f"{_BASE}/info", payload=_INFO, repeat=True)
+            mock.get(f"{_BASE}/system/ccu", payload=[_CCU_ENTRY], repeat=True)
+            mock.get(f"{_BASE}/interfaces", payload=[], repeat=True)
+            central = await _make_config(serial=serial).create_central()
+            await central._client.connect()
+            await central._refresh_system_information()
+            suffix = central._client.store.serial_suffix
+            await central._client.close()
+            return suffix
+
+    async def test_injected_serial_wins_over_daemon(self) -> None:
+        assert await self._refresh(serial="3014F711A0001234") == "11a0001234"
+
+    async def test_daemon_serial_used_without_injection(self) -> None:
+        assert await self._refresh(serial=None) == "daemon1234"
+
+
 class TestActionCoordinators:
     async def test_device_coordinator_get_device(self, connected) -> None:
         central, _ = connected
@@ -221,7 +253,7 @@ class TestGenericDataPointModel:
         switches = central.query_facade.get_data_points(category=DataPointCategory.Switch)
         assert len(switches) == 1
         assert isinstance(switches[0], DpSwitch)
-        assert switches[0].unique_id == "vcu1_1_state"
+        assert switches[0].unique_id == "loom_vcu1_1_state"
 
         sensors = central.query_facade.get_data_points(category=DataPointCategory.Sensor)
         assert len(sensors) == 1
@@ -255,6 +287,15 @@ class TestHubDataPointModel:
             Snapshot.model_validate(
                 {
                     "generated_at": "2026-05-24T08:00:00Z",
+                    "interfaces": [
+                        {
+                            "id": "home:HmIP-RF",
+                            "name": "HmIP",
+                            "connected": True,
+                            "interface": "HmIP-RF",
+                            "central_id": "home",
+                        }
+                    ],
                     "devices": [],
                     "sysvars": [
                         {
@@ -268,12 +309,17 @@ class TestHubDataPointModel:
                 }
             )
         )
+        # The serial fills the central-id slot of hub keys; the adapter
+        # sets it from /system/ccu at start(), but this test drives the
+        # store directly, so set it explicitly.
+        central._client.store.set_serial("3014F711A0001234")  # → 11a0001234
         switches = central.hub_coordinator.get_hub_data_points(
             category=SysvarDpSwitch.default_category()
         )
         assert len(switches) == 1
         assert isinstance(switches[0], SysvarDpSwitch)
-        assert switches[0].unique_id == "sysvar_alarm"
+        # canonical sysvar key: loom_<serial>_sysvar_<hub_slug(name)>.
+        assert switches[0].unique_id == "loom_11a0001234_sysvar_alarm"
 
         buttons = central.hub_coordinator.get_hub_data_points(
             category=ProgramDpButton.default_category(), registered=False
@@ -293,7 +339,9 @@ class TestHubDataPointModel:
 class TestStillStubbedModelSurface:
     async def test_get_event_groups_raises_with_daemon_reason(self) -> None:
         central = await _make_config().create_central()
-        with pytest.raises(NotImplementedError, match="not yet broadcast"):
+        # device.trigger IS broadcast now and bound to DeviceTriggerEvent;
+        # what's still missing is the HA event-group surface on top of it.
+        with pytest.raises(NotImplementedError, match="event-group surface"):
             central.query_facade.get_event_groups(event_type="keypress")
 
 

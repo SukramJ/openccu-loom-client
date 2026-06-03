@@ -22,6 +22,7 @@ into the application's domain model. These tests assert:
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 
 import pytest
@@ -39,15 +40,39 @@ from openccu_loom_client.events import (
     UnknownLoomEvent,
     event_from_envelope,
 )
-from openccu_loom_client.events.types import known_event_types
+from openccu_loom_client.events.types import (
+    DataPointOptimisticRolledBackEvent,
+    DeviceTriggerEvent,
+    known_event_types,
+)
 
-_LOOM_REPO = pathlib.Path("/Users/markus/Documents/GitHub/openccu-loom")
-_WSAPI = _LOOM_REPO / "assets/wsapi.json"
+
+def _find_wsapi() -> pathlib.Path | None:
+    """Locate the daemon's ``wsapi.json``.
+
+    The daemon repo is normally checked out beside this one
+    (``…/GitHub/openccu-loom``). Resolve it relative to this file so the
+    drift check runs on any machine; an explicit ``OPENCCU_LOOM_REPO``
+    env var overrides the location (CI, non-sibling layouts).
+    """
+    candidates = []
+    if env := os.environ.get("OPENCCU_LOOM_REPO"):
+        candidates.append(pathlib.Path(env))
+    # …/openccu-loom-client/tests/unit/this_file → parents[3] == GitHub
+    candidates.append(pathlib.Path(__file__).resolve().parents[3] / "openccu-loom")
+    for repo in candidates:
+        wsapi = repo / "assets/wsapi.json"
+        if wsapi.is_file():
+            return wsapi
+    return None
+
+
+_WSAPI = _find_wsapi()
 
 
 def _broadcasts_in_wsapi() -> set[str]:
-    if not _WSAPI.is_file():
-        pytest.skip(f"wsapi.json not at {_WSAPI}")
+    if _WSAPI is None:
+        pytest.skip("openccu-loom repo not found beside this one (set OPENCCU_LOOM_REPO)")
     doc = json.loads(_WSAPI.read_text())
     return {c["name"] for c in doc["commands"] if c.get("kind") == "broadcast"}
 
@@ -183,6 +208,32 @@ class TestDispatch:
                 },
                 CustomDataPointStateChangedEvent,
             ),
+            (
+                "device.trigger",
+                {
+                    "central": "home",
+                    "interface_id": "home:HmIP-RF",
+                    "device_address": "0001",
+                    "channel": 1,
+                    "event_type": "homematic.keypress",
+                    "parameter": "PRESS_SHORT",
+                },
+                DeviceTriggerEvent,
+            ),
+            (
+                "datapoint.optimistic_rolled_back",
+                {
+                    "central": "home",
+                    "device_address": "0001",
+                    "channel": 1,
+                    "parameter": "LEVEL",
+                    "paramset_key": "VALUES",
+                    "reason": "timeout",
+                    "sent": 0.8,
+                    "present": 0.5,
+                },
+                DataPointOptimisticRolledBackEvent,
+            ),
         ],
     )
     def test_other_known_types(
@@ -191,6 +242,24 @@ class TestDispatch:
         env = self._envelope(type_=type_id, payload=payload)
         ev = event_from_envelope(env)
         assert isinstance(ev, expected_cls)
+
+    def test_device_trigger_keyed_per_data_point(self) -> None:
+        env = self._envelope(
+            type_="device.trigger",
+            payload={
+                "central": "home",
+                "interface_id": "home:HmIP-RF",
+                "device_address": "VCU1",
+                "channel": 1,
+                "event_type": "homematic.keypress",
+                "parameter": "PRESS_SHORT",
+                "unique_id": "loom_event_vcu1_1_press_short",
+            },
+        )
+        ev = event_from_envelope(env)
+        assert isinstance(ev, DeviceTriggerEvent)
+        # The event keys off the daemon-supplied canonical unique_id.
+        assert ev.event_key == "loom_event_vcu1_1_press_short"
 
 
 class TestForwardCompatibility:

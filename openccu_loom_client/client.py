@@ -194,7 +194,8 @@ class LoomClient:
         snapshot = await self.system.get_snapshot()
         self._store.load_snapshot(snapshot)
 
-        central_name = self._infer_central_name(snapshot)
+        # load_snapshot derives the central id from the interface list.
+        central_name = self._store.central_id or None
 
         for device_summary in snapshot.devices:
             detail = await self.devices.get_device_detail(address=device_summary.address)
@@ -303,13 +304,3 @@ class LoomClient:
             await self.bootstrap()
         except Exception:
             _LOGGER.exception("re-bootstrap after replay_lost failed")
-
-    @staticmethod
-    def _infer_central_name(snapshot: object) -> str | None:
-        """Derive the central name from snapshot.interfaces[0].central_id, if present."""
-        interfaces = getattr(snapshot, "interfaces", None) or ()
-        for iface in interfaces:
-            central_id = getattr(iface, "central_id", None)
-            if central_id:
-                return str(central_id)
-        return None

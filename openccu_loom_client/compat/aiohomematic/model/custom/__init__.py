@@ -31,6 +31,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from aiohomematic_contract import canonical_unique_id
 from openccu_loom_types.enums import DataPointCategory
 
 from openccu_loom_client.model import CustomDataPoint
@@ -39,9 +40,18 @@ if TYPE_CHECKING:
     from openccu_loom_client.store import LoomStore
 
 
-def custom_unique_id(*, device_address: str, name: str) -> str:
-    """Stable HA unique id for a Custom-DP, matched by the refresh bridge."""
-    return f"{device_address}_cdp_{name}".replace(":", "_").replace("-", "_").lower()
+def custom_unique_id(*, serial_suffix: str, device_address: str, channel_no: int) -> str:
+    """Canonical HA unique id for a Custom-DP, matched by the refresh bridge.
+
+    aiohomematic builds a custom data point's ``unique_id`` from its
+    *primary channel address* (no parameter); the daemon's ``channel_no``
+    is that primary channel. Built via the shared contract as
+    ``loom_<address>`` — a normal device carries no serial prefix, so the
+    canonical key is e.g. ``loom_vcu1234567_1``.
+    """
+    return canonical_unique_id(
+        serial_suffix=serial_suffix, address=f"{device_address}:{channel_no}"
+    )
 
 
 class _Capabilities:
@@ -96,7 +106,11 @@ class _CustomEntitySurface(CustomDataPoint):
 
     @property
     def unique_id(self) -> str:
-        return custom_unique_id(device_address=self._device_address, name=self.name)
+        return custom_unique_id(
+            serial_suffix=self._store.serial_suffix,
+            device_address=self._device_address,
+            channel_no=self._summary.channel_no,
+        )
 
     @property
     def full_name(self) -> str:

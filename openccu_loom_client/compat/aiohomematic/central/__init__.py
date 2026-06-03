@@ -62,6 +62,7 @@ class CentralConfig:
         port: int | None = None,
         tls: bool = True,
         verify_tls: bool = True,
+        serial: str | None = None,
         client_session: Any | None = None,
         **_ignored: Any,
     ) -> None:
@@ -70,6 +71,13 @@ class CentralConfig:
         self._port = port
         self._tls = tls
         self._verify_tls = verify_tls
+        # Optional CCU serial injected by the integration (HA's
+        # ``entry.unique_id``). It fills the central-id slot of canonical
+        # HA routing keys; when given it wins over the serial the daemon
+        # reports on ``/system/ccu``, guaranteeing the live keys match the
+        # one-time HA registry migration. Falls back to the daemon's
+        # serial when omitted.
+        self._serial = serial
         self._client_session = client_session
         self._auth = self._resolve_auth(
             auth=auth, token=token, username=username, password=password
@@ -103,7 +111,7 @@ class CentralConfig:
         )
         transport = HttpTransport(config, session=self._client_session)
         client = LoomClient(config, http_transport=transport)
-        return LoomCentralAdapter(client=client, name=self._name)
+        return LoomCentralAdapter(client=client, name=self._name, serial=self._serial)
 
 
 async def check_config(
