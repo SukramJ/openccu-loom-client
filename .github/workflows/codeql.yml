@@ -2,10 +2,12 @@ name: "CodeQL"
 
 # yamllint disable-line rule:truthy
 on:
+  # Branch work is checked via its PR; push only re-runs on main (post-merge)
+  # so feature branches don't trigger a second, duplicate run.
   push:
-    branches: [main, dev_ps]
+    branches: [main]
   pull_request:
-    branches: [main, dev_ps]
+    branches: [main]
   schedule:
     - cron: "0 6 * * 1"
   workflow_dispatch:

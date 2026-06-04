@@ -5,11 +5,11 @@ on:
   pull_request:
     branches:
       - main
+  # Branch work is checked via its PR; push only re-runs on main (post-merge)
+  # so feature branches don't trigger a second, duplicate run.
   push:
-    branches-ignore:
+    branches:
       - main
-    tags-ignore:
-      - "**"
 
 permissions:
   contents: read
