@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""Refresh bridge: daemon value events → uniform ``DataPointStateChangedEvent``.
+"""
+Refresh bridge: daemon value events → uniform ``DataPointStateChangedEvent``.
 
 ``homematicip_local`` entities (generic, custom and hub alike) subscribe
 to :class:`DataPointStateChangedEvent` keyed by their ``unique_id`` to
@@ -33,9 +34,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from openccu_loom_client.compat.aiohomematic.central.events import (
-    DataPointStateChangedEvent,
-)
+from openccu_loom_client.compat.aiohomematic.central.events import DataPointStateChangedEvent
 from openccu_loom_client.compat.aiohomematic.model.custom import custom_unique_id
 from openccu_loom_client.compat.aiohomematic.model.hub import sysvar_unique_id
 from openccu_loom_client.events import (
@@ -55,7 +54,8 @@ if TYPE_CHECKING:
 
 
 def install_refresh_bridge(*, bus: EventBus, group: SubscriptionGroup, store: LoomStore) -> None:
-    """Wire the daemon value events to ``DataPointStateChangedEvent``.
+    """
+    Wire the daemon value events to ``DataPointStateChangedEvent``.
 
     Each event's routing key is the daemon-supplied canonical
     ``payload.unique_id`` when present; otherwise it is rebuilt from the

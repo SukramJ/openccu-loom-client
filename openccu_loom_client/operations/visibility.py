@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""Parameter-visibility (un-ignore) REST operations (``/visibility``).
+"""
+Parameter-visibility (un-ignore) REST operations (``/visibility``).
 
 The daemon hides expert/internal parameters by default; un-ignore
 patterns surface specific ones per central.
@@ -23,7 +24,8 @@ class VisibilityOperations(_OperationsBase):
     """Manage un-ignore patterns for otherwise-hidden parameters."""
 
     async def get_unignore(self) -> UnIgnoreListResponse:
-        """List active un-ignore patterns per central.
+        """
+        List active un-ignore patterns per central.
 
         Wire: ``GET /visibility/unignore``.
         """
@@ -31,7 +33,8 @@ class VisibilityOperations(_OperationsBase):
         return UnIgnoreListResponse.model_validate(payload)
 
     async def put_unignore(self, *, request: UnIgnoreUpdateRequest) -> UnIgnoreUpdateResponse:
-        """Replace the un-ignore pattern list (admin).
+        """
+        Replace the un-ignore pattern list (admin).
 
         Wire: ``PUT /visibility/unignore``.
         """
@@ -44,7 +47,8 @@ class VisibilityOperations(_OperationsBase):
         return UnIgnoreUpdateResponse.model_validate(payload)
 
     async def get_unignore_candidates(self) -> UnIgnoreCandidateList:
-        """List hidden parameters that could be un-ignored.
+        """
+        List hidden parameters that could be un-ignored.
 
         Wire: ``GET /visibility/unignore/candidates``.
         """

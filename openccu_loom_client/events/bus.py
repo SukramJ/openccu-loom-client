@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""In-memory pub/sub for typed LoomEvents.
+"""
+In-memory pub/sub for typed LoomEvents.
 
 The :class:`EventBus` is the single point that converts the WebSocket
 event stream into application-level callbacks. It mirrors the
@@ -21,10 +22,10 @@ Two main classes:
 
 from __future__ import annotations
 
-import contextlib
-import logging
 from collections.abc import Awaitable, Callable
+import contextlib
 from dataclasses import dataclass, field
+import logging
 from typing import TYPE_CHECKING, Final, TypeVar
 
 if TYPE_CHECKING:
@@ -54,7 +55,8 @@ class _Subscription:
 
 
 def _event_key_of(event: LoomEvent) -> str | None:
-    """Return the routing key for an event, if it has one.
+    """
+    Return the routing key for an event, if it has one.
 
     Convention: events expose an ``event_key`` attribute when they
     want to be filtered by something more specific than the type
@@ -70,6 +72,7 @@ class EventBus:
     """Process-local pub/sub for :class:`LoomEvent` subclasses."""
 
     def __init__(self) -> None:
+        """Initialize an empty subscription registry."""
         # event_type → list of active subscriptions. We don't bother
         # with a per-(type, key) index — the daemon emits at most a
         # few thousand events/minute and the subscriber count per
@@ -83,7 +86,8 @@ class EventBus:
         handler: Callable[[_EventT], Awaitable[None]],
         event_key: str | None = None,
     ) -> UnsubscribeCallback:
-        """Register ``handler`` for events of exactly ``event_type``.
+        """
+        Register ``handler`` for events of exactly ``event_type``.
 
         If ``event_key`` is non-None the handler only fires when the
         event's own ``event_key`` (see :func:`_event_key_of`) equals
@@ -115,7 +119,8 @@ class EventBus:
         return _unsubscribe
 
     async def publish(self, event: LoomEvent) -> None:
-        """Fan ``event`` out to all matching subscribers.
+        """
+        Fan ``event`` out to all matching subscribers.
 
         Handlers run sequentially in registration order — same
         contract aiohomematic provides. An exception in one handler
@@ -156,7 +161,8 @@ class EventBus:
 
 @dataclass(slots=True)
 class SubscriptionGroup:
-    """Cancellable bundle of subscriptions on one :class:`EventBus`.
+    """
+    Cancellable bundle of subscriptions on one :class:`EventBus`.
 
     Mirrors the ``aiohomematic.central.events.SubscriptionGroup``
     surface so ``homematicip_local``'s pattern of "one group per
@@ -174,9 +180,12 @@ class SubscriptionGroup:
         handler: Callable[[_EventT], Awaitable[None]],
         event_key: str | None = None,
     ) -> UnsubscribeCallback:
-        """Like :meth:`EventBus.subscribe`, but the unsubscribe is
-        also remembered by this group so :meth:`cancel` can call it
-        on shutdown."""
+        """
+        Subscribe like :meth:`EventBus.subscribe`, but tracked by this group.
+
+        The returned unsubscribe is also remembered by this group so
+        :meth:`cancel` can call it on shutdown.
+        """
         unsub = self.bus.subscribe(
             event_type=event_type,
             handler=handler,
@@ -186,7 +195,8 @@ class SubscriptionGroup:
         return unsub
 
     def cancel(self) -> None:
-        """Unsubscribe every handler this group ever registered.
+        """
+        Unsubscribe every handler this group ever registered.
 
         Idempotent: a second call is a no-op. Individual callbacks
         are also idempotent so concurrent direct unsubscribes from

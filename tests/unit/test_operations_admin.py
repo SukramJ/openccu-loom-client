@@ -1,21 +1,23 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""Coverage for the admin / ops operation modules.
+"""
+Coverage for the admin / ops operation modules.
 
 One representative round-trip per module (auth, users, centrals,
 config, diagnostics, backup, sessions, matter, visibility) plus the
-system + devices admin extensions, exercised against aioresponses so
-the paths and request shapes are pinned to the daemon contract.
+system + devices admin extensions, exercised against an in-process
+mock daemon so the paths and request shapes are pinned to the daemon
+contract.
 """
 
 from __future__ import annotations
 
-import pytest
-from aioresponses import aioresponses
-from openccu_loom_types.rest import TokenCreate, UserCreate
+from collections.abc import AsyncIterator
 
-from openccu_loom_client import LoomConfig
+from openccu_loom_types.rest import TokenCreate, UserCreate
+import pytest
+
 from openccu_loom_client.operations import (
     AuthOperations,
     BackupOperations,
@@ -30,8 +32,8 @@ from openccu_loom_client.operations import (
 )
 from openccu_loom_client.operations.devices import DevicesOperations
 from openccu_loom_client.transport import HttpTransport
+from tests.helpers import MockDaemon
 
-_BASE = "http://loom.test:8080/api/v1"
 _INFO = {
     "version": "1.2.3",
     "api_version": "1.0.0",
@@ -44,19 +46,18 @@ _INFO = {
 
 
 @pytest.fixture
-async def http(config: LoomConfig):
-    t = HttpTransport(config, backoff_sequence=(0.0,))
-    with aioresponses() as mock:
-        mock.get(f"{_BASE}/info", payload=_INFO)
-        await t.connect()
-        yield t, mock
+async def http(mock_daemon: MockDaemon) -> AsyncIterator[tuple[HttpTransport, MockDaemon]]:
+    t = HttpTransport(mock_daemon.config, backoff_sequence=(0.0,))
+    mock_daemon.get("/api/v1/info", payload=_INFO)
+    await t.connect()
+    yield t, mock_daemon
     await t.close()
 
 
 class TestAuthOperations:
     async def test_me(self, http) -> None:
         t, mock = http
-        mock.get(f"{_BASE}/auth/me", payload={"subject": "admin", "role": "admin"})
+        mock.get("/api/v1/auth/me", payload={"subject": "admin", "role": "admin"})
         ident = await AuthOperations(transport=t).me()
         assert ident.subject == "admin"
         assert ident.role == "admin"
@@ -64,7 +65,7 @@ class TestAuthOperations:
     async def test_create_token_v2(self, http) -> None:
         t, mock = http
         mock.post(
-            f"{_BASE}/auth/tokens/v2",
+            "/api/v1/auth/tokens/v2",
             payload={"token": "secret-xyz", "fingerprint": "ab12"},
         )
         created = await AuthOperations(transport=t).create_token_v2(
@@ -78,7 +79,7 @@ class TestUsersOperations:
     async def test_create_user(self, http) -> None:
         t, mock = http
         mock.post(
-            f"{_BASE}/users",
+            "/api/v1/users",
             payload={
                 "subject": "alice",
                 "role": "operator",
@@ -92,7 +93,7 @@ class TestUsersOperations:
 
     async def test_delete_user(self, http) -> None:
         t, mock = http
-        mock.delete(f"{_BASE}/users/alice", status=204)
+        mock.delete("/api/v1/users/alice", status=204)
         await UsersOperations(transport=t).delete_user(subject="alice")
 
 
@@ -100,7 +101,7 @@ class TestCentralsOperations:
     async def test_list_centrals(self, http) -> None:
         t, mock = http
         mock.get(
-            f"{_BASE}/centrals",
+            "/api/v1/centrals",
             payload=[
                 {
                     "name": "home",
@@ -117,14 +118,14 @@ class TestCentralsOperations:
 class TestConfigOperations:
     async def test_get_config(self, http) -> None:
         t, mock = http
-        mock.get(f"{_BASE}/config", payload={})
+        mock.get("/api/v1/config", payload={})
         snap = await ConfigOperations(transport=t).get_config()
         assert snap is not None
 
     async def test_put_section_returns_ack(self, http) -> None:
         t, mock = http
         mock.put(
-            f"{_BASE}/config/sections/north",
+            "/api/v1/config/sections/north",
             payload={"section": "north", "version": 3, "restart_required": False},
         )
         ack = await ConfigOperations(transport=t).put_section(
@@ -137,7 +138,7 @@ class TestDiagnosticsOperations:
     async def test_values_cache_stats(self, http) -> None:
         t, mock = http
         mock.get(
-            f"{_BASE}/admin/values-cache/stats",
+            "/api/v1/admin/values-cache/stats",
             payload={
                 "rows": 10,
                 "value_json_bytes": 2048,
@@ -153,14 +154,14 @@ class TestDiagnosticsOperations:
 
     async def test_set_log_level(self, http) -> None:
         t, mock = http
-        mock.put(f"{_BASE}/diagnostics/log-level", payload={"level": "debug"})
+        mock.put("/api/v1/diagnostics/log-level", payload={"level": "debug"})
         result = await DiagnosticsOperations(transport=t).set_log_level(level="debug")
         assert result["level"] == "debug"
 
     async def test_metrics_returns_bytes(self, http) -> None:
         t, mock = http
         mock.get(
-            f"{_BASE}/metrics",
+            "/api/v1/metrics",
             body=b"# HELP up\nup 1\n",
             content_type="text/plain",
         )
@@ -172,7 +173,7 @@ class TestBackupOperations:
     async def test_download_backup_returns_bytes(self, http) -> None:
         t, mock = http
         mock.get(
-            f"{_BASE}/backups/b1/download",
+            "/api/v1/backups/b1/download",
             body=b"SBK-ARCHIVE",
             content_type="application/octet-stream",
         )
@@ -181,14 +182,14 @@ class TestBackupOperations:
 
     async def test_restore_backup(self, http) -> None:
         t, mock = http
-        mock.post(f"{_BASE}/backups/b1/restore", status=202)
+        mock.post("/api/v1/backups/b1/restore", status=202)
         await BackupOperations(transport=t).restore_backup(backup_id="b1")
 
 
 class TestSessionsOperations:
     async def test_acquire_sends_key(self, http) -> None:
         t, mock = http
-        mock.post(f"{_BASE}/sessions/edit", payload={"key": "cfg:north", "held": True})
+        mock.post("/api/v1/sessions/edit", payload={"key": "cfg:north", "held": True})
         result = await SessionsOperations(transport=t).acquire(key="cfg:north")
         assert result["held"] is True
 
@@ -197,7 +198,7 @@ class TestMatterOperations:
     async def test_get_status(self, http) -> None:
         t, mock = http
         mock.get(
-            f"{_BASE}/matter/status",
+            "/api/v1/matter/status",
             payload={
                 "enabled": True,
                 "listening": True,
@@ -215,7 +216,7 @@ class TestMatterOperations:
 class TestVisibilityOperations:
     async def test_get_unignore(self, http) -> None:
         t, mock = http
-        mock.get(f"{_BASE}/visibility/unignore", payload={"centrals": []})
+        mock.get("/api/v1/visibility/unignore", payload={"centrals": []})
         result = await VisibilityOperations(transport=t).get_unignore()
         assert result.centrals == []
 
@@ -223,7 +224,7 @@ class TestVisibilityOperations:
 class TestSystemAdminExtensions:
     async def test_restart(self, http) -> None:
         t, mock = http
-        mock.post(f"{_BASE}/system/restart", payload={"status": "restarting"})
+        mock.post("/api/v1/system/restart", payload={"status": "restarting"})
         result = await SystemOperations(transport=t).restart()
         assert result["status"] == "restarting"
 
@@ -231,13 +232,13 @@ class TestSystemAdminExtensions:
 class TestDevicesAdminExtensions:
     async def test_accept_device(self, http) -> None:
         t, mock = http
-        mock.post(f"{_BASE}/devices/VCU9/accept", status=202)
+        mock.post("/api/v1/devices/VCU9/accept", status=202)
         await DevicesOperations(transport=t).accept_device(address="VCU9")
 
     async def test_get_ui_schema(self, http) -> None:
         t, mock = http
         mock.get(
-            f"{_BASE}/devices/VCU9/channels/1/ui-schema?paramset=VALUES&locale=en",
+            "/api/v1/devices/VCU9/channels/1/ui-schema",
             payload={"fields": []},
         )
         schema = await DevicesOperations(transport=t).get_ui_schema(address="VCU9", channel=1)

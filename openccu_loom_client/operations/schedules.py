@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""Climate / week-profile schedule REST operations.
+"""
+Climate / week-profile schedule REST operations.
 
 Maps to the ``schedules``-tagged endpoints in the daemon's OpenAPI
 surface. These cover the thermostat week-program feature that
@@ -15,11 +16,7 @@ callers get end-to-end typing for the thermostat week-program feature
 
 from __future__ import annotations
 
-from openccu_loom_types.rest import (
-    Schedule,
-    SetActiveProfileRequest,
-    WeekProfileResponse,
-)
+from openccu_loom_types.rest import Schedule, SetActiveProfileRequest, WeekProfileResponse
 
 from openccu_loom_client.operations._base import _OperationsBase
 
@@ -30,7 +27,8 @@ class SchedulesOperations(_OperationsBase):
     # ---- channel-scoped ----
 
     async def get_channel_week_profile(self, *, address: str, channel: int) -> WeekProfileResponse:
-        """Week-profile descriptor (type, temp range, available profiles).
+        """
+        Week-profile descriptor (type, temp range, available profiles).
 
         Wire: ``GET /devices/{addr}/channels/{n}/week_profile``. Returns
         404 when the channel has no attached week profile.
@@ -42,7 +40,8 @@ class SchedulesOperations(_OperationsBase):
         return WeekProfileResponse.model_validate(payload)
 
     async def get_channel_schedule(self, *, address: str, channel: int) -> Schedule:
-        """Climate or simple schedule of one channel.
+        """
+        Climate or simple schedule of one channel.
 
         Wire: ``GET /devices/{addr}/channels/{n}/schedule``. ``kind``
         discriminates ``climate`` (``profiles``) from ``simple``
@@ -55,7 +54,8 @@ class SchedulesOperations(_OperationsBase):
         return Schedule.model_validate(payload)
 
     async def put_channel_schedule(self, *, address: str, channel: int, schedule: Schedule) -> None:
-        """Replace a channel's schedule.
+        """
+        Replace a channel's schedule.
 
         Wire: ``PUT /devices/{addr}/channels/{n}/schedule``. The daemon
         validates the body against the channel's schedule type.
@@ -69,7 +69,8 @@ class SchedulesOperations(_OperationsBase):
         )
 
     async def set_channel_active_profile(self, *, address: str, channel: int, profile: str) -> None:
-        """Pick the active climate profile (P1..P6) for a channel.
+        """
+        Pick the active climate profile (P1..P6) for a channel.
 
         Wire: ``POST /devices/{addr}/channels/{n}/schedule/active-profile``.
         """
@@ -84,7 +85,8 @@ class SchedulesOperations(_OperationsBase):
     # ---- device-scoped (auto-resolves the schedule channel) ----
 
     async def get_device_schedule(self, *, address: str) -> Schedule:
-        """Schedule of a device, auto-resolving the schedule channel.
+        """
+        Schedule of a device, auto-resolving the schedule channel.
 
         Wire: ``GET /devices/{addr}/schedule``.
         """
@@ -95,7 +97,8 @@ class SchedulesOperations(_OperationsBase):
         return Schedule.model_validate(payload)
 
     async def put_device_schedule(self, *, address: str, schedule: Schedule) -> None:
-        """Replace a device's schedule (auto-resolves the channel).
+        """
+        Replace a device's schedule (auto-resolves the channel).
 
         Wire: ``PUT /devices/{addr}/schedule``.
         """
@@ -107,7 +110,8 @@ class SchedulesOperations(_OperationsBase):
         )
 
     async def set_device_active_profile(self, *, address: str, profile: str) -> None:
-        """Pick the active climate profile (auto-resolves the channel).
+        """
+        Pick the active climate profile (auto-resolves the channel).
 
         Wire: ``POST /devices/{addr}/schedule/active-profile``.
         """

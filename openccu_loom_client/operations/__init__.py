@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""High-level REST operation modules — one per daemon resource group.
+"""
+High-level REST operation modules — one per daemon resource group.
 
 Each module is a thin pythonic facade over the corresponding section
 of the daemon's OpenAPI surface. They share a small helper base class

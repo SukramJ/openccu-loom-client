@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""Aiohomematic-compatible CCU-translation helpers.
+"""
+Aiohomematic-compatible CCU-translation helpers.
 
 In the original library this module mapped device models to icon
 names. The daemon now ships these mappings server-side and surfaces
@@ -13,7 +14,8 @@ from __future__ import annotations
 
 
 def get_device_icon(*, model: str) -> str | None:
-    """Return ``None`` until the cutover wires the daemon's mapping.
+    """
+    Return ``None`` until the cutover wires the daemon's mapping.
 
     The daemon's ``DeviceSummary`` doesn't currently include an icon
     field; once it does this helper will fetch from the

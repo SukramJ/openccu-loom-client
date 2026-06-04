@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""Typed event classes that wrap ``WsEnvelope`` + payload.
+"""
+Typed event classes that wrap ``WsEnvelope`` + payload.
 
 The daemon's WebSocket surface emits a uniform envelope
 ``{topic, type, ts, seq, kind, payload}`` (see ``WsEnvelope`` in
@@ -17,9 +18,9 @@ between them handle the parse + dispatch in one step.
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Callable
 from dataclasses import dataclass
+import logging
 from typing import Any, ClassVar, Final
 
 from aiohomematic_contract import canonical_unique_id
@@ -52,7 +53,8 @@ _LOGGER: Final = logging.getLogger(__name__)
 def data_point_event_key(
     *, serial_suffix: str, device_address: str, channel: int | str, parameter: str
 ) -> str:
-    """Rebuild a generic data point's canonical HA routing key.
+    """
+    Rebuild a generic data point's canonical HA routing key.
 
     ``homematicip_local`` subscribes to value-change events with
     ``event_key=data_point.unique_id`` (one subscription per HA entity).
@@ -74,7 +76,8 @@ def data_point_event_key(
 
 @dataclass(slots=True, kw_only=True)
 class LoomEvent:
-    """Base class for every typed event.
+    """
+    Base class for every typed event.
 
     Carries the envelope metadata so subscribers can correlate by
     ``seq`` (e.g. discard out-of-order replays) or by ``kind``
@@ -111,6 +114,7 @@ class DataPointValueChangedEvent(LoomEvent):
     type_id: ClassVar[str] = "datapoint.value_changed"
 
     def __post_init__(self) -> None:
+        """Default the routing key to the payload's canonical unique id."""
         # Keyed by the daemon-supplied canonical ``unique_id`` so a
         # homematicip_local entity that subscribes with
         # ``event_key=data_point.unique_id`` receives exactly its own
@@ -123,10 +127,12 @@ class DataPointValueChangedEvent(LoomEvent):
 
     @property
     def device_address(self) -> str:
+        """Return the address of the device that owns this data point."""
         return self.payload.device_address
 
     @property
     def parameter(self) -> str:
+        """Return the data point's parameter name."""
         return self.payload.parameter
 
 
@@ -138,6 +144,7 @@ class CustomDataPointStateChangedEvent(LoomEvent):
     type_id: ClassVar[str] = "custom_data_point.state_changed"
 
     def __post_init__(self) -> None:
+        """Default the routing key to the payload's central name."""
         if self.event_key is None:
             self.event_key = self.payload.central
 
@@ -150,6 +157,7 @@ class CentralStateChangedEvent(LoomEvent):
     type_id: ClassVar[str] = "central.state_changed"
 
     def __post_init__(self) -> None:
+        """Default the routing key to the payload's central name."""
         if self.event_key is None:
             self.event_key = self.payload.central
 
@@ -162,6 +170,7 @@ class SystemStatusChangedEvent(LoomEvent):
     type_id: ClassVar[str] = "system.status_changed"
 
     def __post_init__(self) -> None:
+        """Default the routing key to the payload's central name."""
         if self.event_key is None:
             self.event_key = self.payload.central
 
@@ -174,6 +183,7 @@ class SysvarChangedEvent(LoomEvent):
     type_id: ClassVar[str] = "hub.sysvar_changed"
 
     def __post_init__(self) -> None:
+        """Default the routing key to the payload's central name."""
         if self.event_key is None:
             self.event_key = self.payload.central
 
@@ -186,13 +196,15 @@ class ProgramExecutedEvent(LoomEvent):
     type_id: ClassVar[str] = "hub.program_executed"
 
     def __post_init__(self) -> None:
+        """Default the routing key to the payload's central name."""
         if self.event_key is None:
             self.event_key = self.payload.central
 
 
 @dataclass(slots=True, kw_only=True)
 class InstallModeChangedEvent(LoomEvent):
-    """The CCU pairing window opened or closed.
+    """
+    The CCU pairing window opened or closed.
 
     ``homematicip_local`` mirrors install-mode state to HA so the user
     sees whether the CCU is currently accepting new devices. The push
@@ -203,13 +215,15 @@ class InstallModeChangedEvent(LoomEvent):
     type_id: ClassVar[str] = "hub.install_mode_changed"
 
     def __post_init__(self) -> None:
+        """Default the routing key to the payload's central name."""
         if self.event_key is None:
             self.event_key = self.payload.central
 
 
 @dataclass(slots=True, kw_only=True)
 class DeviceCreatedEvent(LoomEvent):
-    """A new device was paired and is now part of the registry.
+    """
+    A new device was paired and is now part of the registry.
 
     Forward-compatible with the daemon's deferred lifecycle-broadcast
     ask: the payload schema ships in 0.1.2 even though the broadcast
@@ -220,6 +234,7 @@ class DeviceCreatedEvent(LoomEvent):
     type_id: ClassVar[str] = "device.created"
 
     def __post_init__(self) -> None:
+        """Default the routing key to the payload's central name."""
         if self.event_key is None:
             self.event_key = self.payload.central
 
@@ -232,13 +247,15 @@ class DeviceRemovedEvent(LoomEvent):
     type_id: ClassVar[str] = "device.removed"
 
     def __post_init__(self) -> None:
+        """Default the routing key to the payload's central name."""
         if self.event_key is None:
             self.event_key = self.payload.central
 
 
 @dataclass(slots=True, kw_only=True)
 class DeviceTriggerEvent(LoomEvent):
-    """A non-state device event (keypress, impulse, device error).
+    """
+    A non-state device event (keypress, impulse, device error).
 
     Rides the ``device.{address}.channels.{channel}.trigger`` topic.
     Distinct from a value change: the CCU reports a momentary event
@@ -251,13 +268,15 @@ class DeviceTriggerEvent(LoomEvent):
     type_id: ClassVar[str] = "device.trigger"
 
     def __post_init__(self) -> None:
+        """Default the routing key to the payload's canonical unique id."""
         if self.event_key is None:
             self.event_key = self.payload.unique_id
 
 
 @dataclass(slots=True, kw_only=True)
 class DataPointOptimisticRolledBackEvent(LoomEvent):
-    """An optimistic write was rolled back (TTL expiry or CCU rejection).
+    """
+    An optimistic write was rolled back (TTL expiry or CCU rejection).
 
     The raw daemon broadcast. Rides the same per-data-point topic as
     ``datapoint.value_changed``, so it is keyed identically. The compat
@@ -271,49 +290,63 @@ class DataPointOptimisticRolledBackEvent(LoomEvent):
     type_id: ClassVar[str] = "datapoint.optimistic_rolled_back"
 
     def __post_init__(self) -> None:
+        """Default the routing key to the payload's canonical unique id."""
         if self.event_key is None:
             self.event_key = self.payload.unique_id
 
 
 @dataclass(slots=True, kw_only=True)
 class MatterCommissioningProgressEvent(LoomEvent):
+    """Progress update while a Matter device is being commissioned."""
+
     payload: MatterCommissioningProgressPayload
     type_id: ClassVar[str] = "matter.commissioning_progress"
 
 
 @dataclass(slots=True, kw_only=True)
 class MatterCommissioningWindowOpenedEvent(LoomEvent):
+    """A Matter commissioning window was opened for pairing."""
+
     payload: MatterCommissioningWindowResponse
     type_id: ClassVar[str] = "matter.commissioning_window_opened"
 
 
 @dataclass(slots=True, kw_only=True)
 class MatterEndpointAssembledEvent(LoomEvent):
+    """A Matter endpoint finished assembling from its CCU channels."""
+
     payload: MatterEndpointAssembledPayload
     type_id: ClassVar[str] = "matter.endpoint_assembled"
 
 
 @dataclass(slots=True, kw_only=True)
 class MatterExposableChangedEvent(LoomEvent):
+    """A device's Matter exposability flag changed."""
+
     payload: MatterExposureUpdate
     type_id: ClassVar[str] = "matter.exposable_changed"
 
 
 @dataclass(slots=True, kw_only=True)
 class MatterFabricAddedEvent(LoomEvent):
+    """A Matter fabric was added (a controller joined)."""
+
     payload: MatterFabric
     type_id: ClassVar[str] = "matter.fabric_added"
 
 
 @dataclass(slots=True, kw_only=True)
 class MatterFabricRemovedEvent(LoomEvent):
+    """A Matter fabric was removed (a controller left)."""
+
     payload: MatterFabricRemovedPayload
     type_id: ClassVar[str] = "matter.fabric_removed"
 
 
 @dataclass(slots=True, kw_only=True)
 class UnknownLoomEvent(LoomEvent):
-    """A broadcast whose ``type`` we don't know about (yet).
+    """
+    A broadcast whose ``type`` we don't know about (yet).
 
     Emitted instead of dropping so forward-compat with a newer daemon
     is observable rather than silent. ``raw_payload`` is whatever the
@@ -365,7 +398,8 @@ _EVENT_REGISTRY: Final[dict[str, tuple[Callable[..., LoomEvent], type[BaseModel]
 
 
 def known_event_types() -> frozenset[str]:
-    """Wire ``type`` strings this client knows how to deserialize.
+    """
+    Wire ``type`` strings this client knows how to deserialize.
 
     Useful for tests that assert a daemon's broadcast catalogue is
     fully covered, and for log lines that explain why an
@@ -375,7 +409,8 @@ def known_event_types() -> frozenset[str]:
 
 
 def event_from_envelope(envelope: WsEnvelope) -> LoomEvent:
-    """Convert a wire-level ``WsEnvelope`` into a typed event.
+    """
+    Convert a wire-level ``WsEnvelope`` into a typed event.
 
     Unknown ``type`` strings yield :class:`UnknownLoomEvent` — the
     raw payload is preserved so log analysis can recover it. Payload
@@ -396,7 +431,7 @@ def event_from_envelope(envelope: WsEnvelope) -> LoomEvent:
     event_cls, payload_cls = binding
     try:
         payload = payload_cls.model_validate(envelope.payload)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — any validation error degrades to UnknownLoomEvent
         _LOGGER.warning(
             "payload validation failed for %s (seq=%s): %s — emitting UnknownLoomEvent",
             envelope.type,

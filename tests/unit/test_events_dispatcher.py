@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""WsEnvelope → typed-LoomEvent dispatcher coverage.
+"""
+WsEnvelope → typed-LoomEvent dispatcher coverage.
 
 The registry is the single point that translates wire-side events
 into the application's domain model. These tests assert:
@@ -25,8 +26,8 @@ import json
 import os
 import pathlib
 
-import pytest
 from openccu_loom_types.ws import WsEnvelope
+import pytest
 
 from openccu_loom_client.events import (
     CentralStateChangedEvent,
@@ -48,7 +49,8 @@ from openccu_loom_client.events.types import (
 
 
 def _find_wsapi() -> pathlib.Path | None:
-    """Locate the daemon's ``wsapi.json``.
+    """
+    Locate the daemon's ``wsapi.json``.
 
     The daemon repo is normally checked out beside this one
     (``…/GitHub/openccu-loom``). Resolve it relative to this file so the
@@ -79,7 +81,8 @@ def _broadcasts_in_wsapi() -> set[str]:
 
 class TestRegistryCoverage:
     def test_every_daemon_broadcast_has_a_python_binding(self) -> None:
-        """Live drift check against the daemon's broadcast catalogue.
+        """
+        Live drift check against the daemon's broadcast catalogue.
 
         Skipped when the daemon repo isn't checked out beside this one.
         """
@@ -170,7 +173,7 @@ class TestDispatch:
         assert isinstance(ev, SysvarChangedEvent)
 
     @pytest.mark.parametrize(
-        "type_id, payload, expected_cls",
+        ("type_id", "payload", "expected_cls"),
         [
             (
                 "central.state_changed",

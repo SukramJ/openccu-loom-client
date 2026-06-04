@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""Cross-implementation parity against ``aiohomematic-contract``.
+"""
+Cross-implementation parity against ``aiohomematic-contract``.
 
 The contract package is the algorithm-of-record for the HA routing keys
 and categorization enums that ``aiohomematic`` and this client must
@@ -18,7 +19,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
 from aiohomematic_contract import (
     canonical_unique_id,
     generate_channel_unique_id,
@@ -30,12 +30,10 @@ from aiohomematic_contract import (
 )
 from aiohomematic_contract.unique_id import PROGRAM_ADDRESS, SYSVAR_ADDRESS
 from openccu_loom_types.enums import DataPointCategory, DataPointType
+import pytest
 
 from openccu_loom_client.compat.aiohomematic.model.custom import custom_unique_id
-from openccu_loom_client.compat.aiohomematic.model.hub import (
-    program_unique_id,
-    sysvar_unique_id,
-)
+from openccu_loom_client.compat.aiohomematic.model.hub import program_unique_id, sysvar_unique_id
 from openccu_loom_client.events.types import data_point_event_key
 
 
@@ -44,7 +42,8 @@ def _enum_golden(name: str) -> dict[str, dict[str, object]]:
 
 
 class TestEnumParity:
-    """P2: the daemon-generated enum copies must match the contract values.
+    """
+    P2: the daemon-generated enum copies must match the contract values.
 
     The client uses ``openccu_loom_types.enums`` (PascalCase members,
     generated from the daemon's ``enums.json``); the contract ships the
@@ -77,7 +76,7 @@ class TestSerialSuffix:
     """The CCU serial fills the central-id slot of canonical keys."""
 
     @pytest.mark.parametrize(
-        "serial, expected",
+        ("serial", "expected"),
         [
             ("3014F711A0001234", "11a0001234"),  # last 10, lower-cased
             ("ABC", "abc"),  # shorter than 10 → whole
@@ -89,7 +88,8 @@ class TestSerialSuffix:
 
 
 class TestUniqueIdWrappers:
-    """The client's key helpers must reproduce the contract's canonical key.
+    """
+    The client's key helpers must reproduce the contract's canonical key.
 
     The canonical key is ``loom_`` + the routing key, with the CCU serial
     suffix in the central-id slot. The golden ``central_id`` field stands
@@ -137,7 +137,8 @@ class TestUniqueIdWrappers:
 
 
 class TestContractReferenceGoldens:
-    """Sanity: the imported reference impls still satisfy their fixtures.
+    """
+    Sanity: the imported reference impls still satisfy their fixtures.
 
     (The contract package owns these too, but running them here fails the
     client build loudly if an incompatible contract version is installed.)

@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""``aiohomematic.CentralUnit`` adapter backed by :class:`LoomClient`.
+"""
+``aiohomematic.CentralUnit`` adapter backed by :class:`LoomClient`.
 
 ``homematicip_local`` does not just hold a ``CentralUnit`` reference —
 it reaches into a coordinator surface (``central.device_coordinator``,
@@ -70,7 +71,8 @@ def _not_implemented(what: str, reason: str) -> NotImplementedError:
 
 
 def _category_for_type(data_point_type: Any) -> DataPointCategory | None:
-    """Map a coarse ``DataPointType`` (platform) to its custom-DP category.
+    """
+    Map a coarse ``DataPointType`` (platform) to its custom-DP category.
 
     Custom platforms (light/cover/climate/lock/siren/valve) request data
     points by ``data_point_type`` only; the type's name matches the
@@ -212,7 +214,8 @@ class _QueryFacade:
         registered: bool | None = None,
         **_kwargs: Any,
     ) -> tuple[Any, ...]:
-        """Device data points (generic + custom), filtered like aiohomematic.
+        """
+        Device data points (generic + custom), filtered like aiohomematic.
 
         The store holds categorised ``Dp*`` and ``CustomDp*`` instances
         (built by the injected factories). Generic platforms pass an
@@ -395,6 +398,7 @@ class LoomCentralAdapter:
     """Presents the ``aiohomematic.CentralUnit`` surface over ``LoomClient``."""
 
     def __init__(self, *, client: LoomClient, name: str, serial: str | None = None) -> None:
+        """Wire the coordinator surface and data-point factories onto ``client``."""
         self._client = client
         self._name = name
         # CCU serial injected by the integration (HA's ``entry.unique_id``).
@@ -423,51 +427,63 @@ class LoomCentralAdapter:
 
     @property
     def name(self) -> str:
+        """Return the central's display name."""
         return self._name
 
     @property
     def model(self) -> str:
+        """Return the backend model identifier."""
         return "openccu-loom"
 
     @property
     def version(self) -> str | None:
+        """Return the daemon version, or ``None`` before the first refresh."""
         # Populated by start() / validate_config_and_get_system_information().
         return self._system_information.version
 
     @property
     def url(self) -> str:
+        """Return the daemon's HTTP base URL."""
         return self._client.config.http_base_url
 
     @property
     def state(self) -> CentralState:
+        """Return the current central lifecycle state."""
         return self._state
 
     @property
     def available(self) -> bool:
+        """Return whether the central is running or degraded."""
         return self._state in (CentralState.Running, CentralState.Degraded)
 
     @property
     def system_information(self) -> SystemInformation:
+        """Return the cached daemon + CCU system information."""
         return self._system_information
 
     @property
     def config(self) -> Any:
+        """Return the underlying client's :class:`LoomConfig`."""
         return self._client.config
 
     @property
     def events(self) -> EventBus:
+        """Return the client's event bus."""
         return self._client.events
 
     @property
     def event_bus(self) -> EventBus:
+        """Return the client's event bus (aiohomematic alias for ``events``)."""
         return self._client.events
 
     async def health(self) -> Any:
+        """Return the daemon's health report."""
         return await self._client.system.get_health()
 
     # ---- lifecycle ----
 
     async def start(self) -> None:
+        """Connect, bootstrap the store, open the event stream, and install the refresh bridge."""
         await self._client.connect()
         await self._refresh_system_information()
         await self.client_coordinator.refresh()
@@ -488,7 +504,8 @@ class LoomCentralAdapter:
         self._state = CentralState.Running
 
     async def _bootstrap_custom_data_points(self) -> None:
-        """Fetch each device's Custom DPs into the store (categorised).
+        """
+        Fetch each device's Custom DPs into the store (categorised).
 
         The core bootstrap covers devices/channels/generic data points;
         custom DPs are an HA-backend concern, so the adapter pulls them
@@ -502,6 +519,7 @@ class LoomCentralAdapter:
                 )
 
     async def stop(self) -> None:
+        """Cancel the refresh bridge, close the client, and mark the central stopped."""
         if self._refresh_group is not None:
             self._refresh_group.cancel()
             self._refresh_group = None
@@ -509,7 +527,8 @@ class LoomCentralAdapter:
         self._state = CentralState.Stopped
 
     async def validate_config_and_get_system_information(self) -> SystemInformation:
-        """Pre-flight used by the HA config flow.
+        """
+        Pre-flight used by the HA config flow.
 
         Opens the session (capability handshake), reads daemon + CCU
         metadata, and returns it without starting the event stream.
@@ -519,7 +538,8 @@ class LoomCentralAdapter:
         return self._system_information
 
     async def create_backup_and_download(self) -> dict[str, Any]:
-        """Trigger a CCU backup.
+        """
+        Trigger a CCU backup.
 
         Returns the daemon's trigger response. The downloadable archive
         is fetched separately via ``client.backup.download_backup``
@@ -533,7 +553,7 @@ class LoomCentralAdapter:
         info = await self._client.system.get_info()
         try:
             ccus = await self._client.system.list_system_ccus()
-        except Exception:
+        except Exception:  # noqa: BLE001 — system/ccu endpoint is optional
             _LOGGER.debug("system/ccu unavailable during system-information refresh")
             ccus = []
         daemon_serial = ccus[0].serial if ccus and getattr(ccus[0], "serial", None) else None
@@ -547,7 +567,7 @@ class LoomCentralAdapter:
         interfaces: tuple[str, ...] = ()
         try:
             interfaces = tuple(i.id for i in await self._client.system.list_interfaces())
-        except Exception:
+        except Exception:  # noqa: BLE001 — interfaces endpoint is optional
             _LOGGER.debug("interfaces unavailable during system-information refresh")
         self._system_information = SystemInformation(
             serial=serial,

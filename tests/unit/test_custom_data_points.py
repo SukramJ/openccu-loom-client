@@ -7,12 +7,9 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
 from openccu_loom_types.rest import CustomDPSummary
-from openccu_loom_types.ws import (
-    CustomDataPointStateChangedPayload,
-    DeviceRemovedPayload,
-)
+from openccu_loom_types.ws import CustomDataPointStateChangedPayload, DeviceRemovedPayload
+import pytest
 
 from openccu_loom_client.operations import CustomDataPointsOperations
 from openccu_loom_client.store import LoomStore

@@ -1,0 +1,85 @@
+# This workflow publishes the openccu-loom-client package to PyPI when a GitHub
+# Release is published (or when release-on-tag dispatches the chained event).
+#
+# Prereqs/assumptions:
+# - Trusted Publishing to PyPI is configured for this repository.
+
+name: "Release: Publish to PyPI"
+
+on:
+  release:
+    types: [published]
+  repository_dispatch:
+    types: [release-on-tag-succeeded]
+
+permissions:
+  contents: read
+  id-token: write # required for PyPI Trusted Publishing
+
+concurrency:
+  group: python-publish-${{ github.event.release.tag_name || github.event.client_payload.tag || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  # ==========================================================
+  # 1) BUILD JOB
+  #    - Builds the production distributions from the repo root
+  # ==========================================================
+  release-build:
+    if: ${{ github.repository_owner == 'SukramJ' }}
+    runs-on: ubuntu-latest
+    name: Build Package (${{ github.event.release.tag_name || github.event.client_payload.tag }})
+    env:
+      TAG_NAME: ${{ github.event.release.tag_name || github.event.client_payload.tag }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
+            requirements_test.txt
+
+      - name: Build distributions (prod)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build
+          python -m build
+          ls -l dist/
+
+      - name: Upload built distributions as artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-dists
+          path: dist/
+
+  # ==========================================================
+  # 2) PYPI PUBLISH JOB
+  #    - Publishes the built distributions to PyPI (Trusted Publishing)
+  # ==========================================================
+  pypi-publish:
+    if: ${{ github.repository_owner == 'SukramJ' }}
+    runs-on: ubuntu-latest
+    name: Publish to PyPI (${{ github.event.release.tag_name || github.event.client_payload.tag }})
+    needs: [release-build]
+    permissions:
+      id-token: write
+      contents: read
+    environment:
+      name: pypi
+    env:
+      TAG_NAME: ${{ github.event.release.tag_name || github.event.client_payload.tag }}
+    steps:
+      - name: Download built distributions
+        uses: actions/download-artifact@v8
+        with:
+          name: release-dists
+          path: dist/
+      - name: Publish to PyPI (Trusted Publishing)
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/

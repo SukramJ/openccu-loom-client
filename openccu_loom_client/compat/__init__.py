@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""Compatibility shims for downstream consumers mid-migration.
+"""
+Compatibility shims for downstream consumers mid-migration.
 
 Currently only ``aiohomematic`` (one sub-package) — it exposes the
 same import paths the ``homematicip_local`` HA component uses today,

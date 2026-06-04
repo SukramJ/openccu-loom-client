@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""Client-synthetic events — emitted locally, not by the daemon.
+"""
+Client-synthetic events — emitted locally, not by the daemon.
 
 Two events live here:
 
@@ -40,7 +41,8 @@ def _now() -> datetime:
 
 @dataclass(slots=True, kw_only=True)
 class DataPointsCreatedEvent(LoomEvent):
-    """A batch of data-points became addressable in the store.
+    """
+    A batch of data-points became addressable in the store.
 
     Fired by the store after :meth:`LoomStore.load_snapshot` finishes
     populating, after :meth:`LoomStore.attach_device_detail` resolves
@@ -60,13 +62,15 @@ class DataPointsCreatedEvent(LoomEvent):
     type_id: ClassVar[str] = "client.data_points_created"
 
     def __post_init__(self) -> None:
+        """Default the routing key to the central name when one is set."""
         if self.event_key is None and self.central is not None:
             self.event_key = self.central
 
 
 @dataclass(slots=True, kw_only=True)
 class OptimisticRollbackEvent(LoomEvent):
-    """A previously-optimistic write was rolled back.
+    """
+    A previously-optimistic write was rolled back.
 
     Stub for the daemon's deferred broadcast (see
     ``docs/external-clients/topic-hierarchy.md`` "Not yet pushed").
@@ -85,6 +89,7 @@ class OptimisticRollbackEvent(LoomEvent):
     type_id: ClassVar[str] = "client.optimistic_rollback"
 
     def __post_init__(self) -> None:
+        """Default the routing key to the central name when one is set."""
         if self.event_key is None and self.central is not None:
             self.event_key = self.central
 
@@ -95,7 +100,8 @@ def new_data_points_created_event(
     data_points: list[DataPoint],
     central: str | None = None,
 ) -> DataPointsCreatedEvent:
-    """Construct a ready-to-publish DataPointsCreatedEvent.
+    """
+    Construct a ready-to-publish DataPointsCreatedEvent.
 
     Wraps the envelope-metadata defaults so the store doesn't have
     to know about ``seq=0`` / ``kind=initial`` conventions.
@@ -122,6 +128,13 @@ def new_optimistic_rollback_event(
     central: str | None = None,
     reason: str | None = None,
 ) -> OptimisticRollbackEvent:
+    """
+    Construct a ready-to-publish OptimisticRollbackEvent.
+
+    Wraps the envelope-metadata defaults so a caller synthesizing the
+    rollback from a ``set_value`` failure need not know about the
+    ``seq=0`` / ``kind=change`` conventions.
+    """
     return OptimisticRollbackEvent(
         seq=0,
         kind=Kind.change,

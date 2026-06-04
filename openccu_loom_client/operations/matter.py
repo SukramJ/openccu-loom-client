@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""Matter-bridge administration REST operations (``/matter``).
+"""
+Matter-bridge administration REST operations (``/matter``).
 
 The Matter bridge is operator-opt-in. This wraps its status, fabric
 management, the exposable-device allowlist, and commissioning-window
@@ -44,7 +45,8 @@ class MatterOperations(_OperationsBase):
         await self._transport.request("DELETE", f"/matter/fabrics/{fabric_id}")
 
     async def get_exposable(self) -> MatterExposureList:
-        """List allowlist state + mappable verdict (admin).
+        """
+        List allowlist state + mappable verdict (admin).
 
         Wire: ``GET /matter/exposable``.
         """
@@ -61,7 +63,8 @@ class MatterOperations(_OperationsBase):
         )
 
     async def update_exposable_bulk(self, *, updates: MatterExposureBulkUpdate) -> dict[str, Any]:
-        """Apply multiple allowlist updates (admin).
+        """
+        Apply multiple allowlist updates (admin).
 
         Wire: ``POST /matter/exposable/bulk``. Returns ``{applied: N}``.
         """
@@ -76,7 +79,8 @@ class MatterOperations(_OperationsBase):
     async def open_commissioning_window(
         self, *, request: MatterCommissioningWindowRequest | None = None
     ) -> MatterCommissioningWindowResponse:
-        """Open a Matter commissioning window (admin).
+        """
+        Open a Matter commissioning window (admin).
 
         Wire: ``POST /matter/commissioning/window``.
         """
@@ -90,7 +94,8 @@ class MatterOperations(_OperationsBase):
         return MatterCommissioningWindowResponse.model_validate(payload)
 
     async def close_commissioning_window(self) -> None:
-        """Close an open commissioning window (admin).
+        """
+        Close an open commissioning window (admin).
 
         Wire: ``POST /matter/commissioning/window/close``.
         """
@@ -101,7 +106,8 @@ class MatterOperations(_OperationsBase):
     async def share(
         self, *, request: MatterCommissioningWindowRequest | None = None
     ) -> MatterCommissioningWindowResponse:
-        """Open a commissioning window for a second controller (admin).
+        """
+        Open a commissioning window for a second controller (admin).
 
         Wire: ``POST /matter/share``.
         """

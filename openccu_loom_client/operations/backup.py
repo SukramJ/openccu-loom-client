@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""CCU backup REST operations (``/backups``).
+"""
+CCU backup REST operations (``/backups``).
 
 The daemon drives the CCU's Rega ``create_backup_start`` and stores the
 resulting ``.sbk`` archive locally. Bodies are free-form in the
@@ -34,7 +35,8 @@ class BackupOperations(_OperationsBase):
         return await self._transport.request_bytes("GET", f"/backups/{backup_id}/download")
 
     async def restore_backup(self, *, backup_id: str) -> None:
-        """Restore a CCU backup from a stored snapshot.
+        """
+        Restore a CCU backup from a stored snapshot.
 
         Wire: ``POST /backups/{id}/restore``. Not retried — a restore is
         a destructive, non-idempotent CCU operation.

@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""Configuration REST operations.
+"""
+Configuration REST operations.
 
 Covers the sanitized read-only ``/config`` plus the admin
 config-management surface (``/config/schema``, ``/config/effective``,
@@ -12,11 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from openccu_loom_types.rest import (
-    ConfigSnapshot,
-    ConfigSnapshotResponse,
-    SchemaResponse,
-)
+from openccu_loom_types.rest import ConfigSnapshot, ConfigSnapshotResponse, SchemaResponse
 
 from openccu_loom_client.operations._base import _OperationsBase
 
@@ -30,7 +27,8 @@ class ConfigOperations(_OperationsBase):
         return ConfigSnapshot.model_validate(payload)
 
     async def get_schema(self) -> SchemaResponse:
-        """Config field schema (section list + typed descriptors).
+        """
+        Config field schema (section list + typed descriptors).
 
         Wire: ``GET /config/schema``.
         """
@@ -38,7 +36,8 @@ class ConfigOperations(_OperationsBase):
         return SchemaResponse.model_validate(payload)
 
     async def get_effective(self) -> ConfigSnapshotResponse:
-        """Merged effective config with source annotations (admin).
+        """
+        Return the merged effective config with source annotations (admin).
 
         Wire: ``GET /config/effective``.
         """
@@ -51,7 +50,8 @@ class ConfigOperations(_OperationsBase):
         return dict(payload or {})
 
     async def put_section(self, *, section: str, values: dict[str, Any]) -> dict[str, Any]:
-        """Replace one config section (admin).
+        """
+        Replace one config section (admin).
 
         Wire: ``PUT /config/sections/{section}``. Returns the daemon's
         ack (section, version, updated_at, restart_required).
@@ -65,7 +65,8 @@ class ConfigOperations(_OperationsBase):
         return dict(payload or {})
 
     async def delete_section(self, *, section: str) -> None:
-        """Delete one config section (admin).
+        """
+        Delete one config section (admin).
 
         Wire: ``DELETE /config/sections/{section}``.
         """

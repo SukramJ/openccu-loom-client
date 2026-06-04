@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""Importability + identity tests for the aiohomematic compat namespace.
+"""
+Importability + identity tests for the aiohomematic compat namespace.
 
 The shim's main contract is that every ``from aiohomematic.* import …``
 statement the ``homematicip_local`` HA integration uses today must
@@ -198,23 +199,24 @@ class TestIdentities:
     """Compat aliases should BE the underlying class, not a wrapper."""
 
     def test_central_unit_is_the_adapter(self) -> None:
-        """CentralUnit wraps LoomClient with the aiohomematic coordinator
-        surface (device_coordinator, hub_coordinator, …) the component
-        reaches into — a plain LoomClient alias is not enough."""
+        """
+        CentralUnit wraps LoomClient with the aiohomematic coordinator surface.
+
+        It exposes device_coordinator, hub_coordinator, … the component
+        reaches into — a plain LoomClient alias is not enough.
+        """
         from openccu_loom_client.compat.aiohomematic.central import CentralUnit
-        from openccu_loom_client.compat.aiohomematic.central.adapter import (
-            LoomCentralAdapter,
-        )
+        from openccu_loom_client.compat.aiohomematic.central.adapter import LoomCentralAdapter
 
         assert CentralUnit is LoomCentralAdapter
 
     async def test_central_config_builds_adapter(self) -> None:
-        """CentralConfig is an aiohomematic-shaped factory, not a bare
-        LoomConfig alias — create_central() yields the adapter."""
-        from openccu_loom_client.compat.aiohomematic.central import (
-            CentralConfig,
-            CentralUnit,
-        )
+        """
+        CentralConfig is an aiohomematic-shaped factory, not a bare LoomConfig alias.
+
+        create_central() yields the adapter.
+        """
+        from openccu_loom_client.compat.aiohomematic.central import CentralConfig, CentralUnit
 
         central = await CentralConfig(
             name="home", host="loom.test", port=8080, tls=False, token="t0ken1"
@@ -229,7 +231,8 @@ class TestIdentities:
         assert CallbackDataPoint is DataPoint
 
     def test_data_point_state_changed_is_distinct_uniform_event(self) -> None:
-        """``DataPointStateChangedEvent`` is the uniform refresh event.
+        """
+        ``DataPointStateChangedEvent`` is the uniform refresh event.
 
         It is NO LONGER an alias of the daemon's ``DataPointValueChangedEvent``:
         the refresh bridge fans value/custom/sysvar changes into this one
@@ -309,9 +312,7 @@ class TestCheckConfig:
 
 class TestCallParameterCollector:
     async def test_collector_flushes_as_one_paramset_put(self) -> None:
-        from openccu_loom_client.compat.aiohomematic.model.data_point import (
-            CallParameterCollector,
-        )
+        from openccu_loom_client.compat.aiohomematic.model.data_point import CallParameterCollector
 
         class _StubOps:
             def __init__(self) -> None:
@@ -338,9 +339,7 @@ class TestCallParameterCollector:
         assert call["values"] == {"LEVEL": 0.5, "STATE": True}
 
     async def test_collector_no_op_on_empty(self) -> None:
-        from openccu_loom_client.compat.aiohomematic.model.data_point import (
-            CallParameterCollector,
-        )
+        from openccu_loom_client.compat.aiohomematic.model.data_point import CallParameterCollector
 
         class _StubOps:
             def __init__(self) -> None:

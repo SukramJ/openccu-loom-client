@@ -23,11 +23,13 @@ class Channel:
     __slots__ = ("_store", "_summary")
 
     def __init__(self, *, summary: ChannelSummary, store: LoomStore) -> None:
+        """Wrap the given channel summary against the owning store."""
         self._summary = summary
         self._store = store
 
     @property
     def summary(self) -> ChannelSummary:
+        """Return the underlying wire-side summary record."""
         return self._summary
 
     @property
@@ -37,14 +39,17 @@ class Channel:
 
     @property
     def number(self) -> int:
+        """Return the channel number."""
         return self._summary.number
 
     @property
     def paramset_key(self) -> str:
+        """Return the paramset key of this channel."""
         return self._summary.paramset_key
 
     @property
     def custom_dp_name(self) -> str | None:
+        """Return the custom data-point name, or ``None`` if unset."""
         return self._summary.custom_dp_name
 
     # ---- graph navigation ----
@@ -61,6 +66,7 @@ class Channel:
 
     @property
     def data_points(self) -> Iterator[DataPoint]:
+        """Iterate this channel's data points."""
         return iter(
             self._store.data_points_of(
                 address=self.device_address,
@@ -69,6 +75,7 @@ class Channel:
         )
 
     def get_data_point(self, *, parameter: str) -> DataPoint | None:
+        """Return one data point by parameter name, or ``None`` if absent."""
         return self._store.get_data_point(
             address=self.device_address,
             channel=self.number,
@@ -76,6 +83,7 @@ class Channel:
         )
 
     def __repr__(self) -> str:
+        """Return the debug representation."""
         return (
             f"Channel(address={self.address!r}, number={self.number}, "
             f"paramset_key={self.paramset_key!r})"

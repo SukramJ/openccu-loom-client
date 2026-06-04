@@ -11,7 +11,8 @@ from typing import Any
 
 @dataclass(slots=True)
 class ClimateWeekdaySchedule:
-    """One day of a climate week-program.
+    """
+    One day of a climate week-program.
 
     Aiohomematic carried the slot list (start-time + setpoint pairs)
     here; the daemon's schedule API stores them server-side, so this

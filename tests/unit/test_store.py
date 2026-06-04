@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""LoomStore + domain-model behaviour.
+"""
+LoomStore + domain-model behaviour.
 
 The store is the in-memory mirror of one daemon's CCU model. Tests
 cover the three populating paths (snapshot → detail → data-points),
@@ -13,7 +14,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
 from openccu_loom_types.rest import (
     ChannelSummary,
     DataPointSummary,
@@ -27,6 +27,7 @@ from openccu_loom_types.ws import (
     DeviceCreatedPayload,
     DeviceRemovedPayload,
 )
+import pytest
 
 from openccu_loom_client.store import LoomStore
 

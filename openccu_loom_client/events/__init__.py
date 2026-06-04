@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""Typed events emitted by the openccu-loom daemon over WebSocket.
+"""
+Typed events emitted by the openccu-loom daemon over WebSocket.
 
 Each ``WsEnvelope`` arriving on the wire is converted into a concrete
 :class:`LoomEvent` subclass via :func:`event_from_envelope`. Consumers

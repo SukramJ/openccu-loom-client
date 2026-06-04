@@ -15,9 +15,7 @@ from openccu_loom_types.ws import (
 )
 
 from openccu_loom_client.compat.aiohomematic.central import CentralConfig
-from openccu_loom_client.compat.aiohomematic.central.events import (
-    DataPointStateChangedEvent,
-)
+from openccu_loom_client.compat.aiohomematic.central.events import DataPointStateChangedEvent
 from openccu_loom_client.compat.aiohomematic.central.refresh import install_refresh_bridge
 from openccu_loom_client.compat.aiohomematic.model.custom import (
     CustomDpCover,

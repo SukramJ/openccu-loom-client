@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""Direct-link and central-link REST operations.
+"""
+Direct-link and central-link REST operations.
 
 Maps to the ``links``-tagged endpoints in the daemon's OpenAPI
 surface. Two distinct concepts live here:
@@ -34,7 +35,8 @@ class LinksOperations(_OperationsBase):
     # ---- direct links ----
 
     async def list_links(self, *, address: str, locale: str = "en") -> list[Link]:
-        """List the direct links a device participates in.
+        """
+        List the direct links a device participates in.
 
         Wire: ``GET /devices/{addr}/links?locale=``.
         """
@@ -54,7 +56,8 @@ class LinksOperations(_OperationsBase):
         name: str | None = None,
         description: str | None = None,
     ) -> None:
-        """Add a direct link (sender → receiver).
+        """
+        Add a direct link (sender → receiver).
 
         Wire: ``POST /devices/{addr}/links`` with an
         :class:`AddLinkRequest`. Not retried — link creation is a CCU
@@ -74,7 +77,8 @@ class LinksOperations(_OperationsBase):
         )
 
     async def remove_link(self, *, address: str, sender: str, receiver: str) -> None:
-        """Remove a direct link.
+        """
+        Remove a direct link.
 
         Wire: ``DELETE /devices/{addr}/links?sender=&receiver=``.
         Idempotent — removing an absent link is a no-op.
@@ -87,7 +91,8 @@ class LinksOperations(_OperationsBase):
         )
 
     async def get_link_paramset(self, *, address: str, peer: str) -> dict[str, Any]:
-        """Read the LINK paramset between this channel and a peer.
+        """
+        Read the LINK paramset between this channel and a peer.
 
         Wire: ``GET /devices/{addr}/link-ps/{peer}``.
         """
@@ -98,7 +103,8 @@ class LinksOperations(_OperationsBase):
         return dict(payload or {})
 
     async def put_link_paramset(self, *, address: str, peer: str, values: dict[str, Any]) -> None:
-        """Write the LINK paramset to a peer.
+        """
+        Write the LINK paramset to a peer.
 
         Wire: ``PUT /devices/{addr}/link-ps/{peer}``.
         """
@@ -118,7 +124,8 @@ class LinksOperations(_OperationsBase):
         interface: str,
         locale: str = "en",
     ) -> Any:
-        """List channels eligible to link against this channel.
+        """
+        List channels eligible to link against this channel.
 
         Wire: ``GET /devices/{addr}/channels/{n}/linkable-channels``.
         ``role`` is ``sender`` or ``receiver``.
@@ -132,7 +139,8 @@ class LinksOperations(_OperationsBase):
     # ---- central links (PRESS-event forwarding) ----
 
     async def get_central_links_status(self, *, address: str) -> CentralLinksStatus:
-        """PRESS-event forwarding status for a device.
+        """
+        PRESS-event forwarding status for a device.
 
         Wire: ``GET /devices/{addr}/central-links``.
         """
@@ -143,7 +151,8 @@ class LinksOperations(_OperationsBase):
         return CentralLinksStatus.model_validate(payload)
 
     async def enable_central_links(self, *, address: str) -> None:
-        """Enable central click-event forwarding for a device.
+        """
+        Enable central click-event forwarding for a device.
 
         Wire: ``POST /devices/{addr}/central-links``. This is the
         switch that makes physical button presses observable as
@@ -156,7 +165,8 @@ class LinksOperations(_OperationsBase):
         )
 
     async def disable_central_links(self, *, address: str) -> None:
-        """Disable central click-event forwarding for a device.
+        """
+        Disable central click-event forwarding for a device.
 
         Wire: ``DELETE /devices/{addr}/central-links``. Idempotent.
         """

@@ -9,7 +9,8 @@ import socket
 
 
 def find_free_port() -> int:
-    """Return a currently-free TCP port on the local machine.
+    """
+    Return a currently-free TCP port on the local machine.
 
     Re-implementation of ``aiohomematic.support.find_free_port``.
     The daemon owns its own bindings now — this helper survives only
@@ -22,7 +23,8 @@ def find_free_port() -> int:
 
 
 def to_bool(value: object) -> bool:
-    """Coerce a CCU-typed value into a Python bool.
+    """
+    Coerce a CCU-typed value into a Python bool.
 
     Mirrors the lenient parsing aiohomematic does for legacy reasons:
     truthy strings (``"true"``, ``"1"``, ``"on"``, ``"yes"``) → True,

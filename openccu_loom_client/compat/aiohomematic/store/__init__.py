@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""Aiohomematic-compatible ``store`` sub-package.
+"""
+Aiohomematic-compatible ``store`` sub-package.
 
 The original library owned a SQLite-backed persistent store; the
 openccu-loom daemon owns its own SQLite + filesystem state now (per

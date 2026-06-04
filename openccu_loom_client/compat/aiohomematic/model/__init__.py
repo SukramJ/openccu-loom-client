@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""``aiohomematic.model``-compatible model surface.
+"""
+``aiohomematic.model``-compatible model surface.
 
 Contains alias modules for ``data_point``, ``event``, ``custom``,
 ``generic``, ``hub``, ``schedule_models``, ``update`` and

@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""Async WebSocket transport for the openccu-loom event stream.
+"""
+Async WebSocket transport for the openccu-loom event stream.
 
 Implements the wire contract documented in
 ``docs/external-clients/topic-hierarchy.md`` of the daemon repo:
@@ -24,10 +25,10 @@ arrival order.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator, Awaitable, Callable
 import contextlib
 import json
 import logging
-from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import TYPE_CHECKING, Final, Self
 
 import aiohttp
@@ -66,7 +67,8 @@ a snapshot-based resync; the transport itself stays subscribed.
 
 
 class WsTransport:
-    """Stateful WebSocket transport against one openccu-loom daemon.
+    """
+    Stateful WebSocket transport against one openccu-loom daemon.
 
     Use as an async context manager::
 
@@ -87,6 +89,7 @@ class WsTransport:
         on_replay_lost: ReplayLostHandler | None = None,
         session: aiohttp.ClientSession | None = None,
     ) -> None:
+        """Configure the transport; the connection opens on :meth:`start`."""
         self._config: Final = config
         self._external_session: Final = session
         self._session: aiohttp.ClientSession | None = session
@@ -104,6 +107,7 @@ class WsTransport:
     # ---- context manager ----
 
     async def __aenter__(self) -> Self:
+        """Start the connection and return the transport."""
         await self.start()
         return self
 
@@ -113,6 +117,7 @@ class WsTransport:
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
+        """Stop the connection on context exit."""
         await self.stop()
 
     # ---- lifecycle ----
@@ -149,7 +154,8 @@ class WsTransport:
 
     @property
     def last_seq(self) -> int | None:
-        """Highest ``seq`` observed on a broadcast envelope so far.
+        """
+        Highest ``seq`` observed on a broadcast envelope so far.
 
         Persisted across reconnects so the next ``subscribe`` carries
         the right ``since`` cursor.
@@ -162,7 +168,8 @@ class WsTransport:
         return frozenset(self._subscriptions)
 
     async def subscribe(self, topics: list[str]) -> None:
-        """Add topic patterns to the active subscription set.
+        """
+        Add topic patterns to the active subscription set.
 
         Pushes a ``subscribe`` frame on the open connection if any of
         the topics are new. Idempotent: re-subscribing to an existing
@@ -185,7 +192,8 @@ class WsTransport:
             await self._send({"op": "unsubscribe", "topics": gone})
 
     async def events(self) -> AsyncIterator[WsEnvelope]:
-        """Yield validated envelopes in arrival order until ``stop()``.
+        """
+        Yield validated envelopes in arrival order until ``stop()``.
 
         Backed by an unbounded internal queue — backpressure is the
         consumer's responsibility. The iterator terminates cleanly
@@ -216,7 +224,7 @@ class WsTransport:
                 attempt = 0
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 — keep the reconnect loop alive on any failure
                 _LOGGER.warning(
                     "WS connection to %s failed (attempt %d): %s",
                     self._config.host,
@@ -224,13 +232,16 @@ class WsTransport:
                     exc,
                 )
             if self._closing:
-                return
+                # close() can flip _closing during the await above; mypy
+                # keeps the while-condition's narrowing across the call and
+                # wrongly flags this exit as unreachable.
+                return  # type: ignore[unreachable]
             delay = _RECONNECT_BACKOFF[min(attempt, len(_RECONNECT_BACKOFF) - 1)]
             attempt += 1
             await asyncio.sleep(delay)
 
     async def _connect_and_read(self) -> None:
-        assert self._session is not None
+        assert self._session is not None  # noqa: S101 — invariant: session opened in connect()
 
         headers: dict[str, str] = {"User-Agent": self._config.user_agent}
         self._config.auth.apply_to_headers(headers)
@@ -338,7 +349,7 @@ class WsTransport:
     def _parse_envelope(frame: dict[str, object]) -> WsEnvelope | None:
         try:
             return WsEnvelope.model_validate(frame)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — drop malformed frames, never crash the reader
             _LOGGER.warning("dropping malformed WS envelope: %s | frame=%r", exc, frame)
             return None
 
@@ -351,7 +362,8 @@ class WsTransport:
     # ---- in-band auth refresh (per topic-hierarchy.md) ----
 
     async def reauth(self, token: str) -> None:
-        """Swap the connection's bearer token without a reconnect.
+        """
+        Swap the connection's bearer token without a reconnect.
 
         Useful when an operator revokes the active token via
         ``DELETE /auth/tokens/{id}`` and the client wants to present

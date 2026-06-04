@@ -12,7 +12,8 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def cleanup_files(*, storage_directory: str | Path) -> None:
-    """No-op — daemon owns its own SQLite cache (greenfield policy).
+    """
+    No-op — daemon owns its own SQLite cache (greenfield policy).
 
     Original behaviour deleted stale per-central JSON dumps under
     the aiohomematic storage directory. The openccu-loom daemon

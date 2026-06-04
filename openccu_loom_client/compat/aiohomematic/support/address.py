@@ -7,7 +7,8 @@ from __future__ import annotations
 
 
 def get_device_address(*, address: str) -> str:
-    """Strip the trailing ``:channel`` segment from a channel address.
+    """
+    Strip the trailing ``:channel`` segment from a channel address.
 
     ``"VCU0001:3"`` → ``"VCU0001"``. A bare device address is
     returned unchanged.

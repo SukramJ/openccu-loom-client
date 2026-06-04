@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""Exception hierarchy for the openccu-loom client.
+"""
+Exception hierarchy for the openccu-loom client.
 
 The daemon emits RFC 9457 `application/problem+json` for every error
 response. The `type` field is one of a fixed set of URIs declared in
@@ -26,7 +27,8 @@ class BaseLoomException(Exception):
 
 
 class LoomTransportError(BaseLoomException):
-    """Network-level failure before the daemon got to respond.
+    """
+    Network-level failure before the daemon got to respond.
 
     Examples: connection refused, DNS failure, TLS handshake error,
     timeout. The daemon never saw the request.
@@ -34,7 +36,8 @@ class LoomTransportError(BaseLoomException):
 
 
 class LoomHttpError(BaseLoomException):
-    """The daemon answered with a non-2xx status.
+    """
+    The daemon answered with a non-2xx status.
 
     Carries the parsed RFC 9457 problem document when one was supplied;
     if the response body wasn't problem+json (e.g. an upstream proxy
@@ -51,6 +54,7 @@ class LoomHttpError(BaseLoomException):
         method: str | None = None,
         url: str | None = None,
     ) -> None:
+        """Store the HTTP status, parsed problem, and request context."""
         self.status = status
         self.problem = problem
         self.raw_body = raw_body
@@ -134,7 +138,8 @@ _CODE_TO_EXCEPTION: dict[Code, type[LoomHttpError]] = {
 
 
 def _problem_code(problem: Problem) -> Code | None:
-    """Extract the ``Code`` enum value from a Problem.
+    """
+    Extract the ``Code`` enum value from a Problem.
 
     The wire contract carries two parallel signals:
 
@@ -168,7 +173,8 @@ def http_error_from_problem(
     method: str,
     url: str,
 ) -> LoomHttpError:
-    """Pick the most specific exception class for an HTTP failure.
+    """
+    Pick the most specific exception class for an HTTP failure.
 
     The status code is included for diagnostics, but the type URI is
     the authoritative dispatcher — the daemon contract guarantees that
@@ -189,7 +195,8 @@ def http_error_from_problem(
 
 
 def parse_problem(payload: Any) -> Problem | None:
-    """Parse a JSON payload into a ``Problem``; return None on mismatch.
+    """
+    Parse a JSON payload into a ``Problem``; return None on mismatch.
 
     Defensive against upstream proxies that swallow the body or replace
     it with their own HTML — we never want a generator-style parse
@@ -199,5 +206,5 @@ def parse_problem(payload: Any) -> Problem | None:
         return None
     try:
         return Problem.model_validate(payload)
-    except Exception:  # pragma: no cover - pydantic catches everything specific
+    except Exception:  # noqa: BLE001 # pragma: no cover - pydantic catches everything specific
         return None

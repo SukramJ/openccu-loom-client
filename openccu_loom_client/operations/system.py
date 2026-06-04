@@ -30,11 +30,13 @@ class SystemOperations(_OperationsBase):
         return Info.model_validate(payload)
 
     async def get_health(self) -> Health:
+        """Return the daemon health probe. Wire: ``GET /health``."""
         payload = await self._transport.request("GET", "/health")
         return Health.model_validate(payload)
 
     async def get_diagnostics(self) -> dict[str, Any]:
-        """Structured snapshot for repair/diagnose flows.
+        """
+        Structured snapshot for repair/diagnose flows.
 
         Wire: ``GET /diagnostics``. The schema is open — the daemon's
         component layout decides what's in there. HA repair flows
@@ -46,7 +48,8 @@ class SystemOperations(_OperationsBase):
     # ---- snapshot ----
 
     async def get_snapshot(self) -> Snapshot:
-        """One-shot dump of every device / program / sysvar / interface.
+        """
+        One-shot dump of every device / program / sysvar / interface.
 
         Wire: ``GET /snapshot``. The HA bootstrap path calls this once
         at connect time to seed the local :class:`LoomStore`. For
@@ -60,6 +63,7 @@ class SystemOperations(_OperationsBase):
     # ---- interfaces ----
 
     async def list_interfaces(self) -> list[InterfaceState]:
+        """List all CCU interfaces and their state. Wire: ``GET /interfaces``."""
         payload = await self._transport.request("GET", "/interfaces")
         return [InterfaceState.model_validate(i) for i in (payload or [])]
 
@@ -86,7 +90,8 @@ class SystemOperations(_OperationsBase):
         return dict(payload or {})
 
     async def restart(self) -> dict[str, Any]:
-        """Trigger a graceful daemon shutdown/restart (admin).
+        """
+        Trigger a graceful daemon shutdown/restart (admin).
 
         Wire: ``POST /system/restart``. Not retried.
         """
@@ -94,7 +99,8 @@ class SystemOperations(_OperationsBase):
         return dict(payload or {})
 
     async def get_startup_capture(self) -> StartupCaptureConfig:
-        """Read the startup-capture toggle (admin).
+        """
+        Read the startup-capture toggle (admin).
 
         Wire: ``GET /system/startup-capture``.
         """
@@ -102,7 +108,8 @@ class SystemOperations(_OperationsBase):
         return StartupCaptureConfig.model_validate(payload)
 
     async def set_startup_capture(self, *, config: StartupCaptureConfig) -> StartupCaptureConfig:
-        """Persist the startup-capture toggle (admin).
+        """
+        Persist the startup-capture toggle (admin).
 
         Wire: ``PUT /system/startup-capture``.
         """

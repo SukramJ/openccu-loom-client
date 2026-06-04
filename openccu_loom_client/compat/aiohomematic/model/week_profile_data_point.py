@@ -9,7 +9,8 @@ from openccu_loom_client.model import DataPoint
 
 
 class WeekProfileDataPoint(DataPoint):
-    """A DP that exposes a thermostat week-program on its channel.
+    """
+    A DP that exposes a thermostat week-program on its channel.
 
     HA-side code matches against this class to decide which channels
     own a climate schedule. The actual schedule is fetched via the
