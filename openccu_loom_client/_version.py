@@ -4,17 +4,13 @@
 """
 Single source of truth for the package version.
 
-Pulled from the installed distribution metadata so the version in
-`pyproject.toml` is authoritative and a separate string here can
-never drift.
+The version literal lives in `const.py` (CalVer); this module merely
+re-exports it as `__version__` so both `pyproject.toml` (dynamic
+version) and `const.VERSION` stay in lock-step and can never drift.
 """
 
 from __future__ import annotations
 
-from importlib.metadata import PackageNotFoundError, version as _dist_version
+from openccu_loom_client.const import VERSION as __version__
 
-try:
-    __version__ = _dist_version("openccu-loom-client")
-except PackageNotFoundError:
-    # Editable install before `pip install -e .` resolved the dist-info.
-    __version__ = "0.0.0+local"
+__all__ = ["__version__"]
