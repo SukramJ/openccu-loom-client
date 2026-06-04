@@ -161,8 +161,7 @@ class TestAttachDetailAndDataPoints:
             {
                 **_device_summary().model_dump(),
                 "channels": [
-                    _channel_summary(address="VCU0001", number=n).model_dump()
-                    for n in (1, 2, 3)
+                    _channel_summary(address="VCU0001", number=n).model_dump() for n in (1, 2, 3)
                 ],
             }
         )
@@ -272,9 +271,7 @@ class TestLiveUpdates:
         assert dp.value == 0.8
         assert dp.is_observed is True
 
-    def test_apply_value_changed_for_unknown_dp_is_noop(
-        self, populated: LoomStore, caplog
-    ) -> None:
+    def test_apply_value_changed_for_unknown_dp_is_noop(self, populated: LoomStore, caplog) -> None:
         payload = DataPointValueChangedPayload.model_validate(
             {
                 "central": "home",
@@ -322,9 +319,7 @@ class TestLiveUpdates:
         store.apply_device_created(payload)
         assert store.get_device(address="VCU0001").name == "original"
 
-    def test_apply_device_removed_clears_device_and_children(
-        self, populated: LoomStore
-    ) -> None:
+    def test_apply_device_removed_clears_device_and_children(self, populated: LoomStore) -> None:
         payload = DeviceRemovedPayload.model_validate(
             {
                 "central": "home",
@@ -395,9 +390,7 @@ class TestSetValue:
     async def test_set_value_without_transport_raises(self) -> None:
         store = LoomStore()
         with pytest.raises(RuntimeError, match="no transport bound"):
-            await store.set_value(
-                address="X", channel=1, parameter="P", value=1
-            )
+            await store.set_value(address="X", channel=1, parameter="P", value=1)
 
 
 # ---- domain navigation ----

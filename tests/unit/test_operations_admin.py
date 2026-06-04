@@ -240,7 +240,5 @@ class TestDevicesAdminExtensions:
             f"{_BASE}/devices/VCU9/channels/1/ui-schema?paramset=VALUES&locale=en",
             payload={"fields": []},
         )
-        schema = await DevicesOperations(transport=t).get_ui_schema(
-            address="VCU9", channel=1
-        )
+        schema = await DevicesOperations(transport=t).get_ui_schema(address="VCU9", channel=1)
         assert schema == {"fields": []}

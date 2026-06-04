@@ -47,14 +47,10 @@ class ConfigOperations(_OperationsBase):
 
     async def get_section(self, *, section: str) -> dict[str, Any]:
         """Read one config section (admin). Wire: ``GET /config/sections/{section}``."""
-        payload = await self._transport.request(
-            "GET", f"/config/sections/{section}"
-        )
+        payload = await self._transport.request("GET", f"/config/sections/{section}")
         return dict(payload or {})
 
-    async def put_section(
-        self, *, section: str, values: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def put_section(self, *, section: str, values: dict[str, Any]) -> dict[str, Any]:
         """Replace one config section (admin).
 
         Wire: ``PUT /config/sections/{section}``. Returns the daemon's

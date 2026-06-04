@@ -120,9 +120,7 @@ class TestCustomDataPointModel:
                 }
             )
         )
-        climates = central.query_facade.get_data_points(
-            data_point_type=DataPointType.Climate
-        )
+        climates = central.query_facade.get_data_points(data_point_type=DataPointType.Climate)
         assert len(climates) == 1
         assert isinstance(climates[0], CustomDpIpThermostat)
         assert climates[0].hvac_mode == "heat"
@@ -194,9 +192,7 @@ class TestCustomDeepParity:
         assert dp.level_to_brightness(1.0) == 255
 
     async def test_light_turn_on_with_brightness_invokes_set_level(self) -> None:
-        dp, transport = _cdp_instance(
-            kind="light", category="light", state={"state": "OFF"}
-        )
+        dp, transport = _cdp_instance(kind="light", category="light", state={"state": "OFF"})
         await dp.turn_on(brightness=200)
         method, path, body = transport.calls[-1]
         assert method == "POST"

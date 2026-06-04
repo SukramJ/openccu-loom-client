@@ -123,9 +123,7 @@ class TestUniqueIdWrappers:
                 == expected
             )
 
-    @pytest.mark.parametrize(
-        "name", ["My Var", "Außen Temperatur", "alarm", "Wert mit-Strich"]
-    )
+    @pytest.mark.parametrize("name", ["My Var", "Außen Temperatur", "alarm", "Wert mit-Strich"])
     def test_sysvar_key_matches_contract(self, name: str) -> None:
         assert sysvar_unique_id(serial_suffix="11a0001234", name=name) == canonical_unique_id(
             serial_suffix="11a0001234", address=SYSVAR_ADDRESS, parameter=hub_slug(name)
@@ -160,19 +158,20 @@ class TestContractReferenceGoldens:
     @pytest.mark.parametrize("case", load_golden_cases("unique_id"))
     def test_canonical_is_loom_prefixed_routing_key(self, case: dict) -> None:
         # The canonical key is exactly ``loom_`` + the routing key.
-        assert canonical_unique_id(
-            serial_suffix=case["central_id"],
-            address=case["address"],
-            parameter=case["parameter"],
-            prefix=case["prefix"],
-        ) == f"loom_{case['expected']}"
+        assert (
+            canonical_unique_id(
+                serial_suffix=case["central_id"],
+                address=case["address"],
+                parameter=case["parameter"],
+                prefix=case["prefix"],
+            )
+            == f"loom_{case['expected']}"
+        )
 
     @pytest.mark.parametrize("case", load_golden_cases("channel_unique_id"))
     def test_channel_unique_id_reference(self, case: dict) -> None:
         assert (
-            generate_channel_unique_id(
-                central_id=case["central_id"], address=case["address"]
-            )
+            generate_channel_unique_id(central_id=case["central_id"], address=case["address"])
             == case["expected"]
         )
 

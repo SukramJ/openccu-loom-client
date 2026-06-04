@@ -233,9 +233,7 @@ class HttpTransport:
         merged.setdefault("Accept", "application/octet-stream")
         assert self._session is not None
         try:
-            async with self._session.request(
-                method, url, params=params, headers=merged
-            ) as resp:
+            async with self._session.request(method, url, params=params, headers=merged) as resp:
                 raw = await resp.read()
                 if HTTPStatus.OK <= resp.status < HTTPStatus.MULTIPLE_CHOICES:
                     return raw
@@ -315,5 +313,5 @@ class HttpTransport:
         # right Content-Type but a slightly off body still parse.
         try:
             return json.loads(raw.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
+        except UnicodeDecodeError, json.JSONDecodeError:
             return None

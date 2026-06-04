@@ -99,9 +99,8 @@ class LoomClient:
         self._http: Final = http_transport or HttpTransport(config)
         self._store: Final = store or LoomStore(transport=self._http)
         # Ensure the store always has the transport reference — important
-        # when the caller injects a pre-built store.
-        if self._store is not None and self._store is not LoomStore:
-            self._store.set_transport(self._http)
+        # when the caller injects a pre-built store built without one.
+        self._store.set_transport(self._http)
         self._bus: Final = bus or EventBus()
         self._ws_transport_external: Final = ws_transport
         self._ws: WsTransport | None = ws_transport

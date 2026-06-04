@@ -37,9 +37,7 @@ class TestDataPointsCreatedEvent:
             seen.append(e)
 
         bus.subscribe(event_type=DataPointsCreatedEvent, handler=h)
-        await bus.publish(
-            new_data_points_created_event(devices=[], data_points=[], central="home")
-        )
+        await bus.publish(new_data_points_created_event(devices=[], data_points=[], central="home"))
         assert len(seen) == 1
         assert seen[0].central == "home"
 

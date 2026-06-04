@@ -55,9 +55,7 @@ class TestConnect:
                 await transport.connect(required_capabilities=["matter.bridge.v1"])
         await transport.close()
 
-    async def test_required_capability_present_succeeds(
-        self, transport: HttpTransport
-    ) -> None:
+    async def test_required_capability_present_succeeds(self, transport: HttpTransport) -> None:
         with aioresponses() as mock:
             mock.get("http://loom.test:8080/api/v1/info", payload=_INFO_RESPONSE)
             await transport.connect(required_capabilities=["ws.broadcasts.v1"])
@@ -86,9 +84,7 @@ class TestRequest:
         assert result is None
         await transport.close()
 
-    async def test_404_with_problem_json_raises_not_found(
-        self, transport: HttpTransport
-    ) -> None:
+    async def test_404_with_problem_json_raises_not_found(self, transport: HttpTransport) -> None:
         with aioresponses() as mock:
             mock.get("http://loom.test:8080/api/v1/info", payload=_INFO_RESPONSE)
             mock.get(
@@ -150,9 +146,7 @@ class TestRetry:
         assert result["total"] == 0
         await transport.close()
 
-    async def test_get_gives_up_after_backoff_exhausted(
-        self, transport: HttpTransport
-    ) -> None:
+    async def test_get_gives_up_after_backoff_exhausted(self, transport: HttpTransport) -> None:
         with aioresponses() as mock:
             mock.get("http://loom.test:8080/api/v1/info", payload=_INFO_RESPONSE)
             for _ in range(5):

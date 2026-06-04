@@ -82,16 +82,12 @@ class TestDevicesOperations:
     async def test_patch_device_sends_name(self, http) -> None:
         t, mock = http
         mock.patch("http://loom.test:8080/api/v1/devices/VCU0001", status=200, payload={})
-        await DevicesOperations(transport=t).patch_device(
-            address="VCU0001", name="Renamed"
-        )
+        await DevicesOperations(transport=t).patch_device(address="VCU0001", name="Renamed")
         # aioresponses keys requests by (method, URL); pick the PATCH out
         # by walking the requests map. The exact key shape isn't part of
         # its public API.
         patch_call = next(
-            calls[0]
-            for (method, _url), calls in mock.requests.items()
-            if method == "PATCH"
+            calls[0] for (method, _url), calls in mock.requests.items() if method == "PATCH"
         )
         assert patch_call.kwargs["json"] == {"name": "Renamed"}
 

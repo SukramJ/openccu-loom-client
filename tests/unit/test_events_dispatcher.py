@@ -99,7 +99,7 @@ class TestDispatch:
     def _envelope(self, *, type_: str, payload: dict, seq: int = 1) -> WsEnvelope:
         return WsEnvelope.model_validate(
             {
-                "topic": "doesnt.matter",
+                "topic": "does.not.matter",
                 "type": type_,
                 "ts": "2026-05-24T08:42:13Z",
                 "seq": seq,
@@ -236,9 +236,7 @@ class TestDispatch:
             ),
         ],
     )
-    def test_other_known_types(
-        self, type_id: str, payload: dict, expected_cls: type
-    ) -> None:
+    def test_other_known_types(self, type_id: str, payload: dict, expected_cls: type) -> None:
         env = self._envelope(type_=type_id, payload=payload)
         ev = event_from_envelope(env)
         assert isinstance(ev, expected_cls)

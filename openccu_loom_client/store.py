@@ -134,9 +134,7 @@ class LoomStore:
         the client opens its session (e.g. integration tests)."""
         self._transport = transport
 
-    def set_data_point_factory(
-        self, factory: Callable[..., DataPoint] | None
-    ) -> None:
+    def set_data_point_factory(self, factory: Callable[..., DataPoint] | None) -> None:
         """Install a factory that builds (subclasses of) :class:`DataPoint`.
 
         Must be set before :meth:`attach_channel_data_points` runs (i.e.
@@ -164,9 +162,7 @@ class LoomStore:
             store=self,
         )
 
-    def set_custom_data_point_factory(
-        self, factory: Callable[..., CustomDataPoint] | None
-    ) -> None:
+    def set_custom_data_point_factory(self, factory: Callable[..., CustomDataPoint] | None) -> None:
         """Install a factory that builds (subclasses of) :class:`CustomDataPoint`."""
         self._cdp_factory = factory
 
@@ -199,18 +195,14 @@ class LoomStore:
         """
         if self._transport is None:
             return
-        payload = await self._transport.request(
-            "GET", f"/devices/{address}/cdps/{name}"
-        )
+        payload = await self._transport.request("GET", f"/devices/{address}/cdps/{name}")
         cdp = self._cdps.get((address, name))
         if cdp is not None and isinstance(payload, dict):
             state = payload.get("state")
             if isinstance(state, dict):
                 cdp._replace_state(state)
 
-    async def refresh_data_point(
-        self, *, address: str, channel: int, parameter: str
-    ) -> None:
+    async def refresh_data_point(self, *, address: str, channel: int, parameter: str) -> None:
         """Re-read one data-point's value from the daemon and apply it.
 
         Backs the compat ``load_data_point_value`` call HA makes when an
@@ -240,9 +232,7 @@ class LoomStore:
     def get_channel(self, *, address: str, number: int) -> Channel | None:
         return self._channels.get((address, number))
 
-    def get_data_point(
-        self, *, address: str, channel: int, parameter: str
-    ) -> DataPoint | None:
+    def get_data_point(self, *, address: str, channel: int, parameter: str) -> DataPoint | None:
         return self._data_points.get((address, channel, parameter))
 
     def channels_of(self, *, address: str) -> list[Channel]:
@@ -260,19 +250,13 @@ class LoomStore:
     def data_points_of(self, *, address: str, channel: int) -> list[DataPoint]:
         """All data-points of one (device, channel) pair, sorted by parameter."""
         return sorted(
-            (
-                dp
-                for k, dp in self._data_points.items()
-                if k[0] == address and k[1] == channel
-            ),
+            (dp for k, dp in self._data_points.items() if k[0] == address and k[1] == channel),
             key=lambda dp: dp.parameter,
         )
 
     # ---- custom data points (CDPs) ----
 
-    def get_custom_data_point(
-        self, *, address: str, name: str
-    ) -> CustomDataPoint | None:
+    def get_custom_data_point(self, *, address: str, name: str) -> CustomDataPoint | None:
         return self._cdps.get((address, name))
 
     @property
@@ -386,9 +370,7 @@ class LoomStore:
 
         # Garbage-collect channels (and their DPs) that vanished.
         stale_keys = [
-            k
-            for k in self._channels
-            if k[0] == detail.address and k[1] not in new_numbers
+            k for k in self._channels if k[0] == detail.address and k[1] not in new_numbers
         ]
         for stale in stale_keys:
             self._drop_channel(stale)
@@ -406,11 +388,7 @@ class LoomStore:
         the daemon's catalogue is authoritative.
         """
         # Drop the prior DPs for this channel (we replace wholesale).
-        stale = [
-            k
-            for k in self._data_points
-            if k[0] == device_address and k[1] == channel_number
-        ]
+        stale = [k for k in self._data_points if k[0] == device_address and k[1] == channel_number]
         for s in stale:
             del self._data_points[s]
 
@@ -484,9 +462,9 @@ class LoomStore:
         for k in stale_channels:
             self._drop_channel(k)
         # CDPs are device-scoped, not channel-scoped — drop them too.
-        stale_cdps = [k for k in self._cdps if k[0] == addr]
-        for k in stale_cdps:
-            del self._cdps[k]
+        stale_cdps = [cdp_key for cdp_key in self._cdps if cdp_key[0] == addr]
+        for cdp_key in stale_cdps:
+            del self._cdps[cdp_key]
 
     def apply_sysvar_changed(self, payload: SysvarChangedPayload) -> None:
         """Replace one sysvar's value from a ``hub.sysvar_changed`` push.
@@ -496,13 +474,9 @@ class LoomStore:
         """
         sysvar = self._sysvars.get(payload.name)
         if sysvar is None:
-            _LOGGER.debug(
-                "sysvar_changed for unknown sysvar %r — ignoring", payload.name
-            )
+            _LOGGER.debug("sysvar_changed for unknown sysvar %r — ignoring", payload.name)
             return
-        new_summary = sysvar.summary.model_copy(
-            update={"value": payload.value, "observed": True}
-        )
+        new_summary = sysvar.summary.model_copy(update={"value": payload.value, "observed": True})
         sysvar._replace_summary(new_summary)
 
     def apply_program_executed(self, payload: ProgramExecutedPayload) -> None:

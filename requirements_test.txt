@@ -1,0 +1,10 @@
+-r requirements.txt
+-r requirements_test_pre_commit.txt
+
+aioresponses==0.7.6
+coverage==7.14.1
+mypy==2.1.0
+prek==0.4.3
+pytest==9.0.3
+pytest-asyncio==1.4.0
+pytest-cov==7.1.0

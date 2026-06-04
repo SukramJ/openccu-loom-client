@@ -18,6 +18,7 @@ between them handle the parse + dispatch in one step.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, ClassVar, Final
 
@@ -43,6 +44,7 @@ from openccu_loom_types.ws import (
     SysvarChangedPayload,
     WsEnvelope,
 )
+from pydantic import BaseModel
 
 _LOGGER: Final = logging.getLogger(__name__)
 
@@ -211,7 +213,7 @@ class DeviceCreatedEvent(LoomEvent):
 
     Forward-compatible with the daemon's deferred lifecycle-broadcast
     ask: the payload schema ships in 0.1.2 even though the broadcast
-    isn't annonced in wsapi.json yet.
+    isn't announced in wsapi.json yet.
     """
 
     payload: DeviceCreatedPayload
@@ -326,7 +328,7 @@ class UnknownLoomEvent(LoomEvent):
 # Registry: wire ``type`` string → (event class, payload class). The
 # payload class is a Pydantic model from openccu_loom_types.ws; the
 # event class is the dataclass wrapper above.
-_EVENT_REGISTRY: Final[dict[str, tuple[type[LoomEvent], type]]] = {
+_EVENT_REGISTRY: Final[dict[str, tuple[Callable[..., LoomEvent], type[BaseModel]]]] = {
     DataPointValueChangedEvent.type_id: (DataPointValueChangedEvent, DataPointValueChangedPayload),
     CustomDataPointStateChangedEvent.type_id: (
         CustomDataPointStateChangedEvent,

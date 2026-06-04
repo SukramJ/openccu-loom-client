@@ -80,24 +80,18 @@ class DiagnosticsOperations(_OperationsBase):
 
         Wire: ``DELETE /diagnostics/log-levels/{path}``.
         """
-        await self._transport.request(
-            "DELETE", f"/diagnostics/log-levels/{path}"
-        )
+        await self._transport.request("DELETE", f"/diagnostics/log-levels/{path}")
 
     # ---- log records ----
 
     async def get_logs(self, *, params: dict[str, Any] | None = None) -> dict[str, Any]:
         """Backfill recent log records (admin). Wire: ``GET /diagnostics/logs``."""
-        payload = await self._transport.request(
-            "GET", "/diagnostics/logs", params=params
-        )
+        payload = await self._transport.request("GET", "/diagnostics/logs", params=params)
         return dict(payload or {})
 
     # ---- RAM-buffered capture ----
 
-    async def start_capture(
-        self, *, options: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
+    async def start_capture(self, *, options: dict[str, Any] | None = None) -> dict[str, Any]:
         """Start a RAM-buffered log capture (admin). Wire: ``POST /diagnostics/capture``."""
         payload = await self._transport.request(
             "POST", "/diagnostics/capture", json_body=options or None, allow_retry=False
@@ -111,9 +105,7 @@ class DiagnosticsOperations(_OperationsBase):
 
     async def get_capture(self, *, capture_id: str) -> dict[str, Any]:
         """Capture metadata (admin). Wire: ``GET /diagnostics/capture/{id}``."""
-        payload = await self._transport.request(
-            "GET", f"/diagnostics/capture/{capture_id}"
-        )
+        payload = await self._transport.request("GET", f"/diagnostics/capture/{capture_id}")
         return dict(payload or {})
 
     async def stop_capture(self, *, capture_id: str) -> dict[str, Any]:
@@ -206,9 +198,7 @@ class DiagnosticsOperations(_OperationsBase):
 
         Wire: ``POST /admin/values-cache/reset``.
         """
-        await self._transport.request(
-            "POST", "/admin/values-cache/reset", allow_retry=False
-        )
+        await self._transport.request("POST", "/admin/values-cache/reset", allow_retry=False)
 
     async def reset_device_values_cache(self, *, address: str) -> None:
         """Drop cache rows for one device (admin).
@@ -226,9 +216,7 @@ class DiagnosticsOperations(_OperationsBase):
 
         Wire: ``POST /admin/mqtt/reload``.
         """
-        payload = await self._transport.request(
-            "POST", "/admin/mqtt/reload", allow_retry=False
-        )
+        payload = await self._transport.request("POST", "/admin/mqtt/reload", allow_retry=False)
         return MQTTReloadResponse.model_validate(payload)
 
     # ---- audit ----

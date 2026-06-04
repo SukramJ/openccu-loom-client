@@ -119,9 +119,7 @@ class TestSubscribeAndPublish:
         bus.subscribe(event_type=DataPointValueChangedEvent, handler=good)
         await bus.publish(_dpv_event())
         assert survivors == ["yes"]
-        assert "kaboom" in caplog.text or any(
-            "handler raised" in r.message for r in caplog.records
-        )
+        assert "kaboom" in caplog.text or any("handler raised" in r.message for r in caplog.records)
 
     async def test_handler_can_unsubscribe_peer_mid_fanout(self) -> None:
         """A handler unsubscribing a sibling within the same fan-out

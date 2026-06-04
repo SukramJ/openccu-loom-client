@@ -85,7 +85,7 @@ DEFAULT_UN_IGNORES: Final[tuple[str, ...]] = ()
 # Listen-on/port sentinels — the daemon owns the actual binding, so
 # these are mostly placeholders for HA-side validation logic that
 # previously compared against the aiohomematic defaults.
-IP_ANY_V4: Final = "0.0.0.0"
+IP_ANY_V4: Final = "0.0.0.0"  # nosec B104 — sentinel only; the daemon owns the actual binding
 PORT_ANY: Final = 0
 
 # ---- HA-categorisation helpers ----

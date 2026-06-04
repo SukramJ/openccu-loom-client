@@ -127,9 +127,7 @@ class WsTransport:
             )
         self._closing = False
         self._stopped.clear()
-        self._read_task = asyncio.create_task(
-            self._run_forever(), name="openccu-loom-ws-read"
-        )
+        self._read_task = asyncio.create_task(self._run_forever(), name="openccu-loom-ws-read")
 
     async def stop(self) -> None:
         """Cancel the read loop and close the connection cleanly."""
@@ -308,9 +306,7 @@ class WsTransport:
         if envelope is None:
             return
         # Monotonic by daemon contract — keep the highest we've seen.
-        if envelope.seq is not None and (
-            self._last_seq is None or envelope.seq > self._last_seq
-        ):
+        if envelope.seq is not None and (self._last_seq is None or envelope.seq > self._last_seq):
             self._last_seq = envelope.seq
         await self._envelope_queue.put(envelope)
 

@@ -19,9 +19,7 @@ from openccu_loom_client.operations._base import _OperationsBase
 class SessionsOperations(_OperationsBase):
     """Acquire / release / refresh / take over cooperative edit locks."""
 
-    async def acquire(
-        self, *, key: str, subject: str | None = None
-    ) -> dict[str, Any]:
+    async def acquire(self, *, key: str, subject: str | None = None) -> dict[str, Any]:
         """Acquire a 5-minute edit lock on a resource key.
 
         Wire: ``POST /sessions/edit``.

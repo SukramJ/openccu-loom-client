@@ -86,9 +86,7 @@ class TestSnapshotLoad:
         store.load_snapshot(
             _snapshot(
                 programs=[
-                    ProgramSummary.model_validate(
-                        {"id": "p1", "name": "Renamed", "active": False}
-                    )
+                    ProgramSummary.model_validate({"id": "p1", "name": "Renamed", "active": False})
                 ]
             )
         )

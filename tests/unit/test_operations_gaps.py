@@ -51,11 +51,7 @@ async def http(config: LoomConfig):
 
 def _find_call(mock: aioresponses, method: str):
     """Return the first recorded request for ``method`` (verb-keyed)."""
-    return next(
-        calls[0]
-        for (verb, _url), calls in mock.requests.items()
-        if verb == method
-    )
+    return next(calls[0] for (verb, _url), calls in mock.requests.items() if verb == method)
 
 
 class TestSchedulesOperations:
@@ -82,9 +78,7 @@ class TestSchedulesOperations:
         t, mock = http
         mock.put(f"{_BASE}/devices/VCU1/channels/1/schedule", status=202)
         schedule = Schedule(
-            channel=ScheduleChannelRef(
-                address="VCU1:1", number=1, device_address="VCU1"
-            ),
+            channel=ScheduleChannelRef(address="VCU1:1", number=1, device_address="VCU1"),
             kind="climate",
         )
         await SchedulesOperations(transport=t).put_channel_schedule(
@@ -140,9 +134,7 @@ class TestLinksOperations:
             f"{_BASE}/devices/VCU1/link-ps/VCU2:1",
             payload={"SHORT_ACTION_TYPE": 1},
         )
-        result = await LinksOperations(transport=t).get_link_paramset(
-            address="VCU1", peer="VCU2:1"
-        )
+        result = await LinksOperations(transport=t).get_link_paramset(address="VCU1", peer="VCU2:1")
         assert result == {"SHORT_ACTION_TYPE": 1}
 
 
@@ -198,17 +190,13 @@ class TestHubOperationsGaps:
     async def test_set_program_enabled(self, http) -> None:
         t, mock = http
         mock.patch(f"{_BASE}/programs/p1", status=202)
-        await HubOperations(transport=t).set_program_enabled(
-            program_id="p1", active=False
-        )
+        await HubOperations(transport=t).set_program_enabled(program_id="p1", active=False)
         assert _find_call(mock, "PATCH").kwargs["json"] == {"active": False}
 
     async def test_create_sysvar_only_sends_supplied_fields(self, http) -> None:
         t, mock = http
         mock.post(f"{_BASE}/sysvars", status=202)
-        await HubOperations(transport=t).create_sysvar(
-            name="my_var", value=1.0, value_type="FLOAT"
-        )
+        await HubOperations(transport=t).create_sysvar(name="my_var", value=1.0, value_type="FLOAT")
         assert _find_call(mock, "POST").kwargs["json"] == {
             "name": "my_var",
             "value": 1.0,

@@ -54,9 +54,7 @@ if TYPE_CHECKING:
     from openccu_loom_client.store import LoomStore
 
 
-def install_refresh_bridge(
-    *, bus: EventBus, group: SubscriptionGroup, store: LoomStore
-) -> None:
+def install_refresh_bridge(*, bus: EventBus, group: SubscriptionGroup, store: LoomStore) -> None:
     """Wire the daemon value events to ``DataPointStateChangedEvent``.
 
     Each event's routing key is the daemon-supplied canonical
@@ -110,9 +108,7 @@ def install_refresh_bridge(
             kind=event.kind,
             ts=event.ts,
             event_key=event.payload.unique_id
-            or sysvar_unique_id(
-                serial_suffix=store.serial_suffix, name=event.payload.name
-            ),
+            or sysvar_unique_id(serial_suffix=store.serial_suffix, name=event.payload.name),
         )
 
     async def on_rollback(event: DataPointOptimisticRolledBackEvent) -> None:

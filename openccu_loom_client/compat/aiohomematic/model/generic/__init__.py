@@ -255,7 +255,7 @@ def resolve_generic_class(
     """
     token = (type_token or "").upper()
     if write:
-        if token == "ACTION":
+        if token == "ACTION":  # nosec B105 — parameter type token, not a secret
             return DpSwitch if read else DpButton
         if not read:  # write-only, typed
             if has_value_list:
@@ -265,7 +265,9 @@ def resolve_generic_class(
             return DpAction
         return _WRITABLE_BY_TYPE.get(token, DpText)
     # read-only
-    return DpBinarySensor if token == "BOOL" else DpSensor
+    return (
+        DpBinarySensor if token == "BOOL" else DpSensor  # nosec B105 — type token, not a secret
+    )
 
 
 def make_generic_data_point(

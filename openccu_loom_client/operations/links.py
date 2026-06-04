@@ -97,9 +97,7 @@ class LinksOperations(_OperationsBase):
         )
         return dict(payload or {})
 
-    async def put_link_paramset(
-        self, *, address: str, peer: str, values: dict[str, Any]
-    ) -> None:
+    async def put_link_paramset(self, *, address: str, peer: str, values: dict[str, Any]) -> None:
         """Write the LINK paramset to a peer.
 
         Wire: ``PUT /devices/{addr}/link-ps/{peer}``.

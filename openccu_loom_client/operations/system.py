@@ -90,9 +90,7 @@ class SystemOperations(_OperationsBase):
 
         Wire: ``POST /system/restart``. Not retried.
         """
-        payload = await self._transport.request(
-            "POST", "/system/restart", allow_retry=False
-        )
+        payload = await self._transport.request("POST", "/system/restart", allow_retry=False)
         return dict(payload or {})
 
     async def get_startup_capture(self) -> StartupCaptureConfig:
@@ -103,9 +101,7 @@ class SystemOperations(_OperationsBase):
         payload = await self._transport.request("GET", "/system/startup-capture")
         return StartupCaptureConfig.model_validate(payload)
 
-    async def set_startup_capture(
-        self, *, config: StartupCaptureConfig
-    ) -> StartupCaptureConfig:
+    async def set_startup_capture(self, *, config: StartupCaptureConfig) -> StartupCaptureConfig:
         """Persist the startup-capture toggle (admin).
 
         Wire: ``PUT /system/startup-capture``.

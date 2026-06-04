@@ -29,9 +29,7 @@ class SchedulesOperations(_OperationsBase):
 
     # ---- channel-scoped ----
 
-    async def get_channel_week_profile(
-        self, *, address: str, channel: int
-    ) -> WeekProfileResponse:
+    async def get_channel_week_profile(self, *, address: str, channel: int) -> WeekProfileResponse:
         """Week-profile descriptor (type, temp range, available profiles).
 
         Wire: ``GET /devices/{addr}/channels/{n}/week_profile``. Returns
@@ -56,9 +54,7 @@ class SchedulesOperations(_OperationsBase):
         )
         return Schedule.model_validate(payload)
 
-    async def put_channel_schedule(
-        self, *, address: str, channel: int, schedule: Schedule
-    ) -> None:
+    async def put_channel_schedule(self, *, address: str, channel: int, schedule: Schedule) -> None:
         """Replace a channel's schedule.
 
         Wire: ``PUT /devices/{addr}/channels/{n}/schedule``. The daemon
@@ -72,9 +68,7 @@ class SchedulesOperations(_OperationsBase):
             allow_retry=True,
         )
 
-    async def set_channel_active_profile(
-        self, *, address: str, channel: int, profile: str
-    ) -> None:
+    async def set_channel_active_profile(self, *, address: str, channel: int, profile: str) -> None:
         """Pick the active climate profile (P1..P6) for a channel.
 
         Wire: ``POST /devices/{addr}/channels/{n}/schedule/active-profile``.

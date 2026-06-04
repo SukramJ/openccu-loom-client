@@ -154,9 +154,7 @@ class _CustomEntitySurface(CustomDataPoint):
         self._registered = False
 
     async def load_data_point_value(self, *, call_source: Any = None) -> None:
-        await self._store.refresh_custom_data_point(
-            address=self._device_address, name=self.name
-        )
+        await self._store.refresh_custom_data_point(address=self._device_address, name=self.name)
 
 
 # ---- switch ----
@@ -272,9 +270,7 @@ class CustomDpDimmer(_CustomEntitySurface):
         **_kwargs: Any,
     ) -> None:
         if hs_color is not None:
-            await self.invoke(
-                "set_color", params={"hue": hs_color[0], "saturation": hs_color[1]}
-            )
+            await self.invoke("set_color", params={"hue": hs_color[0], "saturation": hs_color[1]})
         if color_temp_kelvin is not None:
             await self.invoke("set_kelvin", params={"kelvin": int(color_temp_kelvin)})
         if effect is not None:
@@ -324,15 +320,19 @@ class CustomDpCover(_CustomEntitySurface):
         pos = self.current_position
         if pos is not None:
             return pos == 0
-        return self._state_token == "closed"
+        return self._state_token == "closed"  # nosec B105 — cover state token, not a secret
 
     @property
     def is_opening(self) -> bool:
-        return self._state.get("direction") == "opening" or self._state_token == "opening"
+        return (
+            self._state.get("direction") == "opening" or self._state_token == "opening"  # nosec B105 — cover state token, not a secret
+        )
 
     @property
     def is_closing(self) -> bool:
-        return self._state.get("direction") == "closing" or self._state_token == "closing"
+        return (
+            self._state.get("direction") == "closing" or self._state_token == "closing"  # nosec B105 — cover state token, not a secret
+        )
 
     async def open(self) -> None:
         await self.invoke("open")
@@ -496,12 +496,8 @@ class BaseCustomDpClimate(_CustomEntitySurface):
     async def set_profile(self, profile: str) -> None:
         await self.invoke("set_profile", params={"profile": str(profile)})
 
-    async def enable_away_mode_by_duration(
-        self, hours: int, away_temperature: float
-    ) -> None:
-        await self.invoke(
-            "enable_away", params={"hours": hours, "temperature": away_temperature}
-        )
+    async def enable_away_mode_by_duration(self, hours: int, away_temperature: float) -> None:
+        await self.invoke("enable_away", params={"hours": hours, "temperature": away_temperature})
 
     async def enable_away_mode_by_calendar(
         self, start: Any, end: Any, away_temperature: float
@@ -705,9 +701,7 @@ _CATEGORY_FALLBACK: dict[str, type[_CustomEntitySurface]] = {
 }
 
 
-def resolve_custom_class(
-    *, kind: str | None, category: str | None
-) -> type[_CustomEntitySurface]:
+def resolve_custom_class(*, kind: str | None, category: str | None) -> type[_CustomEntitySurface]:
     """Pick the ``CustomDp*`` class from the daemon's kind / category."""
     if kind and kind in _KIND_TO_CLASS:
         return _KIND_TO_CLASS[kind]

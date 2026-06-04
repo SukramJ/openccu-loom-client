@@ -155,14 +155,10 @@ class _HubCoordinator:
         """Build (and cache) categorised hub data points from the store."""
         live: dict[str, Any] = {}
         for sysvar in self._client.store.sysvars:
-            sv_dp: Any = make_sysvar_data_point(
-                summary=sysvar.summary, store=self._client.store
-            )
+            sv_dp: Any = make_sysvar_data_point(summary=sysvar.summary, store=self._client.store)
             live[sv_dp.unique_id] = sv_dp
         for program in self._client.store.programs:
-            pr_dp: Any = make_program_data_point(
-                summary=program.summary, store=self._client.store
-            )
+            pr_dp: Any = make_program_data_point(summary=program.summary, store=self._client.store)
             live[pr_dp.unique_id] = pr_dp
         # Reuse cached instances (preserving their registered flag) and
         # drop entries whose sysvar/program disappeared.
@@ -353,12 +349,8 @@ class _LinkCoordinator:
             description=kwargs.get("description"),
         )
 
-    async def remove_link(
-        self, *, address: str, sender: str, receiver: str
-    ) -> None:
-        await self._client.links.remove_link(
-            address=address, sender=sender, receiver=receiver
-        )
+    async def remove_link(self, *, address: str, sender: str, receiver: str) -> None:
+        await self._client.links.remove_link(address=address, sender=sender, receiver=receiver)
 
     async def get_device_links(self, *, address: str, locale: str = "en") -> Any:
         return await self._client.links.list_links(address=address, locale=locale)
@@ -381,9 +373,7 @@ class _Configuration:
     def __init__(self, client: LoomClient) -> None:
         self._client = client
 
-    async def get_paramset(
-        self, *, address: str, paramset_key: str
-    ) -> dict[str, Any]:
+    async def get_paramset(self, *, address: str, paramset_key: str) -> dict[str, Any]:
         return await self._client.datapoints.get_paramset(
             address=address, paramset_key=paramset_key
         )
@@ -505,9 +495,7 @@ class LoomCentralAdapter:
         here. State arrives later via ``custom_data_point.state_changed``.
         """
         for device in list(self._client.store.devices):
-            cdps = await self._client.custom_data_points.list_for_device(
-                address=device.address
-            )
+            cdps = await self._client.custom_data_points.list_for_device(address=device.address)
             if cdps:
                 self._client.store.attach_custom_data_points(
                     device_address=device.address, cdps=cdps

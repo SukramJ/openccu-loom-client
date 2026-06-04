@@ -109,6 +109,4 @@ class AuthOperations(_OperationsBase):
 
         Wire: ``DELETE /auth/tokens/v2/{fingerprint}``.
         """
-        await self._transport.request(
-            "DELETE", f"/auth/tokens/v2/{fingerprint}"
-        )
+        await self._transport.request("DELETE", f"/auth/tokens/v2/{fingerprint}")

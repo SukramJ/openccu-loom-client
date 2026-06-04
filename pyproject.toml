@@ -9,11 +9,11 @@ description = "Async Python REST + WebSocket client for the openccu-loom daemon"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "OpenCCU-Loom authors" }]
-requires-python = ">=3.11"
+requires-python = ">=3.14"
 dependencies = [
-    "aiohomematic-contract>=2026.6.1",
+    "aiohomematic-contract==2026.6.1",
     "aiohttp>=3.9",
-    "openccu-loom-types>=0.1.5,<0.2",
+    "openccu-loom-types>=0.1.4,<0.2",
     "pydantic>=2.6",
 ]
 classifiers = [
@@ -22,9 +22,7 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Home Automation",
     "Typing :: Typed",
 ]
@@ -51,7 +49,7 @@ openccu_loom_client = ["py.typed"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py314"
 
 [tool.ruff.lint]
 select = [
@@ -80,6 +78,6 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.14"
 strict = true
 warn_unused_ignores = true

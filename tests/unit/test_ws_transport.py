@@ -31,6 +31,7 @@ def _make_app(script: FakeDaemonScript, received_frames: list[dict]) -> web.Appl
     async def handler(request: web.Request) -> web.WebSocketResponse:
         ws = web.WebSocketResponse()
         await ws.prepare(request)
+
         # Drain client frames into received_frames in the background
         # so the script can interleave reads + writes.
         async def reader() -> None:
@@ -160,9 +161,7 @@ class TestReplayLost:
             await asyncio.sleep(0.2)
 
         cfg, _rx = await fake_daemon(script)
-        async with WsTransport(
-            cfg, initial_subscriptions=["device.*"], on_replay_lost=on_lost
-        ):
+        async with WsTransport(cfg, initial_subscriptions=["device.*"], on_replay_lost=on_lost):
             await asyncio.sleep(0.3)
 
         assert captured == [901]
@@ -192,9 +191,7 @@ class TestRuntimeSubscriptions:
             await asyncio.sleep(0.3)
 
         cfg, rx = await fake_daemon(script)
-        async with WsTransport(
-            cfg, initial_subscriptions=["device.*", "hub.*"]
-        ) as ws:
+        async with WsTransport(cfg, initial_subscriptions=["device.*", "hub.*"]) as ws:
             await asyncio.sleep(0.1)
             await ws.unsubscribe(["hub.*"])
             await asyncio.sleep(0.1)

@@ -75,9 +75,7 @@ class DevicesOperations(_OperationsBase):
 
         Wire: ``GET /devices/{addr}/channels``.
         """
-        payload = await self._transport.request(
-            "GET", f"/devices/{address}/channels"
-        )
+        payload = await self._transport.request("GET", f"/devices/{address}/channels")
         return [ChannelSummary.model_validate(c) for c in (payload or [])]
 
     async def list_data_points(
@@ -190,9 +188,7 @@ class DevicesOperations(_OperationsBase):
 
         Wire: ``POST /devices/{addr}/accept``.
         """
-        await self._transport.request(
-            "POST", f"/devices/{address}/accept", allow_retry=False
-        )
+        await self._transport.request("POST", f"/devices/{address}/accept", allow_retry=False)
 
     # ---- UI schema / config snapshots ----
 

@@ -147,9 +147,7 @@ class DataPoint:
 
     @property
     def channel(self) -> Channel | None:
-        return self._store.get_channel(
-            address=self._device_address, number=self._channel_number
-        )
+        return self._store.get_channel(address=self._device_address, number=self._channel_number)
 
     # ---- actions ----
 

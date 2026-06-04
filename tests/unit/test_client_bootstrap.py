@@ -127,9 +127,7 @@ class TestConnectAndBootstrap:
                 dps = list(channels[0].data_points)
                 assert {dp.parameter for dp in dps} == {"STATE", "LEVEL"}
 
-    async def test_bootstrap_emits_data_points_created_event(
-        self, config: LoomConfig
-    ) -> None:
+    async def test_bootstrap_emits_data_points_created_event(self, config: LoomConfig) -> None:
         captured: list[DataPointsCreatedEvent] = []
 
         async def h(e: DataPointsCreatedEvent) -> None:
@@ -181,13 +179,9 @@ class TestWsBridge:
                 # Manually wire the bridge (start_events would do this
                 # via the WS path, but that requires a real WS server).
                 group = client.events.create_subscription_group(name="test-bridge")
-                bind_ws_events_to_store(
-                    bus=client.events, store=client.store, group=group
-                )
+                bind_ws_events_to_store(bus=client.events, store=client.store, group=group)
 
-                dp = client.store.get_data_point(
-                    address="VCU0001", channel=1, parameter="LEVEL"
-                )
+                dp = client.store.get_data_point(address="VCU0001", channel=1, parameter="LEVEL")
                 assert dp is not None
                 assert dp.value == 0.0
 
@@ -232,8 +226,6 @@ class TestSendValueThroughClient:
             )
             async with LoomClient(config) as client:
                 await client.bootstrap()
-                dp = client.store.get_data_point(
-                    address="VCU0001", channel=1, parameter="STATE"
-                )
+                dp = client.store.get_data_point(address="VCU0001", channel=1, parameter="STATE")
                 assert dp is not None
                 await dp.send_value(True)

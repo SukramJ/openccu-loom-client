@@ -60,9 +60,7 @@ class MatterOperations(_OperationsBase):
             allow_retry=True,
         )
 
-    async def update_exposable_bulk(
-        self, *, updates: MatterExposureBulkUpdate
-    ) -> dict[str, Any]:
+    async def update_exposable_bulk(self, *, updates: MatterExposureBulkUpdate) -> dict[str, Any]:
         """Apply multiple allowlist updates (admin).
 
         Wire: ``POST /matter/exposable/bulk``. Returns ``{applied: N}``.
@@ -82,11 +80,7 @@ class MatterOperations(_OperationsBase):
 
         Wire: ``POST /matter/commissioning/window``.
         """
-        body = (
-            request.model_dump(mode="json", exclude_none=True)
-            if request is not None
-            else None
-        )
+        body = request.model_dump(mode="json", exclude_none=True) if request is not None else None
         payload = await self._transport.request(
             "POST",
             "/matter/commissioning/window",
@@ -111,11 +105,7 @@ class MatterOperations(_OperationsBase):
 
         Wire: ``POST /matter/share``.
         """
-        body = (
-            request.model_dump(mode="json", exclude_none=True)
-            if request is not None
-            else None
-        )
+        body = request.model_dump(mode="json", exclude_none=True) if request is not None else None
         payload = await self._transport.request(
             "POST", "/matter/share", json_body=body, allow_retry=False
         )

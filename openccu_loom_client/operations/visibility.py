@@ -30,9 +30,7 @@ class VisibilityOperations(_OperationsBase):
         payload = await self._transport.request("GET", "/visibility/unignore")
         return UnIgnoreListResponse.model_validate(payload)
 
-    async def put_unignore(
-        self, *, request: UnIgnoreUpdateRequest
-    ) -> UnIgnoreUpdateResponse:
+    async def put_unignore(self, *, request: UnIgnoreUpdateRequest) -> UnIgnoreUpdateResponse:
         """Replace the un-ignore pattern list (admin).
 
         Wire: ``PUT /visibility/unignore``.
@@ -50,7 +48,5 @@ class VisibilityOperations(_OperationsBase):
 
         Wire: ``GET /visibility/unignore/candidates``.
         """
-        payload = await self._transport.request(
-            "GET", "/visibility/unignore/candidates"
-        )
+        payload = await self._transport.request("GET", "/visibility/unignore/candidates")
         return UnIgnoreCandidateList.model_validate(payload)

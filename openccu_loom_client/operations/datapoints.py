@@ -60,8 +60,7 @@ class DataPointsOperations(_OperationsBase):
         body = ValuesBatchRequest.model_validate(
             {
                 "queries": [
-                    Query(address=a, channel=c, parameter=p).model_dump()
-                    for (a, c, p) in queries
+                    Query(address=a, channel=c, parameter=p).model_dump() for (a, c, p) in queries
                 ]
             }
         )
