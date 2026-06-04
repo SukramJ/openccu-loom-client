@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""LoomCentralAdapter — the aiohomematic CentralUnit surface over LoomClient.
+"""
+LoomCentralAdapter — the aiohomematic CentralUnit surface over LoomClient.
 
 Covers the implemented surface (CentralConfig auth resolution, identity,
 system-information pre-flight, the action coordinators) and asserts the
@@ -11,13 +12,13 @@ rather than returning a wrong shape.
 
 from __future__ import annotations
 
-import pytest
-from aioresponses import aioresponses
 from openccu_loom_types.enums import DataPointCategory
 from openccu_loom_types.rest import DataPointSummary, Snapshot
+import pytest
 
-from openccu_loom_client import BasicAuth, BearerAuth, LoomConfig
+from openccu_loom_client import BasicAuth, BearerAuth
 from openccu_loom_client.compat.aiohomematic.central import CentralConfig, check_config
+from tests.helpers import MockDaemon
 
 
 def _dp_summary(
@@ -33,7 +34,8 @@ def _dp_summary(
         }
     )
 
-_BASE = "http://loom.test:8080/api/v1"
+
+_BASE = "/api/v1"
 _INFO = {
     "version": "1.2.3",
     "api_version": "1.0.0",
@@ -45,7 +47,7 @@ _INFO = {
 }
 
 
-def _make_config(**overrides) -> CentralConfig:
+def _make_config(*, mock_daemon: MockDaemon | None = None, **overrides) -> CentralConfig:
     base = {
         "name": "home",
         "host": "loom.test",
@@ -53,6 +55,11 @@ def _make_config(**overrides) -> CentralConfig:
         "tls": False,
         "token": "tok-123456",
     }
+    if mock_daemon is not None:
+        # Point a config that will actually open a session at the live
+        # in-process server (ephemeral host/port).
+        base["host"] = mock_daemon.host
+        base["port"] = mock_daemon.port
     base.update(overrides)
     return CentralConfig(**base)
 
@@ -98,26 +105,24 @@ class TestIdentity:
 
 
 @pytest.fixture
-async def connected(config: LoomConfig):
-    """A connected adapter (HTTP session open, no WS / no bootstrap)."""
-    with aioresponses() as mock:
-        mock.get(f"{_BASE}/info", payload=_INFO, repeat=True)
-        central = await _make_config().create_central()
-        await central._client.connect()
-        yield central, mock
+async def connected(mock_daemon: MockDaemon):
+    """Build a connected adapter (HTTP session open, no WS / no bootstrap)."""
+    mock_daemon.get(f"{_BASE}/info", payload=_INFO)
+    central = await _make_config(mock_daemon=mock_daemon).create_central()
+    await central._client.connect()
+    yield central, mock_daemon
     await central._client.close()
 
 
 class TestSystemInformation:
     async def test_validate_config_populates_system_information(self, connected) -> None:
         central, mock = connected
-        mock.get(f"{_BASE}/system/ccu", payload=[], repeat=True)
+        mock.get(f"{_BASE}/system/ccu", payload=[])
         mock.get(
             f"{_BASE}/interfaces",
             payload=[
                 {"id": "home:HmIP-RF", "name": "HmIP-RF", "connected": True, "interface": "HmIP-RF"}
             ],
-            repeat=True,
         )
         info = await central.validate_config_and_get_system_information()
         assert info.version == "1.2.3"
@@ -138,23 +143,24 @@ _CCU_ENTRY = {
 class TestSerialInjection:
     """An injected serial (HA entry.unique_id) fills the key central-id slot."""
 
-    async def _refresh(self, *, serial: str | None) -> str:
-        with aioresponses() as mock:
-            mock.get(f"{_BASE}/info", payload=_INFO, repeat=True)
-            mock.get(f"{_BASE}/system/ccu", payload=[_CCU_ENTRY], repeat=True)
-            mock.get(f"{_BASE}/interfaces", payload=[], repeat=True)
-            central = await _make_config(serial=serial).create_central()
-            await central._client.connect()
-            await central._refresh_system_information()
-            suffix = central._client.store.serial_suffix
-            await central._client.close()
-            return suffix
+    async def _refresh(self, *, mock_daemon: MockDaemon, serial: str | None) -> str:
+        mock_daemon.get(f"{_BASE}/info", payload=_INFO)
+        mock_daemon.get(f"{_BASE}/system/ccu", payload=[_CCU_ENTRY])
+        mock_daemon.get(f"{_BASE}/interfaces", payload=[])
+        central = await _make_config(mock_daemon=mock_daemon, serial=serial).create_central()
+        await central._client.connect()
+        await central._refresh_system_information()
+        suffix = central._client.store.serial_suffix
+        await central._client.close()
+        return suffix
 
-    async def test_injected_serial_wins_over_daemon(self) -> None:
-        assert await self._refresh(serial="3014F711A0001234") == "11a0001234"
+    async def test_injected_serial_wins_over_daemon(self, mock_daemon: MockDaemon) -> None:
+        assert (
+            await self._refresh(mock_daemon=mock_daemon, serial="3014F711A0001234") == "11a0001234"
+        )
 
-    async def test_daemon_serial_used_without_injection(self) -> None:
-        assert await self._refresh(serial=None) == "daemon1234"
+    async def test_daemon_serial_used_without_injection(self, mock_daemon: MockDaemon) -> None:
+        assert await self._refresh(mock_daemon=mock_daemon, serial=None) == "daemon1234"
 
 
 class TestActionCoordinators:
@@ -242,10 +248,7 @@ class TestGenericDataPointModel:
         )
 
     async def test_get_data_points_returns_categorised_instances(self) -> None:
-        from openccu_loom_client.compat.aiohomematic.model.generic import (
-            DpSensor,
-            DpSwitch,
-        )
+        from openccu_loom_client.compat.aiohomematic.model.generic import DpSensor, DpSwitch
 
         central = await _make_config().create_central()
         await self._populate(central)

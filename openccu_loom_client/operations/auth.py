@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""Authentication + API-token provisioning REST operations.
+"""
+Authentication + API-token provisioning REST operations.
 
 Covers the ``/auth``-rooted endpoints: session login/logout, the
 current-identity probe, and the two API-token surfaces (the legacy
@@ -33,7 +34,8 @@ class AuthOperations(_OperationsBase):
     # ---- session ----
 
     async def login(self, *, username: str, password: str) -> Identity:
-        """Exchange credentials for a session cookie.
+        """
+        Exchange credentials for a session cookie.
 
         Wire: ``POST /auth/login``. Not retried.
         """
@@ -50,7 +52,7 @@ class AuthOperations(_OperationsBase):
         await self._transport.request("POST", "/auth/logout", allow_retry=False)
 
     async def me(self) -> Identity:
-        """Current authenticated identity. Wire: ``GET /auth/me``."""
+        """Return the current authenticated identity. Wire: ``GET /auth/me``."""
         payload = await self._transport.request("GET", "/auth/me")
         return Identity.model_validate(payload)
 
@@ -67,7 +69,8 @@ class AuthOperations(_OperationsBase):
         return [TokenListEntry.model_validate(tok) for tok in (payload or [])]
 
     async def create_token(self, *, subject: str, role: str) -> CreateTokenResponse:
-        """Issue a new bearer token (admin).
+        """
+        Issue a new bearer token (admin).
 
         Wire: ``POST /auth/tokens``. The plaintext token is returned
         once, here, and never again — store it immediately.
@@ -87,7 +90,8 @@ class AuthOperations(_OperationsBase):
     # ---- API tokens (v2, fingerprint-based) ----
 
     async def list_tokens_v2(self) -> list[TokenSummary]:
-        """List API tokens with fingerprint + metadata.
+        """
+        List API tokens with fingerprint + metadata.
 
         Wire: ``GET /auth/tokens/v2``.
         """
@@ -105,10 +109,9 @@ class AuthOperations(_OperationsBase):
         return TokenCreated.model_validate(payload)
 
     async def delete_token_v2(self, *, fingerprint: str) -> None:
-        """Revoke an API token by fingerprint.
+        """
+        Revoke an API token by fingerprint.
 
         Wire: ``DELETE /auth/tokens/v2/{fingerprint}``.
         """
-        await self._transport.request(
-            "DELETE", f"/auth/tokens/v2/{fingerprint}"
-        )
+        await self._transport.request("DELETE", f"/auth/tokens/v2/{fingerprint}")

@@ -26,6 +26,7 @@ class HubOperations(_OperationsBase):
     # ---- programs ----
 
     async def list_programs(self) -> list[ProgramSummary]:
+        """List all programs on the CCU. Wire: ``GET /programs``."""
         payload = await self._transport.request("GET", "/programs")
         return [ProgramSummary.model_validate(p) for p in (payload or [])]
 
@@ -38,7 +39,8 @@ class HubOperations(_OperationsBase):
         )
 
     async def set_program_enabled(self, *, program_id: str, active: bool) -> None:
-        """Toggle a program's active flag.
+        """
+        Toggle a program's active flag.
 
         Wire: ``PATCH /programs/{id}`` with ``{active}``. Idempotent —
         setting the same flag twice is a no-op on the CCU.
@@ -53,6 +55,7 @@ class HubOperations(_OperationsBase):
     # ---- sysvars ----
 
     async def list_sysvars(self) -> list[SysvarSummary]:
+        """List all system variables on the CCU. Wire: ``GET /sysvars``."""
         payload = await self._transport.request("GET", "/sysvars")
         return [SysvarSummary.model_validate(s) for s in (payload or [])]
 
@@ -65,10 +68,11 @@ class HubOperations(_OperationsBase):
         description: str | None = None,
         unit: str | None = None,
         value_list: list[str] | None = None,
-        min: Any = None,  # CCU/Rega field name
-        max: Any = None,  # CCU/Rega field name
+        min: Any = None,  # noqa: A002 — CCU/Rega field name
+        max: Any = None,  # noqa: A002 — CCU/Rega field name
     ) -> None:
-        """Create a system variable on the CCU.
+        """
+        Create a system variable on the CCU.
 
         Wire: ``POST /sysvars`` (Rega ``create_system_variable``). Only
         the fields the caller supplies are sent; the daemon applies CCU
@@ -103,11 +107,12 @@ class HubOperations(_OperationsBase):
         name: str,
         description: str | None = None,
         unit: str | None = None,
-        min: str | None = None,  # CCU convention: bounds are strings
-        max: str | None = None,  # CCU convention: bounds are strings
+        min: str | None = None,  # noqa: A002 — CCU convention: bounds are strings
+        max: str | None = None,  # noqa: A002 — CCU convention: bounds are strings
         value_list: list[str] | None = None,
     ) -> None:
-        """Update a sysvar's metadata (description, unit, bounds, enum labels).
+        """
+        Update a sysvar's metadata (description, unit, bounds, enum labels).
 
         Wire: ``PATCH /sysvars/{name}``. All fields optional — omitted
         fields leave the CCU metadata unchanged. Type changes are not
@@ -132,11 +137,13 @@ class HubOperations(_OperationsBase):
         )
 
     async def get_sysvar(self, *, name: str) -> SysvarSummary:
+        """Return one system variable by name. Wire: ``GET /sysvars/{name}``."""
         payload = await self._transport.request("GET", f"/sysvars/{name}")
         return SysvarSummary.model_validate(payload)
 
     async def set_sysvar(self, *, name: str, value: Any) -> None:
-        """Write a new runtime value to a sysvar.
+        """
+        Write a new runtime value to a sysvar.
 
         Wire: ``PUT /sysvars/{name}`` with a :class:`SysvarSetRequest`.
         Type compatibility is the daemon's responsibility — wrong
@@ -150,16 +157,19 @@ class HubOperations(_OperationsBase):
         )
 
     async def delete_sysvar(self, *, name: str) -> None:
+        """Delete a system variable by name. Wire: ``DELETE /sysvars/{name}``."""
         await self._transport.request("DELETE", f"/sysvars/{name}")
 
     # ---- messages ----
 
     async def list_alarm_messages(self) -> list[AlarmMessage]:
+        """List pending alarm messages. Wire: ``GET /alarm-messages``."""
         payload = await self._transport.request("GET", "/alarm-messages")
         return [AlarmMessage.model_validate(m) for m in (payload or [])]
 
     async def ack_alarm_message(self, *, message_id: str) -> None:
-        """Acknowledge (clear) an alarm message.
+        """
+        Acknowledge (clear) an alarm message.
 
         Wire: ``POST /alarm-messages/{id}/ack``. Idempotent — acking an
         already-cleared message is a no-op.
@@ -171,11 +181,13 @@ class HubOperations(_OperationsBase):
         )
 
     async def list_service_messages(self) -> list[ServiceMessage]:
+        """List pending service messages. Wire: ``GET /service-messages``."""
         payload = await self._transport.request("GET", "/service-messages")
         return [ServiceMessage.model_validate(m) for m in (payload or [])]
 
     async def ack_service_message(self, *, message_id: str) -> None:
-        """Acknowledge a service message.
+        """
+        Acknowledge a service message.
 
         Wire: ``POST /service-messages/{id}/ack``. Idempotent.
         """
@@ -188,7 +200,8 @@ class HubOperations(_OperationsBase):
     # ---- rooms / functions ----
 
     async def list_rooms(self) -> list[Room]:
-        """Aggregated room index with device counts.
+        """
+        Return the aggregated room index with device counts.
 
         Wire: ``GET /rooms``.
         """
@@ -196,7 +209,8 @@ class HubOperations(_OperationsBase):
         return [Room.model_validate(r) for r in (payload or [])]
 
     async def list_functions(self) -> list[Function]:
-        """Aggregated function-group index with device counts.
+        """
+        Return the aggregated function-group index with device counts.
 
         Wire: ``GET /functions``.
         """
@@ -204,7 +218,8 @@ class HubOperations(_OperationsBase):
         return [Function.model_validate(f) for f in (payload or [])]
 
     async def list_inbox(self) -> dict[str, Any]:
-        """Pending pairing candidates not yet accepted.
+        """
+        List pending pairing candidates not yet accepted.
 
         Wire: ``GET /inbox``. Promote a candidate with
         :meth:`DevicesOperations.accept_device`.
@@ -215,10 +230,12 @@ class HubOperations(_OperationsBase):
     # ---- install mode ----
 
     async def get_install_mode(self) -> InstallModeState:
+        """Return the current install-mode state. Wire: ``GET /install-mode``."""
         payload = await self._transport.request("GET", "/install-mode")
         return InstallModeState.model_validate(payload)
 
     async def set_install_mode(self, *, active: bool, seconds: int = 60) -> None:
+        """Toggle install mode for a duration. Wire: ``POST /install-mode``."""
         await self._transport.request(
             "POST",
             "/install-mode",

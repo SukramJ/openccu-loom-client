@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""Diagnostics + observability REST operations.
+"""
+Diagnostics + observability REST operations.
 
 Covers the admin diagnostics surface: per-subsystem log-level
 overrides, log backfill, RAM-buffered capture, the RPC-session
@@ -41,12 +42,13 @@ class DiagnosticsOperations(_OperationsBase):
     # ---- log levels ----
 
     async def get_log_level(self) -> dict[str, Any]:
-        """Current global default log level. Wire: ``GET /diagnostics/log-level``."""
+        """Return the current global default log level. Wire: ``GET /diagnostics/log-level``."""
         payload = await self._transport.request("GET", "/diagnostics/log-level")
         return dict(payload or {})
 
     async def set_log_level(self, *, level: str) -> dict[str, Any]:
-        """Change the global default log level (admin).
+        """
+        Change the global default log level (admin).
 
         Wire: ``PUT /diagnostics/log-level``.
         """
@@ -64,7 +66,8 @@ class DiagnosticsOperations(_OperationsBase):
         return dict(payload or {})
 
     async def set_log_level_override(self, *, path: str, level: str) -> None:
-        """Install a per-subsystem override (admin).
+        """
+        Install a per-subsystem override (admin).
 
         Wire: ``PUT /diagnostics/log-levels/{path}``.
         """
@@ -76,28 +79,23 @@ class DiagnosticsOperations(_OperationsBase):
         )
 
     async def remove_log_level_override(self, *, path: str) -> None:
-        """Remove a per-subsystem override (admin).
+        """
+        Remove a per-subsystem override (admin).
 
         Wire: ``DELETE /diagnostics/log-levels/{path}``.
         """
-        await self._transport.request(
-            "DELETE", f"/diagnostics/log-levels/{path}"
-        )
+        await self._transport.request("DELETE", f"/diagnostics/log-levels/{path}")
 
     # ---- log records ----
 
     async def get_logs(self, *, params: dict[str, Any] | None = None) -> dict[str, Any]:
         """Backfill recent log records (admin). Wire: ``GET /diagnostics/logs``."""
-        payload = await self._transport.request(
-            "GET", "/diagnostics/logs", params=params
-        )
+        payload = await self._transport.request("GET", "/diagnostics/logs", params=params)
         return dict(payload or {})
 
     # ---- RAM-buffered capture ----
 
-    async def start_capture(
-        self, *, options: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
+    async def start_capture(self, *, options: dict[str, Any] | None = None) -> dict[str, Any]:
         """Start a RAM-buffered log capture (admin). Wire: ``POST /diagnostics/capture``."""
         payload = await self._transport.request(
             "POST", "/diagnostics/capture", json_body=options or None, allow_retry=False
@@ -111,9 +109,7 @@ class DiagnosticsOperations(_OperationsBase):
 
     async def get_capture(self, *, capture_id: str) -> dict[str, Any]:
         """Capture metadata (admin). Wire: ``GET /diagnostics/capture/{id}``."""
-        payload = await self._transport.request(
-            "GET", f"/diagnostics/capture/{capture_id}"
-        )
+        payload = await self._transport.request("GET", f"/diagnostics/capture/{capture_id}")
         return dict(payload or {})
 
     async def stop_capture(self, *, capture_id: str) -> dict[str, Any]:
@@ -126,7 +122,8 @@ class DiagnosticsOperations(_OperationsBase):
         return dict(payload or {})
 
     async def download_capture(self, *, capture_id: str) -> bytes:
-        """Download a capture archive (tar.gz, admin).
+        """
+        Download a capture archive (tar.gz, admin).
 
         Wire: ``GET /diagnostics/capture/{id}/download``.
         """
@@ -139,7 +136,8 @@ class DiagnosticsOperations(_OperationsBase):
     async def start_rpc_recording(
         self, *, options: dict[str, Any] | None = None
     ) -> list[dict[str, Any]]:
-        """Start the XML/JSON/BIN-RPC session recorder (admin).
+        """
+        Start the XML/JSON/BIN-RPC session recorder (admin).
 
         Wire: ``POST /diagnostics/rpc-recording``.
         """
@@ -159,7 +157,8 @@ class DiagnosticsOperations(_OperationsBase):
     async def stop_rpc_recording(
         self, *, options: dict[str, Any] | None = None
     ) -> list[dict[str, Any]]:
-        """Stop the RPC session recorder (admin).
+        """
+        Stop the RPC session recorder (admin).
 
         Wire: ``POST /diagnostics/rpc-recording/stop``.
         """
@@ -172,7 +171,8 @@ class DiagnosticsOperations(_OperationsBase):
         return list(payload or [])
 
     async def download_rpc_recording(self, *, central: str) -> bytes:
-        """Download a recorded RPC trace (admin).
+        """
+        Download a recorded RPC trace (admin).
 
         Wire: ``GET /diagnostics/rpc-recording/{central}/download``.
         """
@@ -194,7 +194,8 @@ class DiagnosticsOperations(_OperationsBase):
     # ---- persistent VALUES cache ----
 
     async def get_values_cache_stats(self) -> ValuesCacheStats:
-        """Persistent VALUES-cache statistics (admin).
+        """
+        Return persistent VALUES-cache statistics (admin).
 
         Wire: ``GET /admin/values-cache/stats``.
         """
@@ -202,16 +203,16 @@ class DiagnosticsOperations(_OperationsBase):
         return ValuesCacheStats.model_validate(payload)
 
     async def reset_values_cache(self) -> None:
-        """Drop every row from the persistent cache (admin).
+        """
+        Drop every row from the persistent cache (admin).
 
         Wire: ``POST /admin/values-cache/reset``.
         """
-        await self._transport.request(
-            "POST", "/admin/values-cache/reset", allow_retry=False
-        )
+        await self._transport.request("POST", "/admin/values-cache/reset", allow_retry=False)
 
     async def reset_device_values_cache(self, *, address: str) -> None:
-        """Drop cache rows for one device (admin).
+        """
+        Drop cache rows for one device (admin).
 
         Wire: ``POST /devices/{addr}/values-cache/reset``.
         """
@@ -222,13 +223,12 @@ class DiagnosticsOperations(_OperationsBase):
     # ---- MQTT ----
 
     async def reload_mqtt(self) -> MQTTReloadResponse:
-        """Tear down + rebuild the MQTT stack (admin).
+        """
+        Tear down + rebuild the MQTT stack (admin).
 
         Wire: ``POST /admin/mqtt/reload``.
         """
-        payload = await self._transport.request(
-            "POST", "/admin/mqtt/reload", allow_retry=False
-        )
+        payload = await self._transport.request("POST", "/admin/mqtt/reload", allow_retry=False)
         return MQTTReloadResponse.model_validate(payload)
 
     # ---- audit ----

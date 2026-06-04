@@ -8,12 +8,9 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-import pytest
 from openccu_loom_types.rest import Kind
-from openccu_loom_types.ws import (
-    CentralStateChangedPayload,
-    DataPointValueChangedPayload,
-)
+from openccu_loom_types.ws import CentralStateChangedPayload, DataPointValueChangedPayload
+import pytest
 
 from openccu_loom_client.events import (
     CentralStateChangedEvent,
@@ -119,14 +116,13 @@ class TestSubscribeAndPublish:
         bus.subscribe(event_type=DataPointValueChangedEvent, handler=good)
         await bus.publish(_dpv_event())
         assert survivors == ["yes"]
-        assert "kaboom" in caplog.text or any(
-            "handler raised" in r.message for r in caplog.records
-        )
+        assert "kaboom" in caplog.text or any("handler raised" in r.message for r in caplog.records)
 
     async def test_handler_can_unsubscribe_peer_mid_fanout(self) -> None:
-        """A handler unsubscribing a sibling within the same fan-out
-        must take effect immediately — the peer is skipped in this
-        publish call, not the next one.
+        """
+        A handler unsubscribing a sibling within the same fan-out must take effect immediately.
+
+        The peer is skipped in this publish call, not the next one.
 
         Rationale: when h1's logic concludes "h2 should never see this
         event again", h2 receiving this very event would violate the

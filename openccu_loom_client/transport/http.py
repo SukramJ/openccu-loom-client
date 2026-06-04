@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""Async REST transport for the openccu-loom daemon.
+"""
+Async REST transport for the openccu-loom daemon.
 
 This module wraps :class:`aiohttp.ClientSession` with the daemon
 contract specifics:
@@ -24,9 +25,9 @@ on top in subsequent phases.
 from __future__ import annotations
 
 import asyncio
+from http import HTTPStatus
 import json
 import logging
-from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Final, Self
 
 import aiohttp
@@ -68,7 +69,8 @@ _DEFAULT_BACKOFF_SEQUENCE: Final = (0.5, 2.0)
 
 
 class HttpTransport:
-    """REST transport for one openccu-loom daemon.
+    """
+    REST transport for one openccu-loom daemon.
 
     Lifecycle: construct → :meth:`connect` (opens the session and runs
     the capability handshake) → use → :meth:`close` (or async-context
@@ -83,6 +85,7 @@ class HttpTransport:
         session: aiohttp.ClientSession | None = None,
         backoff_sequence: tuple[float, ...] = _DEFAULT_BACKOFF_SEQUENCE,
     ) -> None:
+        """Configure the transport; the session opens on :meth:`connect`."""
         self._config: Final = config
         self._external_session: Final = session
         self._backoff_sequence: Final = backoff_sequence
@@ -92,6 +95,7 @@ class HttpTransport:
     # ---- context manager ----
 
     async def __aenter__(self) -> Self:
+        """Connect and return the transport."""
         await self.connect()
         return self
 
@@ -101,12 +105,14 @@ class HttpTransport:
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
+        """Close the session on context exit."""
         await self.close()
 
     # ---- lifecycle ----
 
     async def connect(self, *, required_capabilities: Iterable[str] = ()) -> Info:
-        """Open the underlying session and run the capability handshake.
+        """
+        Open the underlying session and run the capability handshake.
 
         Returns the parsed ``/info`` payload so callers can record the
         daemon's version and capability set without an extra round-trip.
@@ -164,7 +170,8 @@ class HttpTransport:
         headers: dict[str, str] | None = None,
         allow_retry: bool | None = None,
     ) -> Any:
-        """Run one REST request against the daemon.
+        """
+        Run one REST request against the daemon.
 
         ``path`` is appended to ``config.http_base_url``. ``params``
         and ``json_body`` are passed through to aiohttp.
@@ -206,7 +213,7 @@ class HttpTransport:
                     exc,
                 )
         # Exhausted all attempts — re-raise the last failure.
-        assert last_exc is not None
+        assert last_exc is not None  # noqa: S101 — invariant: loop ran at least once
         raise last_exc
 
     async def request_bytes(
@@ -217,7 +224,8 @@ class HttpTransport:
         params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
     ) -> bytes:
-        """Fetch a non-JSON (binary) body — backup / capture downloads.
+        """
+        Fetch a non-JSON (binary) body — backup / capture downloads.
 
         Returns the raw response body. Errors still go through the
         ``problem+json`` path, so a 4xx/5xx raises the same typed
@@ -231,11 +239,9 @@ class HttpTransport:
         url = self._config.http_base_url + path
         merged = self._build_headers(headers)
         merged.setdefault("Accept", "application/octet-stream")
-        assert self._session is not None
+        assert self._session is not None  # noqa: S101 — narrowed by the connected-state guard above
         try:
-            async with self._session.request(
-                method, url, params=params, headers=merged
-            ) as resp:
+            async with self._session.request(method, url, params=params, headers=merged) as resp:
                 raw = await resp.read()
                 if HTTPStatus.OK <= resp.status < HTTPStatus.MULTIPLE_CHOICES:
                     return raw
@@ -277,7 +283,7 @@ class HttpTransport:
         json_body: Any | None,
         headers: dict[str, str],
     ) -> Any:
-        assert self._session is not None
+        assert self._session is not None  # noqa: S101 — narrowed by the connected-state guard above
         try:
             async with self._session.request(
                 method,
@@ -315,5 +321,5 @@ class HttpTransport:
         # right Content-Type but a slightly off body still parse.
         try:
             return json.loads(raw.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
+        except UnicodeDecodeError, json.JSONDecodeError:
             return None

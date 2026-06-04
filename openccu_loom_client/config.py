@@ -30,7 +30,8 @@ DEFAULT_REQUEST_TIMEOUT_SECONDS = 30.0
 
 @dataclass(slots=True, kw_only=True)
 class LoomConfig:
-    """Configuration for connecting to one openccu-loom daemon.
+    """
+    Configuration for connecting to one openccu-loom daemon.
 
     All wire-level transport, auth and resilience knobs live here so the
     rest of the client never has to thread them through call sites.
@@ -51,6 +52,7 @@ class LoomConfig:
     user_agent: str = "py-openccu-loom-client"
 
     def __post_init__(self) -> None:
+        """Default the port from the TLS flag when not explicitly set."""
         if self.port is None:
             object.__setattr__(
                 self,

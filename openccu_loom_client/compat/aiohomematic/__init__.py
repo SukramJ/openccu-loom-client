@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""``aiohomematic``-compatible namespace backed by openccu-loom-client.
+"""
+``aiohomematic``-compatible namespace backed by openccu-loom-client.
 
 This package mirrors the import paths the ``homematicip_local`` Home
 Assistant integration uses today, so the cutover from a direct CCU

@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""Authentication methods supported by the openccu-loom daemon.
+"""
+Authentication methods supported by the openccu-loom daemon.
 
 The daemon's OpenAPI surface (`securitySchemes` in `assets/openapi.yaml`)
 declares three schemes:
@@ -34,7 +35,8 @@ class AuthMethod(ABC):
 
     @abstractmethod
     def apply_to_headers(self, headers: dict[str, str]) -> None:
-        """Mutate ``headers`` in place with whatever this method needs.
+        """
+        Mutate ``headers`` in place with whatever this method needs.
 
         Called once per REST request and once for the WebSocket upgrade
         handshake.
@@ -43,7 +45,8 @@ class AuthMethod(ABC):
     @property
     @abstractmethod
     def identity_hint(self) -> str:
-        """Human-readable hint identifying this credential.
+        """
+        Human-readable hint identifying this credential.
 
         Used in log lines and error messages — must NEVER include the
         secret itself.
@@ -58,17 +61,20 @@ class BasicAuth(AuthMethod):
     password: str
 
     def apply_to_headers(self, headers: dict[str, str]) -> None:
+        """Attach the Basic ``Authorization`` header for this credential."""
         token = b64encode(f"{self.username}:{self.password}".encode()).decode("ascii")
         headers["Authorization"] = f"Basic {token}"
 
     @property
     def identity_hint(self) -> str:
+        """Return a log-safe identity hint for this Basic credential."""
         return f"basic:{self.username}"
 
 
 @dataclass(frozen=True, slots=True)
 class BearerAuth(AuthMethod):
-    """HTTP Bearer auth — API token issued by the daemon.
+    """
+    HTTP Bearer auth — API token issued by the daemon.
 
     Tokens are opaque from the client's perspective; the daemon
     validates them against its token store. ``label`` is just a local
@@ -80,10 +86,12 @@ class BearerAuth(AuthMethod):
     label: str = "bearer"
 
     def apply_to_headers(self, headers: dict[str, str]) -> None:
+        """Attach the Bearer ``Authorization`` header for this token."""
         headers["Authorization"] = f"Bearer {self.token}"
 
     @property
     def identity_hint(self) -> str:
+        """Return a log-safe identity hint exposing only the token suffix."""
         # Last six chars only — same convention the daemon uses when
         # listing tokens via GET /auth/tokens.
         suffix = (
@@ -96,7 +104,8 @@ class BearerAuth(AuthMethod):
 
 @dataclass(frozen=True, slots=True)
 class SessionAuth(AuthMethod):
-    """Cookie-based session issued by POST /auth/login.
+    """
+    Cookie-based session issued by POST /auth/login.
 
     The cookie value is supplied by the caller after they've performed
     the login round-trip; this auth method just attaches it to outgoing
@@ -108,10 +117,12 @@ class SessionAuth(AuthMethod):
     cookie_name: str = "openccu_loom_session"
 
     def apply_to_headers(self, headers: dict[str, str]) -> None:
+        """Append the session cookie to the outgoing ``Cookie`` header."""
         existing = headers.get("Cookie", "")
         pair = f"{self.cookie_name}={self.cookie_value}"
         headers["Cookie"] = f"{existing}; {pair}" if existing else pair
 
     @property
     def identity_hint(self) -> str:
+        """Return a log-safe identity hint for this session cookie."""
         return f"session:{self.cookie_name}"

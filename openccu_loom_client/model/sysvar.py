@@ -14,7 +14,8 @@ if TYPE_CHECKING:
 
 
 class Sysvar:
-    """Store-aware wrapper around one CCU system variable.
+    """
+    Store-aware wrapper around one CCU system variable.
 
     Sysvars are hub-level typed values exposed by the daemon —
     similar to data-points, but not tied to a specific device.
@@ -25,19 +26,23 @@ class Sysvar:
     __slots__ = ("_store", "_summary")
 
     def __init__(self, *, summary: SysvarSummary, store: LoomStore) -> None:
+        """Bind this wrapper to its wire summary and owning store."""
         self._summary = summary
         self._store = store
 
     @property
     def summary(self) -> SysvarSummary:
+        """Return the backing wire summary."""
         return self._summary
 
     @property
     def name(self) -> str:
+        """Return the sysvar's name."""
         return self._summary.name
 
     @property
     def value(self) -> Any:
+        """Return the sysvar's current runtime value."""
         return self._summary.value
 
     @property
@@ -47,22 +52,27 @@ class Sysvar:
 
     @property
     def unit(self) -> str | None:
+        """Return the value's unit, or ``None`` if dimensionless."""
         return self._summary.unit
 
     @property
     def description(self) -> str | None:
+        """Return the sysvar's description, or ``None`` if unset."""
         return self._summary.description
 
     @property
     def value_list(self) -> tuple[str, ...]:
+        """Return the enum value labels, empty for non-enum sysvars."""
         return tuple(self._summary.value_list or ())
 
     @property
     def is_observed(self) -> bool:
+        """Return whether the daemon streams updates for this sysvar."""
         return self._summary.observed
 
     async def set_value(self, value: Any) -> None:
-        """Write a new runtime value to this sysvar.
+        """
+        Write a new runtime value to this sysvar.
 
         Wire: ``PUT /sysvars/{name}`` via :meth:`LoomStore.set_sysvar`.
         """
@@ -72,4 +82,5 @@ class Sysvar:
         self._summary = summary
 
     def __repr__(self) -> str:
+        """Return a debug representation with name, value and type."""
         return f"Sysvar(name={self.name!r}, value={self.value!r}, type={self.value_type!r})"

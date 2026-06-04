@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""Wire-level transports for the openccu-loom daemon.
+"""
+Wire-level transports for the openccu-loom daemon.
 
 Two transports live here:
 

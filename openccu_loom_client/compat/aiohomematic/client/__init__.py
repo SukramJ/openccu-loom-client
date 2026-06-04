@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""``aiohomematic.client`` shim — only ``InterfaceConfig`` is used externally.
+"""
+``aiohomematic.client`` shim — only ``InterfaceConfig`` is used externally.
 
 In the original library, ``InterfaceConfig`` configured one of the
 CCU-side XML-RPC interfaces (port, callback host, …). The daemon now
@@ -21,7 +22,8 @@ from openccu_loom_types.enums import Interface
 
 @dataclass(slots=True)
 class InterfaceConfig:
-    """Per-interface configuration carried from HA's config entry.
+    """
+    Per-interface configuration carried from HA's config entry.
 
     Surface parity with ``aiohomematic.client.InterfaceConfig`` so the
     config-flow code path stays unchanged during the cutover. The

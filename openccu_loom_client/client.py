@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""High-level :class:`LoomClient` — facade over transport + store + bus.
+"""
+High-level :class:`LoomClient` — facade over transport + store + bus.
 
 The client is the single object Home Assistant (and any other
 consumer) interacts with. It composes:
@@ -37,9 +38,9 @@ Usage::
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterable
 import contextlib
 import logging
-from collections.abc import Iterable
 from typing import TYPE_CHECKING, Final, Self
 
 from openccu_loom_client.bridge import bind_ws_events_to_store
@@ -95,13 +96,13 @@ class LoomClient:
         http_transport: HttpTransport | None = None,
         ws_transport: WsTransport | None = None,
     ) -> None:
+        """Compose the store, bus, transports and operation façades."""
         self._config: Final = config
         self._http: Final = http_transport or HttpTransport(config)
         self._store: Final = store or LoomStore(transport=self._http)
         # Ensure the store always has the transport reference — important
-        # when the caller injects a pre-built store.
-        if self._store is not None and self._store is not LoomStore:
-            self._store.set_transport(self._http)
+        # when the caller injects a pre-built store built without one.
+        self._store.set_transport(self._http)
         self._bus: Final = bus or EventBus()
         self._ws_transport_external: Final = ws_transport
         self._ws: WsTransport | None = ws_transport
@@ -133,19 +134,23 @@ class LoomClient:
 
     @property
     def store(self) -> LoomStore:
+        """Return the in-memory mirror of the daemon's CCU model."""
         return self._store
 
     @property
     def events(self) -> EventBus:
+        """Return the event bus that fans out typed daemon events."""
         return self._bus
 
     @property
     def config(self) -> LoomConfig:
+        """Return the connection configuration for this client."""
         return self._config
 
     # ---- async context manager ----
 
     async def __aenter__(self) -> Self:
+        """Connect on context entry and return the client."""
         await self.connect()
         return self
 
@@ -155,6 +160,7 @@ class LoomClient:
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
+        """Close the client on context exit."""
         await self.close()
 
     # ---- lifecycle ----
@@ -164,7 +170,8 @@ class LoomClient:
         *,
         required_capabilities: Iterable[str] = (),
     ) -> None:
-        """Open the HTTP session and run the capability handshake.
+        """
+        Open the HTTP session and run the capability handshake.
 
         Does NOT start the WS event stream — call :meth:`start_events`
         explicitly so callers can choose between snapshot-only mode
@@ -173,7 +180,8 @@ class LoomClient:
         await self._http.connect(required_capabilities=required_capabilities)
 
     async def bootstrap(self, *, fetch_data_points: bool = True) -> None:
-        """Populate the store from the daemon's current state.
+        """
+        Populate the store from the daemon's current state.
 
         Steps:
 
@@ -233,7 +241,8 @@ class LoomClient:
         *,
         subscriptions: Iterable[str] | None = None,
     ) -> None:
-        """Open the WS event stream and wire it to the store + bus.
+        """
+        Open the WS event stream and wire it to the store + bus.
 
         Idempotent: re-calling is a no-op while the loop is alive.
         """
@@ -278,7 +287,7 @@ class LoomClient:
 
     async def _dispatch_loop(self) -> None:
         """Pump WsEnvelope → typed event → EventBus."""
-        assert self._ws is not None
+        assert self._ws is not None  # noqa: S101 — invariant: dispatch loop runs only after start_events()
         try:
             async for envelope in self._ws.events():
                 event = event_from_envelope(envelope)
@@ -289,12 +298,13 @@ class LoomClient:
             _LOGGER.exception("WS dispatch loop crashed")
 
     async def _on_replay_lost(self, oldest_seq: int) -> None:
-        """Called by the WS transport when the daemon's replay buffer
-        aged the events out. The client triggers a fresh bootstrap
-        so the store re-syncs against /snapshot.
+        """
+        Re-bootstrap the store after the daemon's replay buffer aged out.
 
-        Background-runs on the WS reader task so it doesn't block
-        the next frame.
+        Called by the WS transport when the requested events are no longer
+        replayable; triggers a fresh bootstrap so the store re-syncs against
+        ``/snapshot``. Background-runs on the WS reader task so it doesn't
+        block the next frame.
         """
         _LOGGER.warning(
             "WS replay lost (oldest_seq=%s) — re-bootstrapping store",

@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""``aiohomematic.model.custom`` — categorised Custom-DP classes.
+"""
+``aiohomematic.model.custom`` — categorised Custom-DP classes.
 
 The daemon collapses a device's multi-parameter wiring into one Custom
 Data Point per function (light, cover, climate, lock, siren, switch,
@@ -41,7 +42,8 @@ if TYPE_CHECKING:
 
 
 def custom_unique_id(*, serial_suffix: str, device_address: str, channel_no: int) -> str:
-    """Canonical HA unique id for a Custom-DP, matched by the refresh bridge.
+    """
+    Canonical HA unique id for a Custom-DP, matched by the refresh bridge.
 
     aiohomematic builds a custom data point's ``unique_id`` from its
     *primary channel address* (no parameter); the daemon's ``channel_no``
@@ -55,7 +57,8 @@ def custom_unique_id(*, serial_suffix: str, device_address: str, channel_no: int
 
 
 class _Capabilities:
-    """Attribute-access view over the daemon's ``capabilities`` flag map.
+    """
+    Attribute-access view over the daemon's ``capabilities`` flag map.
 
     HA reads capability flags as attributes (``dp.capabilities.brightness``,
     ``.color``, ``.profiles``, ``.open``, ``.tones`` …). Unknown flags
@@ -101,11 +104,13 @@ class _CustomEntitySurface(CustomDataPoint):
 
     @property
     def category(self) -> DataPointCategory:
+        """Return the HA data-point category from the daemon string, else the class default."""
         # Prefer the daemon's category string; fall back to the class default.
         return _CATEGORY_BY_STRING.get(self._summary.category or "", self._category)
 
     @property
     def unique_id(self) -> str:
+        """Return the canonical HA unique id derived from the primary channel address."""
         return custom_unique_id(
             serial_suffix=self._store.serial_suffix,
             device_address=self._device_address,
@@ -114,49 +119,58 @@ class _CustomEntitySurface(CustomDataPoint):
 
     @property
     def full_name(self) -> str:
+        """Return the display name as ``<device name> <data-point name>``."""
         device = self.device
         device_name = device.name if device is not None else self._device_address
         return f"{device_name} {self.name}"
 
     @property
     def central(self) -> Any:
+        """Return the owning central unit; always ``None`` under the daemon model."""
         return None
 
     @property
     def is_valid(self) -> bool:
+        """Return whether a non-empty ``state`` has been received."""
         return bool(self._state)
 
     @property
     def available(self) -> bool:
+        """Return the owning device's availability, defaulting to ``True`` when unknown."""
         device = self.device
         return bool(device.available) if device is not None else True
 
     @property
     def state_uncertain(self) -> bool:
+        """Return the ``state_uncertain`` flag from the state dict."""
         return bool(self._state.get("state_uncertain", False))
 
     @property
     def enabled_default(self) -> bool:
+        """Return whether the entity is enabled by default; always ``True``."""
         return True
 
     @property
     def capabilities(self) -> _Capabilities:
+        """Return an attribute-access view over the summary's capability flags."""
         return _Capabilities(self._summary.capabilities)
 
     @property
     def is_registered(self) -> bool:
+        """Return whether the entity has been registered with HA."""
         return getattr(self, "_registered", False)
 
     def register(self) -> None:
+        """Mark the entity as registered with HA."""
         self._registered = True
 
     def unregister(self) -> None:
+        """Mark the entity as no longer registered with HA."""
         self._registered = False
 
     async def load_data_point_value(self, *, call_source: Any = None) -> None:
-        await self._store.refresh_custom_data_point(
-            address=self._device_address, name=self.name
-        )
+        """Refresh this custom data point's state from the daemon."""
+        await self._store.refresh_custom_data_point(address=self._device_address, name=self.name)
 
 
 # ---- switch ----
@@ -169,22 +183,27 @@ class CustomDpSwitch(_CustomEntitySurface):
 
     @property
     def value(self) -> bool | None:
+        """Return the raw ``is_on`` state value, or ``None`` if unknown."""
         return self._state.get("is_on")
 
     @property
     def is_on(self) -> bool:
+        """Return whether the switch is on, from the ``is_on`` state key."""
         return bool(self._state.get("is_on"))
 
     @property
     def group_value(self) -> Any:
+        """Return the group-channel aggregate; always ``None`` under the daemon model."""
         # aiohomematic exposes a group-channel aggregate here; the daemon
         # collapses that server-side, so there is no separate group value.
         return None
 
     async def turn_on(self, **_kwargs: Any) -> None:
+        """Turn the switch on."""
         await self.invoke("turn_on")
 
     async def turn_off(self, **_kwargs: Any) -> None:
+        """Turn the switch off."""
         await self.invoke("turn_off")
 
     async def set_timer_on_time(self, *, on_time: float) -> None:
@@ -202,22 +221,27 @@ class CustomDpDimmer(_CustomEntitySurface):
 
     @property
     def is_on(self) -> bool:
+        """Return whether the light is on, from the ``state`` key ("ON"/"OFF")."""
         return str(self._state.get("state", "OFF")).upper() == "ON"
 
     @property
     def brightness(self) -> int | None:
+        """Return the brightness (0-255) from the ``brightness`` state key, or ``None``."""
         return _as_int(self._state.get("brightness"))
 
     @property
     def has_color_temperature(self) -> bool:
+        """Return whether the light supports colour temperature."""
         return self.capabilities.color_temp
 
     @property
     def has_hs_color(self) -> bool:
+        """Return whether the light supports hue/saturation colour."""
         return self.capabilities.color
 
     @property
     def has_effects(self) -> bool:
+        """Return whether the light supports effects."""
         return self.capabilities.effects
 
     # Colour / effect state is not carried in the daemon's light CDP
@@ -225,41 +249,50 @@ class CustomDpDimmer(_CustomEntitySurface):
     # daemon surfaces them. Writes still drive the daemon set_* ops.
     @property
     def color_temp_kelvin(self) -> int | None:
+        """Return the colour temperature in kelvin, or ``None`` if not surfaced."""
         return _as_int(self._state.get("color_temp_kelvin"))
 
     @property
     def hs_color(self) -> tuple[float, float] | None:
+        """Return the ``(hue, saturation)`` colour, or ``None`` if either is unknown."""
         hue = _as_float(self._state.get("hue"))
         sat = _as_float(self._state.get("saturation"))
         return (hue, sat) if hue is not None and sat is not None else None
 
     @property
     def effect(self) -> str | None:
+        """Return the active effect name, or ``None`` if not set."""
         val = self._state.get("effect")
         return str(val) if val is not None else None
 
     @property
     def effects(self) -> tuple[str, ...]:
+        """Return the available effect names from the ``effects`` state key."""
         raw = self._state.get("effects") or ()
         return tuple(str(e) for e in raw)
 
     @property
     def last_level(self) -> int:
+        """Return the last known brightness (0-255), defaulting to 0."""
         return _as_int(self._state.get("brightness")) or 0
 
     @staticmethod
     def level_to_brightness(level: float) -> int:
+        """Convert a level (0.0-1.0) to a brightness value (0-255)."""
         return round(level * 255)
 
     @staticmethod
     def brightness_to_level(brightness: int) -> float:
+        """Convert a brightness value (0-255) to a level (0.0-1.0)."""
         return brightness / 255.0
 
     def set_last_level(self, value: int) -> None:
+        """Store the last brightness for HA-side restore; performs no daemon write."""
         # Last-brightness restore is HA-side bookkeeping; no daemon write.
         self._state["brightness"] = value
 
     async def set_timer_on_time(self, *, on_time: float) -> None:
+        """Turn on for a fixed duration in seconds."""
         await self.invoke("set_timer_on_time", params={"seconds": float(on_time)})
 
     async def turn_on(
@@ -271,10 +304,9 @@ class CustomDpDimmer(_CustomEntitySurface):
         effect: str | None = None,
         **_kwargs: Any,
     ) -> None:
+        """Turn the light on, optionally setting brightness, colour, kelvin, or effect."""
         if hs_color is not None:
-            await self.invoke(
-                "set_color", params={"hue": hs_color[0], "saturation": hs_color[1]}
-            )
+            await self.invoke("set_color", params={"hue": hs_color[0], "saturation": hs_color[1]})
         if color_temp_kelvin is not None:
             await self.invoke("set_kelvin", params={"kelvin": int(color_temp_kelvin)})
         if effect is not None:
@@ -285,9 +317,11 @@ class CustomDpDimmer(_CustomEntitySurface):
             await self.invoke("turn_on")
 
     async def turn_off(self, **_kwargs: Any) -> None:
+        """Turn the light off."""
         await self.invoke("turn_off")
 
     async def set_brightness(self, brightness: int) -> None:
+        """Set the light brightness (0-255)."""
         await self.invoke("set_level", params={"brightness": int(brightness)})
 
 
@@ -309,38 +343,51 @@ class CustomDpCover(_CustomEntitySurface):
 
     @property
     def current_position(self) -> int | None:
+        """Return the current position (0-100) from ``current_position``, or ``None``."""
         return _as_int(self._state.get("current_position"))
 
     @property
     def current_channel_position(self) -> int | None:
+        """Return the current position; alias of :attr:`current_position`."""
         return self.current_position
 
     @property
     def _state_token(self) -> str:
+        """Return the lower-cased ``state`` token (e.g. "closed"/"opening")."""
         return str(self._state.get("state", "")).lower()
 
     @property
     def is_closed(self) -> bool:
+        """Return whether the cover is closed, from position 0 or the ``state`` token."""
         pos = self.current_position
         if pos is not None:
             return pos == 0
-        return self._state_token == "closed"
+        return self._state_token == "closed"  # noqa: S105 # nosec B105 — cover state token, not a secret
 
     @property
     def is_opening(self) -> bool:
-        return self._state.get("direction") == "opening" or self._state_token == "opening"
+        """Return whether the cover is opening, from ``direction`` or the ``state`` token."""
+        if self._state.get("direction") == "opening":
+            return True
+        return self._state_token == "opening"  # noqa: S105 # nosec B105 — cover state token, not a secret
 
     @property
     def is_closing(self) -> bool:
-        return self._state.get("direction") == "closing" or self._state_token == "closing"
+        """Return whether the cover is closing, from ``direction`` or the ``state`` token."""
+        if self._state.get("direction") == "closing":
+            return True
+        return self._state_token == "closing"  # noqa: S105 # nosec B105 — cover state token, not a secret
 
     async def open(self) -> None:
+        """Open the cover fully."""
         await self.invoke("open")
 
     async def close(self) -> None:
+        """Close the cover fully."""
         await self.invoke("close")
 
     async def stop(self) -> None:
+        """Stop cover movement."""
         await self.invoke("stop")
 
     async def set_position(
@@ -350,6 +397,7 @@ class CustomDpCover(_CustomEntitySurface):
         collector: Any = None,
         **_kwargs: Any,
     ) -> None:
+        """Move the cover to the given position (0-100)."""
         await self.invoke("set_position", params={"position": position / 100.0})
 
 
@@ -358,10 +406,12 @@ class CustomDpBlind(CustomDpCover):
 
     @property
     def current_tilt_position(self) -> int | None:
+        """Return the current tilt position (0-100) from ``current_tilt_position``, or ``None``."""
         return _as_int(self._state.get("current_tilt_position"))
 
     @property
     def current_channel_tilt_position(self) -> int | None:
+        """Return the current tilt position; alias of :attr:`current_tilt_position`."""
         return self.current_tilt_position
 
     async def set_position(
@@ -371,20 +421,25 @@ class CustomDpBlind(CustomDpCover):
         collector: Any = None,
         **_kwargs: Any,
     ) -> None:
+        """Move the cover to the given position (0-100) and optional tilt position (0-100)."""
         await self.invoke("set_position", params={"position": position / 100.0})
         if tilt_position is not None:
             await self.invoke("set_tilt", params={"tilt": tilt_position / 100.0})
 
     async def set_tilt_position(self, tilt_position: int) -> None:
+        """Set the tilt position (0-100)."""
         await self.invoke("set_tilt", params={"tilt": tilt_position / 100.0})
 
     async def open_tilt(self) -> None:
+        """Open the tilt fully."""
         await self.invoke("open_tilt")
 
     async def close_tilt(self) -> None:
+        """Close the tilt fully."""
         await self.invoke("close_tilt")
 
     async def stop_tilt(self) -> None:
+        """Stop tilt movement."""
         await self.invoke("stop_tilt")
 
 
@@ -393,6 +448,7 @@ class CustomDpIpBlind(CustomDpBlind):
 
     @property
     def operation_mode(self) -> str | None:
+        """Return the operation mode from the ``operation_mode`` state key, or ``None``."""
         val = self._state.get("operation_mode")
         return str(val) if val is not None else None
 
@@ -401,6 +457,7 @@ class CustomDpGarage(CustomDpCover):
     """Garage-door CDP."""
 
     async def ventilate(self) -> None:
+        """Move the garage door to its ventilation position."""
         await self.invoke("ventilate")
 
 
@@ -408,7 +465,8 @@ class CustomDpGarage(CustomDpCover):
 
 
 class BaseCustomDpClimate(_CustomEntitySurface):
-    """Thermostat CDP.
+    """
+    Thermostat CDP.
 
     ``hvac_mode``/``preset_mode``/``action`` come straight from the
     daemon's climate state. Current/target temperature are read from the
@@ -420,46 +478,56 @@ class BaseCustomDpClimate(_CustomEntitySurface):
 
     @property
     def hvac_mode(self) -> str:
+        """Return the HVAC mode from the ``hvac_mode`` state key, defaulting to "off"."""
         return str(self._state.get("hvac_mode", "off"))
 
     @property
     def preset_mode(self) -> str:
+        """Return the preset mode from the ``preset_mode`` state key, defaulting to "none"."""
         return str(self._state.get("preset_mode", "none"))
 
     @property
     def action(self) -> str | None:
+        """Return the current HVAC action from the ``action`` state key, or ``None``."""
         val = self._state.get("action")
         return str(val) if val is not None else None
 
     @property
     def current_temperature(self) -> float | None:
+        """Return the measured temperature from ``current_temperature``, or ``None``."""
         val = self._state.get("current_temperature")
         return float(val) if isinstance(val, (int, float)) else None
 
     @property
     def target_temperature(self) -> float | None:
+        """Return the target temperature from ``set_temperature``/``target_temperature``, or ``None``."""
         val = self._state.get("set_temperature", self._state.get("target_temperature"))
         return float(val) if isinstance(val, (int, float)) else None
 
     @property
     def current_humidity(self) -> int | None:
+        """Return the measured humidity from the ``current_humidity`` state key, or ``None``."""
         return _as_int(self._state.get("current_humidity"))
 
     @property
     def temperature_offset(self) -> str | None:
+        """Return the temperature offset from the ``temperature_offset`` state key, or ``None``."""
         val = self._state.get("temperature_offset")
         return str(val) if val is not None else None
 
     @property
     def min_temp(self) -> float:
+        """Return the minimum settable temperature, defaulting to 4.5."""
         return _as_float(self._state.get("min_temp")) or 4.5
 
     @property
     def max_temp(self) -> float:
+        """Return the maximum settable temperature, defaulting to 30.5."""
         return _as_float(self._state.get("max_temp")) or 30.5
 
     @property
     def target_temperature_step(self) -> float:
+        """Return the temperature step, defaulting to 0.5."""
         return _as_float(self._state.get("target_temperature_step")) or 0.5
 
     # ``mode``/``activity``/``profile`` are returned as the daemon's
@@ -467,51 +535,58 @@ class BaseCustomDpClimate(_CustomEntitySurface):
     # aiohomematic's Climate* enums should compare by ``.value``.
     @property
     def mode(self) -> str:
+        """Return the HVAC mode; alias of :attr:`hvac_mode`."""
         return self.hvac_mode
 
     @property
     def modes(self) -> tuple[str, ...]:
+        """Return the available HVAC modes from the ``hvac_modes`` state key."""
         raw = self._state.get("hvac_modes") or ()
         return tuple(str(m) for m in raw)
 
     @property
     def activity(self) -> str | None:
+        """Return the current HVAC action; alias of :attr:`action`."""
         return self.action
 
     @property
     def profile(self) -> str:
+        """Return the active profile; alias of :attr:`preset_mode`."""
         return self.preset_mode
 
     @property
     def profiles(self) -> tuple[str, ...]:
+        """Return the available profiles from the ``available_profiles`` state key."""
         raw = self._state.get("available_profiles") or ()
         return tuple(str(p) for p in raw)
 
     async def set_temperature(self, temperature: float) -> None:
+        """Set the target temperature."""
         await self.invoke("set_temperature", params={"temperature": float(temperature)})
 
     async def set_mode(self, mode: str) -> None:
+        """Set the HVAC mode."""
         await self.invoke("set_mode", params={"mode": str(mode)})
 
     async def set_profile(self, profile: str) -> None:
+        """Set the active profile."""
         await self.invoke("set_profile", params={"profile": str(profile)})
 
-    async def enable_away_mode_by_duration(
-        self, hours: int, away_temperature: float
-    ) -> None:
-        await self.invoke(
-            "enable_away", params={"hours": hours, "temperature": away_temperature}
-        )
+    async def enable_away_mode_by_duration(self, hours: int, away_temperature: float) -> None:
+        """Enable away mode for a number of hours at the given temperature."""
+        await self.invoke("enable_away", params={"hours": hours, "temperature": away_temperature})
 
     async def enable_away_mode_by_calendar(
         self, start: Any, end: Any, away_temperature: float
     ) -> None:
+        """Enable away mode between the given start and end at the given temperature."""
         await self.invoke(
             "enable_away",
             params={"start": start, "end": end, "temperature": away_temperature},
         )
 
     async def disable_away_mode(self) -> None:
+        """Disable away mode."""
         await self.invoke("disable_away")
 
 
@@ -537,27 +612,34 @@ class BaseCustomDpLock(_CustomEntitySurface):
 
     @property
     def is_locked(self) -> bool:
+        """Return whether the lock is locked, from the ``is_locked`` state key."""
         return bool(self._state.get("is_locked"))
 
     @property
     def is_locking(self) -> bool:
+        """Return whether the lock is currently locking, from the ``is_locking`` state key."""
         return bool(self._state.get("is_locking"))
 
     @property
     def is_unlocking(self) -> bool:
+        """Return whether the lock is currently unlocking, from the ``is_unlocking`` state key."""
         return bool(self._state.get("is_unlocking"))
 
     @property
     def is_jammed(self) -> bool:
+        """Return whether the lock is jammed, from the ``is_jammed`` state key."""
         return bool(self._state.get("is_jammed"))
 
     async def lock(self) -> None:
+        """Lock the device."""
         await self.invoke("lock")
 
     async def unlock(self) -> None:
+        """Unlock the device."""
         await self.invoke("unlock")
 
     async def open(self) -> None:
+        """Open (release) the lock latch."""
         await self.invoke("open")
 
 
@@ -568,6 +650,7 @@ class PlaySoundArgs:
     """Container for play-sound parameters; mirrors aiohomematic shape."""
 
     def __init__(self, *, sound: str, duration: int | None = None) -> None:
+        """Store the sound name and optional duration."""
         self.sound = sound
         self.duration = duration
 
@@ -576,6 +659,7 @@ class SirenOnArgs:
     """Container for siren-on parameters."""
 
     def __init__(self, *, sound: str | None = None, duration: int | None = None) -> None:
+        """Store the optional sound name and optional duration."""
         self.sound = sound
         self.duration = duration
 
@@ -587,20 +671,25 @@ class BaseCustomDpSiren(_CustomEntitySurface):
 
     @property
     def is_on(self) -> bool:
+        """Return whether the siren is on, from the ``state`` key ("on"/"off")."""
         return str(self._state.get("state", "off")).lower() == "on"
 
     @property
     def available_tones(self) -> Any:
+        """Return the available tones from the ``available_tones`` state key."""
         return self._state.get("available_tones") or {}
 
     @property
     def available_lights(self) -> Any:
+        """Return the available light patterns from the ``available_lights`` state key."""
         return self._state.get("available_lights") or {}
 
     async def turn_on(self, **params: Any) -> None:
+        """Turn the siren on, passing through any tone/light/duration params."""
         await self.invoke("turn_on", params=params or None)
 
     async def turn_off(self) -> None:
+        """Turn the siren off."""
         await self.invoke("turn_off")
 
 
@@ -609,17 +698,21 @@ class CustomDpSoundPlayer(BaseCustomDpSiren):
 
     @property
     def available_soundfiles(self) -> Any:
+        """Return the available sound files from the ``available_soundfiles`` state key."""
         return self._state.get("available_soundfiles") or {}
 
     @property
     def current_soundfile(self) -> str | None:
+        """Return the current sound file from the ``current_soundfile`` state key, or ``None``."""
         val = self._state.get("current_soundfile")
         return str(val) if val is not None else None
 
     async def play_sound(self, **params: Any) -> None:
+        """Play a sound, passing through any sound/duration params."""
         await self.invoke("turn_on", params=params or None)
 
     async def stop_sound(self) -> None:
+        """Stop sound playback."""
         await self.invoke("turn_off")
 
 
@@ -633,23 +726,29 @@ class CustomDpIpIrrigationValve(_CustomEntitySurface):
 
     @property
     def value(self) -> bool:
+        """Return whether the valve is open, from the ``is_open`` state key."""
         return bool(self._state.get("is_open"))
 
     @property
     def is_open(self) -> bool:
+        """Return whether the valve is open, from the ``is_open`` state key."""
         return bool(self._state.get("is_open"))
 
     @property
     def group_value(self) -> Any:
+        """Return the group-channel aggregate; always ``None`` under the daemon model."""
         return None
 
     async def open(self) -> None:
+        """Open the valve."""
         await self.invoke("open")
 
     async def close(self) -> None:
+        """Close the valve."""
         await self.invoke("close")
 
     async def set_timer_on_time(self, *, on_time: float) -> None:
+        """Open the valve for a fixed duration in seconds."""
         await self.invoke("open", params={"duration": float(on_time)})
 
 
@@ -662,9 +761,11 @@ class CustomDpTextDisplay(_CustomEntitySurface):
     _category: ClassVar[DataPointCategory] = DataPointCategory.TextDisplay
 
     async def write(self, **params: Any) -> None:
+        """Write text to the display, passing through line/content params."""
         await self.invoke("write", params=params or None)
 
     async def clear(self) -> None:
+        """Clear the display."""
         await self.invoke("clear")
 
 
@@ -705,9 +806,7 @@ _CATEGORY_FALLBACK: dict[str, type[_CustomEntitySurface]] = {
 }
 
 
-def resolve_custom_class(
-    *, kind: str | None, category: str | None
-) -> type[_CustomEntitySurface]:
+def resolve_custom_class(*, kind: str | None, category: str | None) -> type[_CustomEntitySurface]:
     """Pick the ``CustomDp*`` class from the daemon's kind / category."""
     if kind and kind in _KIND_TO_CLASS:
         return _KIND_TO_CLASS[kind]

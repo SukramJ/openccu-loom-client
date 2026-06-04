@@ -7,12 +7,9 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
 from openccu_loom_types.rest import CustomDPSummary
-from openccu_loom_types.ws import (
-    CustomDataPointStateChangedPayload,
-    DeviceRemovedPayload,
-)
+from openccu_loom_types.ws import CustomDataPointStateChangedPayload, DeviceRemovedPayload
+import pytest
 
 from openccu_loom_client.operations import CustomDataPointsOperations
 from openccu_loom_client.store import LoomStore
@@ -62,9 +59,7 @@ class TestAttachAndQuery:
             "b",
         }
         # Re-attach with a different set — old entries vanish.
-        store.attach_custom_data_points(
-            device_address="VCU0001", cdps=[_cdp_summary(name="c")]
-        )
+        store.attach_custom_data_points(device_address="VCU0001", cdps=[_cdp_summary(name="c")])
         names = {c.name for c in store.custom_data_points_of(address="VCU0001")}
         assert names == {"c"}
 
@@ -76,9 +71,7 @@ class TestAttachAndQuery:
 class TestStateUpdates:
     def test_apply_state_changed_overwrites_state(self) -> None:
         store = LoomStore()
-        store.attach_custom_data_points(
-            device_address="VCU0001", cdps=[_cdp_summary(name="main")]
-        )
+        store.attach_custom_data_points(device_address="VCU0001", cdps=[_cdp_summary(name="main")])
         cdp = store.get_custom_data_point(address="VCU0001", name="main")
         assert cdp is not None
         assert cdp.state == {}
@@ -113,9 +106,7 @@ class TestStateUpdates:
     def test_state_property_is_defensive_copy(self) -> None:
         """Callers can't mutate the store's record through the returned dict."""
         store = LoomStore()
-        store.attach_custom_data_points(
-            device_address="VCU0001", cdps=[_cdp_summary()]
-        )
+        store.attach_custom_data_points(device_address="VCU0001", cdps=[_cdp_summary()])
         store.apply_custom_data_point_state_changed(
             CustomDataPointStateChangedPayload.model_validate(
                 {
@@ -152,9 +143,7 @@ class TestInvoke:
     async def test_invoke_round_trips_to_transport(self) -> None:
         transport = _FakeTransport()
         store = LoomStore(transport=transport)  # type: ignore[arg-type]
-        store.attach_custom_data_points(
-            device_address="VCU0001", cdps=[_cdp_summary(name="main")]
-        )
+        store.attach_custom_data_points(device_address="VCU0001", cdps=[_cdp_summary(name="main")])
         cdp = store.get_custom_data_point(address="VCU0001", name="main")
         assert cdp is not None
         await cdp.invoke("turn_on", params={"level": 0.5}, priority="high")
@@ -168,9 +157,7 @@ class TestInvoke:
     async def test_invoke_without_params(self) -> None:
         transport = _FakeTransport()
         store = LoomStore(transport=transport)  # type: ignore[arg-type]
-        store.attach_custom_data_points(
-            device_address="VCU0001", cdps=[_cdp_summary()]
-        )
+        store.attach_custom_data_points(device_address="VCU0001", cdps=[_cdp_summary()])
         cdp = store.get_custom_data_point(address="VCU0001", name="main")
         assert cdp is not None
         await cdp.invoke("turn_off")
@@ -180,17 +167,13 @@ class TestInvoke:
     async def test_invoke_without_transport_raises(self) -> None:
         store = LoomStore()
         with pytest.raises(RuntimeError):
-            await store.invoke_custom_data_point(
-                address="X", name="y", operation="z"
-            )
+            await store.invoke_custom_data_point(address="X", name="y", operation="z")
 
 
 class TestDeviceRemovalCleansUpCdps:
     def test_remove_device_drops_its_cdps(self) -> None:
         store = LoomStore()
-        store.attach_custom_data_points(
-            device_address="VCU0001", cdps=[_cdp_summary(name="main")]
-        )
+        store.attach_custom_data_points(device_address="VCU0001", cdps=[_cdp_summary(name="main")])
         store.apply_device_removed(
             DeviceRemovedPayload.model_validate(
                 {

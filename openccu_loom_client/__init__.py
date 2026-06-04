@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""Async Python REST + WebSocket client for the openccu-loom daemon.
+"""
+Async Python REST + WebSocket client for the openccu-loom daemon.
 
 The public surface intentionally mirrors what the
 `homematicip_local` Home Assistant integration imports from

@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""Device-scoped REST operations.
+"""
+Device-scoped REST operations.
 
 Maps to the ``/devices`` and ``/devices/{addr}``-rooted endpoints in
 the daemon's OpenAPI surface. Returns parsed Pydantic models from
@@ -32,7 +33,8 @@ class DevicesOperations(_OperationsBase):
     # ---- read ----
 
     async def list_devices(self, *, page: int = 1, per_page: int = 50) -> DeviceList:
-        """Paginated catalogue of registered devices.
+        """
+        Paginated catalogue of registered devices.
 
         Wire: ``GET /devices?page=&per_page=``. Returns the full
         envelope (items + page + per_page + total) so callers can
@@ -46,7 +48,8 @@ class DevicesOperations(_OperationsBase):
         return DeviceList.model_validate(payload)
 
     async def iter_all_devices(self, *, per_page: int = 200) -> list[DeviceSummary]:
-        """Convenience: walk all pages and return one flat list.
+        """
+        Walk all pages and return one flat device list.
 
         Use for bootstrap workflows where the caller wants the
         complete catalogue in one go. For large CCUs prefer
@@ -63,7 +66,8 @@ class DevicesOperations(_OperationsBase):
             page += 1
 
     async def get_device_detail(self, *, address: str) -> DeviceDetail:
-        """One device's full record incl. firmware, availability and channels.
+        """
+        One device's full record incl. firmware, availability and channels.
 
         Wire: ``GET /devices/{addr}``.
         """
@@ -71,13 +75,12 @@ class DevicesOperations(_OperationsBase):
         return DeviceDetail.model_validate(payload)
 
     async def list_channels(self, *, address: str) -> list[ChannelSummary]:
-        """All channels of a device (without their data-points).
+        """
+        All channels of a device (without their data-points).
 
         Wire: ``GET /devices/{addr}/channels``.
         """
-        payload = await self._transport.request(
-            "GET", f"/devices/{address}/channels"
-        )
+        payload = await self._transport.request("GET", f"/devices/{address}/channels")
         return [ChannelSummary.model_validate(c) for c in (payload or [])]
 
     async def list_data_points(
@@ -86,7 +89,8 @@ class DevicesOperations(_OperationsBase):
         address: str,
         channel: int,
     ) -> list[DataPointSummary]:
-        """All data-points of one (device, channel) pair.
+        """
+        All data-points of one (device, channel) pair.
 
         Wire: ``GET /devices/{addr}/channels/{n}/data-points``.
         """
@@ -103,7 +107,8 @@ class DevicesOperations(_OperationsBase):
         channel: int,
         parameter: str,
     ) -> DataPointSummary:
-        """One data-point record (incl. current value, range, type).
+        """
+        One data-point record (incl. current value, range, type).
 
         Wire: ``GET /devices/{addr}/channels/{n}/data-points/{param}``.
         """
@@ -118,7 +123,8 @@ class DevicesOperations(_OperationsBase):
     async def list_calculated_data_points(
         self, *, address: str, channel: int
     ) -> list[CalculatedDPSummary]:
-        """All calculated (derived) data-points on a channel.
+        """
+        All calculated (derived) data-points on a channel.
 
         Wire: ``GET /devices/{addr}/channels/{n}/calc-dps``.
         """
@@ -131,7 +137,8 @@ class DevicesOperations(_OperationsBase):
     async def get_calculated_data_point(
         self, *, address: str, channel: int, name: str
     ) -> CalculatedDPDetail:
-        """One calculated data-point by name (incl. ``depends_on``).
+        """
+        One calculated data-point by name (incl. ``depends_on``).
 
         Wire: ``GET /devices/{addr}/channels/{n}/calc-dps/{name}``.
         """
@@ -144,7 +151,8 @@ class DevicesOperations(_OperationsBase):
     # ---- write / lifecycle ----
 
     async def refresh_all(self) -> None:
-        """Force a CCU re-pull on every interface.
+        """
+        Force a CCU re-pull on every interface.
 
         Wire: ``POST /devices/refresh``. Async on the daemon side;
         the call returns 202.
@@ -152,7 +160,8 @@ class DevicesOperations(_OperationsBase):
         await self._transport.request("POST", "/devices/refresh")
 
     async def patch_device(self, *, address: str, name: str) -> None:
-        """Update a device's mutable metadata (currently just name).
+        """
+        Update a device's mutable metadata (currently just name).
 
         Wire: ``PATCH /devices/{addr}``.
         """
@@ -164,14 +173,16 @@ class DevicesOperations(_OperationsBase):
         )
 
     async def delete_device(self, *, address: str) -> None:
-        """Remove a device from the registry (admin operation).
+        """
+        Remove a device from the registry (admin operation).
 
         Wire: ``DELETE /devices/{addr}``.
         """
         await self._transport.request("DELETE", f"/devices/{address}")
 
     async def update_firmware(self, *, address: str) -> None:
-        """Trigger an OTA firmware update for the device.
+        """
+        Trigger an OTA firmware update for the device.
 
         Wire: ``POST /devices/{addr}/firmware/update``. Never retried —
         the CCU does not handle duplicate update requests gracefully, so
@@ -186,13 +197,12 @@ class DevicesOperations(_OperationsBase):
         )
 
     async def accept_device(self, *, address: str) -> None:
-        """Promote a pending pairing candidate into the registry.
+        """
+        Promote a pending pairing candidate into the registry.
 
         Wire: ``POST /devices/{addr}/accept``.
         """
-        await self._transport.request(
-            "POST", f"/devices/{address}/accept", allow_retry=False
-        )
+        await self._transport.request("POST", f"/devices/{address}/accept", allow_retry=False)
 
     # ---- UI schema / config snapshots ----
 
@@ -206,7 +216,8 @@ class DevicesOperations(_OperationsBase):
         locale: str = "en",
         expert: bool | None = None,
     ) -> dict[str, Any]:
-        """Renderable form descriptor for a channel paramset.
+        """
+        Return the renderable form descriptor for a channel paramset.
 
         Wire: ``GET /devices/{addr}/channels/{n}/ui-schema``.
         """
@@ -225,7 +236,8 @@ class DevicesOperations(_OperationsBase):
     async def export_channel_config(
         self, *, address: str, channel: int, paramset: str = "MASTER"
     ) -> ExportedConfiguration:
-        """Export a channel paramset as a portable snapshot.
+        """
+        Export a channel paramset as a portable snapshot.
 
         Wire: ``GET /devices/{addr}/channels/{n}/config/export``.
         """
@@ -239,7 +251,8 @@ class DevicesOperations(_OperationsBase):
     async def import_channel_config(
         self, *, address: str, channel: int, configuration: ExportedConfiguration
     ) -> None:
-        """Import a previously-exported paramset snapshot.
+        """
+        Import a previously-exported paramset snapshot.
 
         Wire: ``POST /devices/{addr}/channels/{n}/config/import``.
         """

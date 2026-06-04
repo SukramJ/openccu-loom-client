@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""Constants + enums — surface that ``aiohomematic.const`` used to expose.
+"""
+Constants + enums — surface that ``aiohomematic.const`` used to expose.
 
 The values come from ``openccu_loom_types.enums`` where possible (so
 the wire contract stays the single source of truth). The few aliases
@@ -54,7 +55,7 @@ from openccu_loom_types.enums import (
 # ---- config-key constants ----
 
 CONF_USERNAME: Final = "username"
-CONF_PASSWORD: Final = "password"
+CONF_PASSWORD: Final = "password"  # noqa: S105 — config-key name, not a secret
 CONF_HOST: Final = "host"
 CONF_PORT: Final = "port"
 
@@ -85,7 +86,7 @@ DEFAULT_UN_IGNORES: Final[tuple[str, ...]] = ()
 # Listen-on/port sentinels — the daemon owns the actual binding, so
 # these are mostly placeholders for HA-side validation logic that
 # previously compared against the aiohomematic defaults.
-IP_ANY_V4: Final = "0.0.0.0"
+IP_ANY_V4: Final = "0.0.0.0"  # noqa: S104 # nosec B104 — sentinel only; the daemon owns the actual binding
 PORT_ANY: Final = 0
 
 # ---- HA-categorisation helpers ----
@@ -113,7 +114,8 @@ SYSVAR_STATE_PATH_ROOT: Final = "sysvar"
 
 
 class ScheduleProfile:
-    """Placeholder for aiohomematic's ScheduleProfile enum.
+    """
+    Placeholder for aiohomematic's ScheduleProfile enum.
 
     The daemon owns the schedule semantic; HA only needs the
     profile-id strings (``P1`` … ``P6``). Materialise them here so
@@ -147,6 +149,7 @@ class ScheduleTimerConfig:
     """Per-config-entry scheduling tunable (HA-only, daemon doesn't see this)."""
 
     def __init__(self, *, sys_scan_interval: int = 300) -> None:
+        """Store the system-variable scan interval in seconds."""
         self.sys_scan_interval = sys_scan_interval
 
 
@@ -159,6 +162,7 @@ class TimeoutConfig:
         command_retry_max_attempts: int = 3,
         command_throttle_interval: float = 0.0,
     ) -> None:
+        """Store the command retry and throttle tunables."""
         self.command_retry_max_attempts = command_retry_max_attempts
         self.command_throttle_interval = command_throttle_interval
 
@@ -173,6 +177,7 @@ class SystemInformation:
         version: str | None = None,
         available_interfaces: tuple[str, ...] = (),
     ) -> None:
+        """Store the CCU serial, version and available interfaces."""
         self.serial = serial
         self.version = version
         self.available_interfaces = available_interfaces
@@ -193,7 +198,8 @@ _DEFAULT_PORTS: Final[dict[Interface, tuple[int, int]]] = {
 
 
 def get_interface_default_port(*, interface: Interface, tls: bool = False) -> int:
-    """Best-effort default port lookup, kept for HA-config-flow compat.
+    """
+    Best-effort default port lookup, kept for HA-config-flow compat.
 
     Returns 0 when the interface family doesn't have a fixed default
     (CUxD, …). The daemon will surface its actual binding on

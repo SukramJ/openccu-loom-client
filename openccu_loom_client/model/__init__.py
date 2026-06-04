@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""Domain models — store-aware wrappers around the wire-type Pydantic models.
+"""
+Domain models — store-aware wrappers around the wire-type Pydantic models.
 
 The Pydantic models in ``openccu_loom_types.rest`` are flat data
 containers. These classes add the navigation graph (Device → Channels

@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""``aiohomematic.model.data_point`` compatibility.
+"""
+``aiohomematic.model.data_point`` compatibility.
 
 Two symbols are exported:
 
@@ -29,7 +30,8 @@ CallbackDataPoint = DataPoint
 
 
 class CallParameterCollector:
-    """Batch multiple parameter writes into one daemon paramset PUT.
+    """
+    Batch multiple parameter writes into one daemon paramset PUT.
 
     HA-side code that wants atomic multi-DP writes (cover position +
     tilt, light brightness + colour, …) constructs one of these,
@@ -58,6 +60,7 @@ class CallParameterCollector:
         channel: int,
         paramset_key: str = "VALUES",
     ) -> None:
+        """Bind the collector to one channel paramset and start empty."""
         self._datapoints_ops = datapoints_ops
         self._address = address
         self._channel = channel
@@ -70,7 +73,8 @@ class CallParameterCollector:
         self._values[parameter] = value
 
     async def send_data(self) -> None:
-        """Flush every staged value as one paramset PUT.
+        """
+        Flush every staged value as one paramset PUT.
 
         Idempotent: a second call with no new ``add_data`` is a no-op.
         After commit the collector is closed to further mutation.
@@ -86,6 +90,7 @@ class CallParameterCollector:
         self._committed = True
 
     async def __aenter__(self) -> Self:
+        """Enter the context and return the collector for staging writes."""
         return self
 
     async def __aexit__(
@@ -94,6 +99,7 @@ class CallParameterCollector:
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
+        """Flush staged writes on clean exit; propagate on error."""
         # Only flush on clean exit; on error, let the failure propagate.
         if exc_type is None:
             await self.send_data()

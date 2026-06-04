@@ -5,8 +5,8 @@
 
 from __future__ import annotations
 
-import pytest
 from openccu_loom_types.rest import Code, Problem
+import pytest
 
 from openccu_loom_client.exceptions import (
     _CODE_TO_EXCEPTION,
@@ -24,8 +24,10 @@ from openccu_loom_client.exceptions import (
 
 
 def _make_problem(code: Code, *, status: int, title: str = "boom") -> Problem:
-    """Build a Problem that carries BOTH the URI (`type`) and the
-    short `code` field — the daemon emits both on every error, and the
+    """
+    Build a Problem that carries BOTH the URI (`type`) and the short `code` field.
+
+    The daemon emits both on every error, and the
     dispatcher must work even if one is missing.
     """
     return Problem.model_validate(

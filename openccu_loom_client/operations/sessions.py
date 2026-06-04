@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""Edit-lock session REST operations (``/sessions/edit``).
+"""
+Edit-lock session REST operations (``/sessions/edit``).
 
 Cooperative 5-minute edit locks keyed on a resource string, so two
 operators don't clobber each other's config/paramset edits. Bodies are
@@ -19,10 +20,9 @@ from openccu_loom_client.operations._base import _OperationsBase
 class SessionsOperations(_OperationsBase):
     """Acquire / release / refresh / take over cooperative edit locks."""
 
-    async def acquire(
-        self, *, key: str, subject: str | None = None
-    ) -> dict[str, Any]:
-        """Acquire a 5-minute edit lock on a resource key.
+    async def acquire(self, *, key: str, subject: str | None = None) -> dict[str, Any]:
+        """
+        Acquire a 5-minute edit lock on a resource key.
 
         Wire: ``POST /sessions/edit``.
         """
@@ -46,7 +46,8 @@ class SessionsOperations(_OperationsBase):
         return dict(payload or {})
 
     async def take_over(self, *, key: str) -> None:
-        """Force-close another user's edit lock.
+        """
+        Force-close another user's edit lock.
 
         Wire: ``POST /sessions/edit/take-over``.
         """

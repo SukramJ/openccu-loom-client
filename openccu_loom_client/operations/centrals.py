@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""Central (CCU connection) administration REST operations.
+"""
+Central (CCU connection) administration REST operations.
 
 Covers ``/centrals``. The daemon is multi-CCU from day one; each
 :class:`CentralRow` is one persisted CCU connection record.

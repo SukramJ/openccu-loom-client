@@ -13,7 +13,8 @@ from openccu_loom_client.operations._base import _OperationsBase
 
 
 class CustomDataPointsOperations(_OperationsBase):
-    """Wraps the daemon's per-device CDP surface.
+    """
+    Wraps the daemon's per-device CDP surface.
 
     The catalogue (which CDPs a device exposes, their supported
     operations) is fetched via :meth:`list_for_device`; the live
@@ -40,7 +41,8 @@ class CustomDataPointsOperations(_OperationsBase):
         params: dict[str, Any] | None = None,
         priority: str | None = None,
     ) -> None:
-        """Run one CDP operation by path-segment name.
+        """
+        Run one CDP operation by path-segment name.
 
         Wire: ``POST /devices/{addr}/cdps/{name}/{operation}`` with
         a :class:`CustomDPInvokeRequest` (``{params, priority}``).

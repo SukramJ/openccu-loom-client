@@ -7,11 +7,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from openccu_loom_types.rest import (
-    Availability,
-    DeviceSummary,
-    Firmware,
-)
+from openccu_loom_types.rest import Availability, DeviceSummary, Firmware
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -21,7 +17,8 @@ if TYPE_CHECKING:
 
 
 class Device:
-    """Store-aware wrapper around one CCU device.
+    """
+    Store-aware wrapper around one CCU device.
 
     Constructed from a :class:`DeviceSummary` (returned by the
     daemon's ``/snapshot`` or ``/devices`` endpoints). Channels and
@@ -37,6 +34,7 @@ class Device:
     )
 
     def __init__(self, *, summary: DeviceSummary, store: LoomStore) -> None:
+        """Wrap the given device summary against the owning store."""
         self._summary = summary
         self._store = store
         self._firmware: Firmware | None = None
@@ -46,7 +44,8 @@ class Device:
 
     @property
     def summary(self) -> DeviceSummary:
-        """The underlying wire-side summary record.
+        """
+        The underlying wire-side summary record.
 
         Mutated in place when the daemon's view advances (e.g. ``name``
         changes via PATCH, ``available`` flips via lifecycle event).
@@ -57,30 +56,37 @@ class Device:
 
     @property
     def address(self) -> str:
+        """Return the device address."""
         return self._summary.address
 
     @property
     def name(self) -> str:
+        """Return the device name."""
         return self._summary.name
 
     @property
     def model(self) -> str:
+        """Return the device model."""
         return self._summary.model
 
     @property
     def interface(self) -> str:
+        """Return the interface this device is reached through."""
         return self._summary.interface
 
     @property
     def interface_id(self) -> str | None:
+        """Return the interface id, or ``None`` if unknown."""
         return self._summary.interface_id
 
     @property
     def manufacturer(self) -> str | None:
+        """Return the manufacturer, or ``None`` if unknown."""
         return self._summary.manufacturer
 
     @property
     def available(self) -> bool:
+        """Return whether the device is currently available."""
         return self._summary.available
 
     @property
@@ -90,10 +96,12 @@ class Device:
 
     @property
     def firmware(self) -> Firmware | None:
+        """Return the firmware detail, or ``None`` until detail is attached."""
         return self._firmware
 
     @property
     def availability(self) -> Availability | None:
+        """Return the availability detail, or ``None`` until detail is attached."""
         return self._availability
 
     # ---- graph navigation ----
@@ -110,6 +118,7 @@ class Device:
     # ---- mutation hooks (called by the store) ----
 
     def _update_summary(self, summary: DeviceSummary) -> None:
+        """Replace the wire summary in place when the daemon's view advances."""
         self._summary = summary
 
     def _attach_detail(
@@ -118,8 +127,10 @@ class Device:
         firmware: Firmware | None,
         availability: Availability | None,
     ) -> None:
+        """Attach the detail-only firmware and availability records."""
         self._firmware = firmware
         self._availability = availability
 
     def __repr__(self) -> str:
+        """Return the debug representation."""
         return f"Device(address={self.address!r}, model={self.model!r}, name={self.name!r})"

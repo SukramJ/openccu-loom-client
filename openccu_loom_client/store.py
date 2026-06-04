@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""In-memory mirror of the daemon's device / channel / data-point model.
+"""
+In-memory mirror of the daemon's device / channel / data-point model.
 
 The store is the single source of truth for the client's view of the
 CCU state. It's populated by one of two paths:
@@ -27,8 +28,8 @@ component (the future ``LoomClient``) wires WS events → store
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Callable
+import logging
 from typing import TYPE_CHECKING, Any, Final
 
 from aiohomematic_contract import serial_suffix as contract_serial_suffix
@@ -43,14 +44,7 @@ from openccu_loom_types.rest import (
     SysvarSummary,
 )
 
-from openccu_loom_client.model import (
-    Channel,
-    CustomDataPoint,
-    DataPoint,
-    Device,
-    Program,
-    Sysvar,
-)
+from openccu_loom_client.model import Channel, CustomDataPoint, DataPoint, Device, Program, Sysvar
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -73,6 +67,7 @@ class LoomStore:
     """Process-local mirror of one daemon's CCU model."""
 
     def __init__(self, *, transport: HttpTransport | None = None) -> None:
+        """Initialise an empty store, optionally bound to a transport."""
         self._transport = transport
         # The daemon central *name* (``snapshot.interfaces[].central_id``,
         # == ``payload.central``). Used to scope/annotate events, NOT as a
@@ -120,7 +115,8 @@ class LoomStore:
         return self._serial_suffix
 
     def set_serial(self, serial: str | None) -> None:
-        """Record the CCU serial; stored as its canonical suffix.
+        """
+        Record the CCU serial; stored as its canonical suffix.
 
         The serial comes from ``GET /system/ccu`` (``SystemCCUEntry.serial``)
         or is injected by the integration (HA's ``entry.unique_id``).
@@ -130,14 +126,17 @@ class LoomStore:
     # ---- transport wiring ----
 
     def set_transport(self, transport: HttpTransport) -> None:
-        """Attach a transport — used when the store is built before
-        the client opens its session (e.g. integration tests)."""
+        """
+        Attach a transport to the store.
+
+        Used when the store is built before the client opens its session
+        (e.g. integration tests).
+        """
         self._transport = transport
 
-    def set_data_point_factory(
-        self, factory: Callable[..., DataPoint] | None
-    ) -> None:
-        """Install a factory that builds (subclasses of) :class:`DataPoint`.
+    def set_data_point_factory(self, factory: Callable[..., DataPoint] | None) -> None:
+        """
+        Install a factory that builds (subclasses of) :class:`DataPoint`.
 
         Must be set before :meth:`attach_channel_data_points` runs (i.e.
         before bootstrap). The aiohomematic-compat layer uses this to
@@ -164,9 +163,7 @@ class LoomStore:
             store=self,
         )
 
-    def set_custom_data_point_factory(
-        self, factory: Callable[..., CustomDataPoint] | None
-    ) -> None:
+    def set_custom_data_point_factory(self, factory: Callable[..., CustomDataPoint] | None) -> None:
         """Install a factory that builds (subclasses of) :class:`CustomDataPoint`."""
         self._cdp_factory = factory
 
@@ -192,26 +189,24 @@ class LoomStore:
         )
 
     async def refresh_custom_data_point(self, *, address: str, name: str) -> None:
-        """Re-read one CDP's detail from the daemon and apply its state.
+        """
+        Re-read one CDP's detail from the daemon and apply its state.
 
         Backs the compat ``load_data_point_value`` for custom entities.
         No-op without a transport or if the CDP is unknown.
         """
         if self._transport is None:
             return
-        payload = await self._transport.request(
-            "GET", f"/devices/{address}/cdps/{name}"
-        )
+        payload = await self._transport.request("GET", f"/devices/{address}/cdps/{name}")
         cdp = self._cdps.get((address, name))
         if cdp is not None and isinstance(payload, dict):
             state = payload.get("state")
             if isinstance(state, dict):
                 cdp._replace_state(state)
 
-    async def refresh_data_point(
-        self, *, address: str, channel: int, parameter: str
-    ) -> None:
-        """Re-read one data-point's value from the daemon and apply it.
+    async def refresh_data_point(self, *, address: str, channel: int, parameter: str) -> None:
+        """
+        Re-read one data-point's value from the daemon and apply it.
 
         Backs the compat ``load_data_point_value`` call HA makes when an
         entity is added or manually refreshed. No-op if no transport is
@@ -235,14 +230,15 @@ class LoomStore:
         return self._devices.values()
 
     def get_device(self, *, address: str) -> Device | None:
+        """Return the device for the given address, or ``None``."""
         return self._devices.get(address)
 
     def get_channel(self, *, address: str, number: int) -> Channel | None:
+        """Return the channel for the given address and number, or ``None``."""
         return self._channels.get((address, number))
 
-    def get_data_point(
-        self, *, address: str, channel: int, parameter: str
-    ) -> DataPoint | None:
+    def get_data_point(self, *, address: str, channel: int, parameter: str) -> DataPoint | None:
+        """Return the data point for the given address, channel and parameter."""
         return self._data_points.get((address, channel, parameter))
 
     def channels_of(self, *, address: str) -> list[Channel]:
@@ -260,19 +256,14 @@ class LoomStore:
     def data_points_of(self, *, address: str, channel: int) -> list[DataPoint]:
         """All data-points of one (device, channel) pair, sorted by parameter."""
         return sorted(
-            (
-                dp
-                for k, dp in self._data_points.items()
-                if k[0] == address and k[1] == channel
-            ),
+            (dp for k, dp in self._data_points.items() if k[0] == address and k[1] == channel),
             key=lambda dp: dp.parameter,
         )
 
     # ---- custom data points (CDPs) ----
 
-    def get_custom_data_point(
-        self, *, address: str, name: str
-    ) -> CustomDataPoint | None:
+    def get_custom_data_point(self, *, address: str, name: str) -> CustomDataPoint | None:
+        """Return the custom data point for the given address and name."""
         return self._cdps.get((address, name))
 
     @property
@@ -291,18 +282,22 @@ class LoomStore:
 
     @property
     def programs(self) -> Iterable[Program]:
+        """Every program currently known."""
         return self._programs.values()
 
     def get_program(self, *, program_id: str) -> Program | None:
+        """Return the program for the given id, or ``None``."""
         return self._programs.get(program_id)
 
     # ---- sysvars ----
 
     @property
     def sysvars(self) -> Iterable[Sysvar]:
+        """Every system variable currently known."""
         return self._sysvars.values()
 
     def get_sysvar(self, *, name: str) -> Sysvar | None:
+        """Return the system variable for the given name, or ``None``."""
         return self._sysvars.get(name)
 
     # ---- CDP attach ----
@@ -313,7 +308,8 @@ class LoomStore:
         device_address: str,
         cdps: list[CustomDPSummary],
     ) -> None:
-        """Replace the CDP catalogue for one device.
+        """
+        Replace the CDP catalogue for one device.
 
         Used after :meth:`CustomDataPointsOperations.list_for_device`
         during bootstrap. Subsequent state changes attach via
@@ -332,7 +328,8 @@ class LoomStore:
     # ---- bulk load (bootstrap) ----
 
     def load_snapshot(self, snapshot: Snapshot) -> None:
-        """Populate the device-level graph from a fresh ``/snapshot``.
+        """
+        Populate the device-level graph from a fresh ``/snapshot``.
 
         Channels and data-points are not part of the snapshot
         envelope (see DeviceSummary in openapi.yaml) — fetch them
@@ -364,7 +361,8 @@ class LoomStore:
         return None
 
     def attach_device_detail(self, detail: DeviceDetail) -> None:
-        """Apply a full ``GET /devices/{addr}`` detail record.
+        """
+        Apply a full ``GET /devices/{addr}`` detail record.
 
         Idempotent: re-applying overwrites firmware / availability and
         re-registers every channel in the detail. Channels that are no
@@ -386,9 +384,7 @@ class LoomStore:
 
         # Garbage-collect channels (and their DPs) that vanished.
         stale_keys = [
-            k
-            for k in self._channels
-            if k[0] == detail.address and k[1] not in new_numbers
+            k for k in self._channels if k[0] == detail.address and k[1] not in new_numbers
         ]
         for stale in stale_keys:
             self._drop_channel(stale)
@@ -400,17 +396,14 @@ class LoomStore:
         channel_number: int,
         data_points: list[DataPointSummary],
     ) -> None:
-        """Register the data-points of one channel.
+        """
+        Register the data-points of one channel.
 
         Replaces any previously-registered DPs for the same channel —
         the daemon's catalogue is authoritative.
         """
         # Drop the prior DPs for this channel (we replace wholesale).
-        stale = [
-            k
-            for k in self._data_points
-            if k[0] == device_address and k[1] == channel_number
-        ]
+        stale = [k for k in self._data_points if k[0] == device_address and k[1] == channel_number]
         for s in stale:
             del self._data_points[s]
 
@@ -425,7 +418,8 @@ class LoomStore:
     # ---- live updates ----
 
     def apply_value_changed(self, payload: DataPointValueChangedPayload) -> None:
-        """Update one data-point's value from a ``datapoint.value_changed`` push.
+        """
+        Update one data-point's value from a ``datapoint.value_changed`` push.
 
         Missing data-points are logged but not auto-created — the
         bootstrap workflow is responsible for catalogue parity. A
@@ -455,7 +449,8 @@ class LoomStore:
         dp._replace_summary(new_summary)
 
     def apply_device_created(self, payload: DeviceCreatedPayload) -> None:
-        """Register a freshly-paired device as a stub entry.
+        """
+        Register a freshly-paired device as a stub entry.
 
         The push payload carries only address / model / interface_id
         — channels and data-points still need to be fetched via
@@ -484,31 +479,30 @@ class LoomStore:
         for k in stale_channels:
             self._drop_channel(k)
         # CDPs are device-scoped, not channel-scoped — drop them too.
-        stale_cdps = [k for k in self._cdps if k[0] == addr]
-        for k in stale_cdps:
-            del self._cdps[k]
+        stale_cdps = [cdp_key for cdp_key in self._cdps if cdp_key[0] == addr]
+        for cdp_key in stale_cdps:
+            del self._cdps[cdp_key]
 
     def apply_sysvar_changed(self, payload: SysvarChangedPayload) -> None:
-        """Replace one sysvar's value from a ``hub.sysvar_changed`` push.
+        """
+        Replace one sysvar's value from a ``hub.sysvar_changed`` push.
 
         Unknown sysvars are logged + ignored (same rationale as
         :meth:`apply_value_changed`).
         """
         sysvar = self._sysvars.get(payload.name)
         if sysvar is None:
-            _LOGGER.debug(
-                "sysvar_changed for unknown sysvar %r — ignoring", payload.name
-            )
+            _LOGGER.debug("sysvar_changed for unknown sysvar %r — ignoring", payload.name)
             return
-        new_summary = sysvar.summary.model_copy(
-            update={"value": payload.value, "observed": True}
-        )
+        new_summary = sysvar.summary.model_copy(update={"value": payload.value, "observed": True})
         sysvar._replace_summary(new_summary)
 
     def apply_program_executed(self, payload: ProgramExecutedPayload) -> None:
-        """Acknowledge a program execution; the catalogue itself
-        doesn't change, but a subscriber may want to react to the
-        event itself (logged / used by HA-side automations).
+        """
+        Acknowledge a program execution event.
+
+        The catalogue itself doesn't change, but a subscriber may want to
+        react to the event itself (logged / used by HA-side automations).
         """
         _LOGGER.debug(
             "program_executed: %s (trigger=%s, success=%s)",
@@ -520,7 +514,8 @@ class LoomStore:
     def apply_custom_data_point_state_changed(
         self, payload: CustomDataPointStateChangedPayload
     ) -> None:
-        """Replace one CDP's state dict from a ``custom_data_point.state_changed`` push.
+        """
+        Replace one CDP's state dict from a ``custom_data_point.state_changed`` push.
 
         Unknown CDPs are logged at debug + ignored — same rationale as
         :meth:`apply_value_changed`: the bootstrap workflow is
@@ -568,7 +563,8 @@ class LoomStore:
         )
 
     async def set_sysvar(self, *, name: str, value: Any) -> None:
-        """Write a sysvar's runtime value back to the CCU.
+        """
+        Write a sysvar's runtime value back to the CCU.
 
         Wire: ``PUT /sysvars/{name}``.
         """
@@ -583,7 +579,8 @@ class LoomStore:
         )
 
     async def execute_program(self, *, program_id: str) -> None:
-        """Trigger a CCU program.
+        """
+        Trigger a CCU program.
 
         Wire: ``POST /programs/{id}/execute``. Not retried — programs
         can have side effects (cover open, notification send) where

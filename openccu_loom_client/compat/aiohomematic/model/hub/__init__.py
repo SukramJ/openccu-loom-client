@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""``aiohomematic.model.hub`` — categorised Sysvar / Program data points.
+"""
+``aiohomematic.model.hub`` — categorised Sysvar / Program data points.
 
 Hub entities (CCU system variables and programs) become HA platform
 entities. Each class declares its :class:`DataPointCategory` and a
@@ -26,7 +27,8 @@ from openccu_loom_client.model import Program, Sysvar
 
 
 def sysvar_unique_id(*, serial_suffix: str, name: str) -> str:
-    """Canonical HA unique id for a sysvar, matched by the refresh bridge.
+    """
+    Canonical HA unique id for a sysvar, matched by the refresh bridge.
 
     ``loom_<serial>_sysvar_<hub-slug(name)>``: the daemon ``name`` is the
     CCU legacy name, ``hub_slug`` is python-slugify (the contract's slug
@@ -38,7 +40,8 @@ def sysvar_unique_id(*, serial_suffix: str, name: str) -> str:
 
 
 def program_unique_id(*, serial_suffix: str, name: str) -> str:
-    """Canonical HA unique id for a program.
+    """
+    Canonical HA unique id for a program.
 
     Keyed on ``hub_slug(legacy_name)`` (not the program id), with the
     serial suffix in the central-id slot — ``loom_<serial>_program_<slug>``.
@@ -55,28 +58,35 @@ class _HubEntitySurface:
 
     @classmethod
     def default_category(cls) -> DataPointCategory:
+        """Return the HA data-point category for this class."""
         return cls._category
 
     @property
     def category(self) -> DataPointCategory:
+        """Return the HA data-point category of this instance."""
         return self._category
 
     @property
     def is_registered(self) -> bool:
+        """Return whether this hub entity has been registered with HA."""
         return getattr(self, "_registered", False)
 
     def register(self) -> None:
+        """Mark this hub entity as registered with HA."""
         self._registered = True
 
     def unregister(self) -> None:
+        """Mark this hub entity as no longer registered with HA."""
         self._registered = False
 
     @property
     def enabled_default(self) -> bool:
+        """Return whether the entity is enabled by default."""
         return True
 
     @property
     def state_uncertain(self) -> bool:
+        """Return whether the current state is considered uncertain."""
         return False
 
 
@@ -86,6 +96,7 @@ class _HubEntitySurface:
 class _SysvarEntitySurface(_HubEntitySurface):
     @property
     def unique_id(self) -> str:
+        """Return the canonical HA unique id for this sysvar."""
         return sysvar_unique_id(
             serial_suffix=self._store.serial_suffix,  # type: ignore[attr-defined]
             name=self.name,  # type: ignore[attr-defined]
@@ -93,13 +104,16 @@ class _SysvarEntitySurface(_HubEntitySurface):
 
     @property
     def data_type(self) -> str | None:
+        """Return the sysvar value type."""
         return self.value_type  # type: ignore[attr-defined,no-any-return]
 
     @property
     def values(self) -> tuple[str, ...]:
+        """Return the allowed value list for an enum sysvar."""
         return self.value_list  # type: ignore[attr-defined,no-any-return]
 
     async def send_variable(self, value: Any) -> None:
+        """Write a new value back to the sysvar."""
         await self.set_value(value)  # type: ignore[attr-defined]
 
 
@@ -149,9 +163,11 @@ class ProgramDpButton(_HubEntitySurface, Program):
 
     @property
     def unique_id(self) -> str:
+        """Return the canonical HA unique id for this program."""
         return program_unique_id(serial_suffix=self._store.serial_suffix, name=self.name)
 
     async def press(self) -> None:
+        """Trigger the program (HA button press)."""
         await self.execute()
 
 
@@ -162,6 +178,7 @@ class ProgramDpSwitch(_HubEntitySurface, Program):
 
     @property
     def unique_id(self) -> str:
+        """Return the canonical HA unique id for this program."""
         return program_unique_id(serial_suffix=self._store.serial_suffix, name=self.name)
 
 
@@ -169,7 +186,8 @@ class ProgramDpSwitch(_HubEntitySurface, Program):
 
 
 class HmUpdate:
-    """Type marker for the HA update platform.
+    """
+    Type marker for the HA update platform.
 
     The daemon exposes per-device firmware metadata on
     :class:`openccu_loom_client.model.Device.firmware` (populated by
@@ -190,7 +208,8 @@ _SYSVAR_BY_TYPE: dict[str, type[Sysvar]] = {
 
 
 def resolve_sysvar_class(*, value_type: str | None, has_value_list: bool) -> type[Sysvar]:
-    """Pick the ``SysvarDp*`` class from the sysvar's value type.
+    """
+    Pick the ``SysvarDp*`` class from the sysvar's value type.
 
     BOOL sysvars map to a writable switch (HA users toggle them); other
     types map to number/select/text, defaulting to a read-only sensor.
@@ -201,6 +220,7 @@ def resolve_sysvar_class(*, value_type: str | None, has_value_list: bool) -> typ
 
 
 def make_sysvar_data_point(*, summary: Any, store: Any) -> Sysvar:
+    """Build the categorised ``SysvarDp*`` wrapper for a sysvar summary."""
     cls = resolve_sysvar_class(
         value_type=summary.value_type, has_value_list=bool(summary.value_list)
     )
@@ -208,6 +228,7 @@ def make_sysvar_data_point(*, summary: Any, store: Any) -> Sysvar:
 
 
 def make_program_data_point(*, summary: Any, store: Any) -> Program:
+    """Build the ``ProgramDpButton`` wrapper for a program summary."""
     return ProgramDpButton(summary=summary, store=store)
 
 

@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""WS-transport tests using a real aiohttp TestServer as the daemon side.
+"""
+WS-transport tests using a real aiohttp TestServer as the daemon side.
 
 aiohttp.test_utils gives us a full-fidelity server (handshake, frame
 parsing, close) without mocking — we control the daemon's responses
@@ -11,12 +12,12 @@ directly and can assert on every client frame it receives.
 from __future__ import annotations
 
 import asyncio
-import json
 from collections.abc import AsyncIterator, Awaitable, Callable
+import json
 
 import aiohttp
-import pytest
 from aiohttp import web
+import pytest
 
 from openccu_loom_client import BearerAuth, LoomConfig
 from openccu_loom_client.transport import WsTransport
@@ -31,6 +32,7 @@ def _make_app(script: FakeDaemonScript, received_frames: list[dict]) -> web.Appl
     async def handler(request: web.Request) -> web.WebSocketResponse:
         ws = web.WebSocketResponse()
         await ws.prepare(request)
+
         # Drain client frames into received_frames in the background
         # so the script can interleave reads + writes.
         async def reader() -> None:
@@ -57,9 +59,11 @@ def _make_app(script: FakeDaemonScript, received_frames: list[dict]) -> web.Appl
 async def fake_daemon() -> AsyncIterator[
     Callable[[FakeDaemonScript], Awaitable[tuple[LoomConfig, list[dict]]]]
 ]:
-    """Spawn a fresh fake-daemon WS server per test, returning a config
-    bound to its address and a list collecting every frame the client
-    sent.
+    """
+    Spawn a fresh fake-daemon WS server per test.
+
+    Returns a config bound to its address and a list collecting every
+    frame the client sent.
     """
     runners: list[web.AppRunner] = []
     received: list[list[dict]] = []
@@ -160,9 +164,7 @@ class TestReplayLost:
             await asyncio.sleep(0.2)
 
         cfg, _rx = await fake_daemon(script)
-        async with WsTransport(
-            cfg, initial_subscriptions=["device.*"], on_replay_lost=on_lost
-        ):
+        async with WsTransport(cfg, initial_subscriptions=["device.*"], on_replay_lost=on_lost):
             await asyncio.sleep(0.3)
 
         assert captured == [901]
@@ -192,9 +194,7 @@ class TestRuntimeSubscriptions:
             await asyncio.sleep(0.3)
 
         cfg, rx = await fake_daemon(script)
-        async with WsTransport(
-            cfg, initial_subscriptions=["device.*", "hub.*"]
-        ) as ws:
+        async with WsTransport(cfg, initial_subscriptions=["device.*", "hub.*"]) as ws:
             await asyncio.sleep(0.1)
             await ws.unsubscribe(["hub.*"])
             await asyncio.sleep(0.1)

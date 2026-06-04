@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""Glue layer: WebSocket events → LoomStore + EventBus.
+"""
+Glue layer: WebSocket events → LoomStore + EventBus.
 
 The transport raises typed :class:`LoomEvent` objects via the event
 bus; the store has ``apply_*`` methods that mutate the in-memory
@@ -40,7 +41,8 @@ def bind_ws_events_to_store(
     store: LoomStore,
     group: SubscriptionGroup,
 ) -> None:
-    """Subscribe the standard wire→store handlers on ``group``.
+    """
+    Subscribe the standard wire→store handlers on ``group``.
 
     Six subscriptions are installed:
 

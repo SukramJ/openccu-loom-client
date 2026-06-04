@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""``aiohomematic.central``-compatible surface backed by :class:`LoomClient`.
+"""
+``aiohomematic.central``-compatible surface backed by :class:`LoomClient`.
 
 Three symbols are exported to satisfy the ``homematicip_local`` imports:
 
@@ -39,7 +40,8 @@ CentralUnit = LoomCentralAdapter
 
 
 class CentralConfig:
-    """``aiohomematic.CentralConfig``-shaped factory for the loom backend.
+    """
+    ``aiohomematic.CentralConfig``-shaped factory for the loom backend.
 
     The component constructs this with the full aiohomematic keyword
     set; only the daemon-relevant subset is honoured. Authentication
@@ -66,6 +68,7 @@ class CentralConfig:
         client_session: Any | None = None,
         **_ignored: Any,
     ) -> None:
+        """Capture the daemon-relevant config and resolve the auth method."""
         self._name = name or host
         self._host = host
         self._port = port
@@ -126,7 +129,8 @@ async def check_config(
     storage_directory: str | None = None,
     **_kwargs: object,
 ) -> list[str]:
-    """HA config-flow pre-flight — returns the list of failure messages.
+    """
+    HA config-flow pre-flight — returns the list of failure messages.
 
     Aiohomematic's original implementation tried CCU connectivity here
     and returned every problem it could detect. In the daemon-mediated

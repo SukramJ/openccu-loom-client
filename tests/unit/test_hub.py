@@ -7,9 +7,9 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
 from openccu_loom_types.rest import ProgramSummary, Snapshot, SysvarSummary
 from openccu_loom_types.ws import ProgramExecutedPayload, SysvarChangedPayload
+import pytest
 
 from openccu_loom_client.store import LoomStore
 
@@ -86,9 +86,7 @@ class TestSnapshotLoad:
         store.load_snapshot(
             _snapshot(
                 programs=[
-                    ProgramSummary.model_validate(
-                        {"id": "p1", "name": "Renamed", "active": False}
-                    )
+                    ProgramSummary.model_validate({"id": "p1", "name": "Renamed", "active": False})
                 ]
             )
         )
@@ -167,8 +165,10 @@ class TestProgramExecute:
 
 class TestProgramExecutedEvent:
     def test_apply_program_executed_is_diagnostic_only(self) -> None:
-        """The catalogue doesn't change on execution — the event is
-        informational; subscribers may use it independently.
+        """
+        The catalogue doesn't change on execution.
+
+        The event is informational; subscribers may use it independently.
         """
         store = LoomStore()
         store.apply_program_executed(

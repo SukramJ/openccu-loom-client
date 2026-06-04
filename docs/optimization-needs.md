@@ -5,6 +5,7 @@ Running log of follow-up work surfaced while reconciling the client with
 priority, the evidence (file:line / commit), and the suggested fix.
 
 > Done so far:
+>
 > - All unique_id / slug construction routes through `aiohomematic_contract`
 >   (generic, custom, sysvar, program); golden cross-checks in
 >   `tests/unit/test_contract_parity.py`.
@@ -33,11 +34,12 @@ migrates HA's registry to the canonical `loom_`/serial scheme on setup
 lives in **homematicip_local** (`async_migrate_entries`), not here.
 
 Open in this repo / to verify:
+
 - **(homematicip_local) one-time registry migration** + serial wiring;
   the old `entry_id[-10:]` `central_id` injection is obsolete.
 - **`legacy_name` equivalence (still assumed).** Hub keys use
   `hub_slug(name)`; the daemon's sysvar/program `name` must equal
-  aiohomematic's `legacy_name` (ReGa name) *before* slugify. Verify on a
+  aiohomematic's `legacy_name` (ReGa name) _before_ slugify. Verify on a
   real CCU.
 - **serial equivalence.** The client keys off the `/system/ccu` serial;
   the registry migration keys off `entry.unique_id`. Both are the real
@@ -70,11 +72,12 @@ present, fall back to per-device fetch otherwise.
 
 `device.trigger` is now bound to `DeviceTriggerEvent`, but
 `query_facade.get_event_groups` still raises (stub message updated to
-point here). aiohomematic exposes keypress/impulse events as HA *device
-triggers*, with the event data point carrying an `event`/button **prefix**
+point here). aiohomematic exposes keypress/impulse events as HA _device
+triggers_, with the event data point carrying an `event`/button **prefix**
 in its `unique_id` (`generate_unique_id(prefix="event", …)`).
 
 Two pieces of work:
+
 - Build the event-group surface on top of `DeviceTriggerEvent` and
   un-stub `get_event_groups`.
 - The trigger `event_key` is now the daemon-supplied `payload.unique_id`

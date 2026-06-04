@@ -26,7 +26,8 @@ class DataPointsOperations(_OperationsBase):
         value: Any,
         priority: str | None = None,
     ) -> None:
-        """Write one data-point value back to the CCU.
+        """
+        Write one data-point value back to the CCU.
 
         Wire: ``PUT /devices/{addr}/channels/{n}/data-points/{param}/value``
         with a :class:`SetValueRequest`. Idempotent: the daemon
@@ -48,7 +49,8 @@ class DataPointsOperations(_OperationsBase):
         self,
         queries: list[tuple[str, int, str]],
     ) -> dict[tuple[str, int, str], Any]:
-        """Read many data-points in one round-trip.
+        """
+        Read many data-points in one round-trip.
 
         Wire: ``POST /devices/values:batch`` with a
         :class:`ValuesBatchRequest`. Returns a dict keyed on the
@@ -60,8 +62,7 @@ class DataPointsOperations(_OperationsBase):
         body = ValuesBatchRequest.model_validate(
             {
                 "queries": [
-                    Query(address=a, channel=c, parameter=p).model_dump()
-                    for (a, c, p) in queries
+                    Query(address=a, channel=c, parameter=p).model_dump() for (a, c, p) in queries
                 ]
             }
         )
@@ -91,7 +92,8 @@ class DataPointsOperations(_OperationsBase):
         address: str,
         paramset_key: str,
     ) -> dict[str, Any]:
-        """Read a whole paramset (VALUES / MASTER / LINK) for a channel.
+        """
+        Read a whole paramset (VALUES / MASTER / LINK) for a channel.
 
         Wire: ``GET /devices/{addr}/paramsets/{key}``. The wire shape
         is a free-form dict keyed by parameter name; the daemon
@@ -110,7 +112,8 @@ class DataPointsOperations(_OperationsBase):
         paramset_key: str,
         values: dict[str, Any],
     ) -> None:
-        """Write a paramset transactionally to the CCU.
+        """
+        Write a paramset transactionally to the CCU.
 
         Wire: ``PUT /devices/{addr}/paramsets/{key}``. The daemon
         forwards the whole map as a single CCU call where the

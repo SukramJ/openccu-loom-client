@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""``aiohomematic.model.generic`` — categorised data-point classes.
+"""
+``aiohomematic.model.generic`` — categorised data-point classes.
 
 Each generic CCU parameter maps to one HA platform entity. The class
 a parameter resolves to (and the :class:`DataPointCategory` it carries)
@@ -39,7 +40,8 @@ _LOGGER: Final = logging.getLogger(__name__)
 
 
 class _GenericEntitySurface:
-    """Entity-facing attributes HA reads off a generic data point.
+    """
+    Entity-facing attributes HA reads off a generic data point.
 
     Mixed into every ``Dp*`` class. Relies on the host class also being
     a :class:`DataPoint` (so ``value``, ``parameter``, ``min`` … resolve).
@@ -156,13 +158,16 @@ class DpSwitch(_GenericEntitySurface, DataPoint):
     _category: ClassVar[DataPointCategory] = DataPointCategory.Switch
 
     async def turn_on(self, **_kwargs: Any) -> None:
+        """Send ``True`` to switch the parameter on."""
         await self.send_value(value=True)
 
     async def turn_off(self, **_kwargs: Any) -> None:
+        """Send ``False`` to switch the parameter off."""
         await self.send_value(value=False)
 
     async def set_on_time(self, *, on_time: float) -> None:
-        """Timed-on for a generic switch parameter.
+        """
+        Timed-on for a generic switch parameter.
 
         aiohomematic writes a sibling ``ON_TIME`` parameter; the loom
         client addresses one parameter per data point, so this is a
@@ -211,6 +216,7 @@ class DpAction(_GenericEntitySurface, DataPoint):
     _category: ClassVar[DataPointCategory] = DataPointCategory.Action
 
     async def send_action(self, value: Any = True) -> None:
+        """Send the given value to the write-only parameter."""
         await self.send_value(value=value)
 
 
@@ -220,6 +226,7 @@ class DpButton(DpAction):
     _category: ClassVar[DataPointCategory] = DataPointCategory.Button
 
     async def press(self) -> None:
+        """Send ``True`` to trigger the momentary button press."""
         await self.send_value(value=True)
 
 
@@ -249,13 +256,14 @@ _WRITABLE_BY_TYPE: dict[str, type[DataPoint]] = {
 def resolve_generic_class(
     *, type_token: str | None, read: bool, write: bool, has_value_list: bool
 ) -> type[DataPoint]:
-    """Pick the ``Dp*`` class for a parameter from its type + operations.
+    """
+    Pick the ``Dp*`` class for a parameter from its type + operations.
 
     Mirrors aiohomematic's resolver tree (see module docstring).
     """
     token = (type_token or "").upper()
     if write:
-        if token == "ACTION":
+        if token == "ACTION":  # noqa: S105 # nosec B105 — parameter type token, not a secret
             return DpSwitch if read else DpButton
         if not read:  # write-only, typed
             if has_value_list:
@@ -265,7 +273,9 @@ def resolve_generic_class(
             return DpAction
         return _WRITABLE_BY_TYPE.get(token, DpText)
     # read-only
-    return DpBinarySensor if token == "BOOL" else DpSensor
+    return (
+        DpBinarySensor if token == "BOOL" else DpSensor  # noqa: S105 # nosec B105 — type token, not a secret
+    )
 
 
 def make_generic_data_point(
