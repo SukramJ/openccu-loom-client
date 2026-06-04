@@ -1,4 +1,4 @@
-# py-openccu-loom-client
+# openccu-loom-client
 
 **Status:** WIP / Alpha — transport, event bus, domain store, the full
 daemon REST surface (HA-relevant + admin/ops), and the `aiohomematic`

@@ -49,7 +49,7 @@ class LoomConfig:
     # Client name advertised in `User-Agent` so the daemon can attribute
     # request load in audit logs. Override per deployment if running
     # multiple HA instances against one daemon.
-    user_agent: str = "py-openccu-loom-client"
+    user_agent: str = "openccu-loom-client"
 
     def __post_init__(self) -> None:
         """Default the port from the TLS flag when not explicitly set."""

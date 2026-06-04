@@ -28,8 +28,8 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/SukramJ/py-openccu-loom-client"
-"Bug Tracker" = "https://github.com/SukramJ/py-openccu-loom-client/issues"
+Homepage = "https://github.com/SukramJ/openccu-loom-client"
+"Bug Tracker" = "https://github.com/SukramJ/openccu-loom-client/issues"
 "Daemon Repo" = "https://github.com/SukramJ/openccu-loom"
 
 [project.optional-dependencies]
