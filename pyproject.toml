@@ -562,6 +562,15 @@ max-complexity = 15 # Allow up to 15 McCabe complexity per function
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# e2e tests drive the real daemon (and godevccu) as subprocesses; they
+# are opt-in and excluded from the default run. Select them explicitly:
+#   LOOM_DAEMON_BIN=... pytest -m e2e
+#   LOOM_DAEMON_BIN=... GODEVCCU_E2E_BIN=... pytest -m "e2e or e2e_ccu"
+addopts = "-m 'not e2e and not e2e_ccu'"
+markers = [
+    "e2e: end-to-end tests against the real daemon subprocess (needs LOOM_DAEMON_BIN)",
+    "e2e_ccu: e2e tests that also need the godevccu simulator (needs GODEVCCU_E2E_BIN)",
+]
 
 [tool.mypy]
 python_version = "3.14" # Target Python version used for type checking
