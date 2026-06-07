@@ -51,6 +51,7 @@ from openccu_loom_client.compat.aiohomematic.central.state_paths import (
 )
 from openccu_loom_client.compat.aiohomematic.const import SystemInformation
 from openccu_loom_client.compat.aiohomematic.model.custom import make_custom_data_point
+from openccu_loom_client.compat.aiohomematic.model.event_group import build_event_groups
 from openccu_loom_client.compat.aiohomematic.model.generic import make_generic_data_point
 from openccu_loom_client.compat.aiohomematic.model.hub import (
     make_program_data_point,
@@ -218,7 +219,18 @@ class _HubCoordinator:
 
     @property
     def install_mode_dps(self) -> dict[str, Any]:
-        raise _not_implemented("hub_coordinator.install_mode_dps", _MODEL_PORT_TODO)
+        """
+        Per-interface install-mode button/sensor pairs.
+
+        Returns an empty mapping for now: the daemon exposes install-mode
+        state (``GET /install-mode`` + ``hub.install_mode_changed``), but
+        the button/sensor *entity* pair carries a dual unique_id whose
+        exact derivation must match aiohomematic's registry format — left
+        as a focused follow-up rather than risk orphaned HA entities. The
+        empty mapping keeps HA's orphan-cleanup and platform setup working
+        (no install-mode entities spawn) instead of raising.
+        """
+        return {}
 
 
 class _QueryFacade:
@@ -270,13 +282,19 @@ class _QueryFacade:
             address=address, channel=channel, parameter=parameter
         )
 
-    def get_event_groups(self, **_kwargs: Any) -> tuple[Any, ...]:
-        raise _not_implemented(
-            "query_facade.get_event_groups",
-            "device trigger (keypress/impulse) events ARE now broadcast "
-            "(device.trigger → DeviceTriggerEvent), but the HA event-group "
-            "surface that groups them per device is not modelled yet — see "
-            "docs/optimization-needs.md",
+    def get_event_groups(
+        self,
+        *,
+        event_type: Any = None,
+        registered: bool | None = None,
+        **_kwargs: Any,
+    ) -> tuple[Any, ...]:
+        """Return device-trigger event groups built from the store's trigger DPs."""
+        return build_event_groups(
+            store=self._client.store,
+            central_id=self._client.store.serial_suffix,
+            event_type=event_type,
+            registered=registered,
         )
 
     def get_state_paths(

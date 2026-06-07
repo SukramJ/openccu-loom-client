@@ -105,3 +105,17 @@ async def test_build_configurable_devices(client_with_ccu: LoomClient) -> None:
     # The dataclass serialises to the aiohomematic-shaped dict HA sends out.
     as_dict = dataclasses.asdict(device)
     assert set(as_dict) >= {"address", "channels", "model", "maintenance", "interface_id"}
+
+
+async def test_build_event_groups(client_with_ccu: LoomClient) -> None:
+    from openccu_loom_client.compat.aiohomematic.model.event_group import build_event_groups
+
+    await client_with_ccu.bootstrap()
+    groups = build_event_groups(
+        store=client_with_ccu.store, central_id=client_with_ccu.store.serial_suffix
+    )
+    # The seeded HmIP-BSM exposes KEY_TRANSCEIVER channels with PRESS_* params.
+    assert groups, "expected device-trigger event groups from the seeded devices"
+    group = groups[0]
+    assert group.unique_id.startswith("event_group_")
+    assert group.event_types  # lower-cased PRESS_* names
