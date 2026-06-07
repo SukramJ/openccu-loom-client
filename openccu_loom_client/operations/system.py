@@ -78,9 +78,15 @@ class SystemOperations(_OperationsBase):
     # ---- CCU repair surface ----
 
     async def list_system_ccus(self) -> list[SystemCCUEntry]:
-        """Wire: ``GET /system/ccu``. Repair / config-flow read-out."""
+        """
+        Wire: ``GET /system/ccu``. Repair / config-flow read-out.
+
+        The daemon wraps the list in an ``{"entries": [...]}`` envelope;
+        unwrap it, while tolerating a bare list for forward-compatibility.
+        """
         payload = await self._transport.request("GET", "/system/ccu")
-        return [SystemCCUEntry.model_validate(c) for c in (payload or [])]
+        entries = payload.get("entries", []) if isinstance(payload, dict) else (payload or [])
+        return [SystemCCUEntry.model_validate(c) for c in entries]
 
     # ---- lifecycle / status (admin) ----
 
