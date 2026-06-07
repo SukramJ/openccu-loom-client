@@ -60,6 +60,11 @@ class Device:
         return self._summary.address
 
     @property
+    def ise_id(self) -> int | None:
+        """Return the CCU-internal numeric device id, or ``None`` if unset."""
+        return self._summary.ise_id
+
+    @property
     def name(self) -> str:
         """Return the device name."""
         return self._summary.name

@@ -39,6 +39,10 @@ from typing import TYPE_CHECKING, Any, Final
 
 from openccu_loom_types.enums import CentralState, DataPointCategory
 
+from openccu_loom_client.compat.aiohomematic.central.configurable_devices import (
+    ConfigurableDevice,
+    build_configurable_devices,
+)
 from openccu_loom_client.compat.aiohomematic.central.refresh import install_refresh_bridge
 from openccu_loom_client.compat.aiohomematic.const import SystemInformation
 from openccu_loom_client.compat.aiohomematic.model.custom import make_custom_data_point
@@ -382,12 +386,14 @@ class _JsonRpcClient:
         await self._client.hub.ack_service_message(message_id=message_id)
 
     async def rename_device(self, *, ise_id: int, name: str) -> None:
-        raise _not_implemented(
-            "json_rpc_client.rename_device",
-            "the daemon renames by device address (PATCH /devices/{addr}); "
-            "map the CCU ise_id to an address before calling "
-            "client.devices.patch_device",
+        """Rename a device by its CCU ise_id (mapped to the address)."""
+        address = next(
+            (d.address for d in self._client.store.devices if d.ise_id == ise_id),
+            None,
         )
+        if address is None:
+            raise ValueError(f"no device with ise_id {ise_id} in the store")
+        await self._client.devices.patch_device(address=address, name=name)
 
 
 class _LinkCoordinator:
@@ -510,12 +516,11 @@ class _Configuration:
             expert=expert,
         )
 
-    def get_configurable_devices(self, **_kwargs: Any) -> Any:
-        raise _not_implemented(
-            "configuration.get_configurable_devices",
-            "needs the aiohomematic ConfigurableDevice dataclass shape mirrored from "
-            "store.devices/channels — tracked as a follow-up",
-        )
+    def get_configurable_devices(
+        self, *, locale: str = "en", **_kwargs: Any
+    ) -> tuple[ConfigurableDevice, ...]:
+        """Return configurable-device descriptors for the config UI."""
+        return build_configurable_devices(self._client.store)
 
 
 class LoomCentralAdapter:

@@ -78,13 +78,30 @@ async def test_set_value_roundtrip(client_with_ccu: LoomClient) -> None:
     await dp.send_value(target)
 
 
-@pytest.mark.xfail(
-    reason="daemon returns supported_operations: null for simulated CDPs, which "
-    "fails CustomDPSummary validation — wire-contract gap in openccu-loom-types",
-    strict=False,
-)
 async def test_list_custom_data_points(client_with_ccu: LoomClient) -> None:
+    # The daemon now returns supported_operations as [] (never null), so
+    # CustomDPSummary validation succeeds — regression guard for that fix.
     await client_with_ccu.bootstrap()
-    # The thermostat exposes CDPs whose supported_operations come back null.
     address = device_address_by_model(client_with_ccu, "HmIP-BWTH")
     await client_with_ccu.custom_data_points.list_for_device(address=address)
+
+
+async def test_build_configurable_devices(client_with_ccu: LoomClient) -> None:
+    import dataclasses
+
+    from openccu_loom_client.compat.aiohomematic.central.configurable_devices import (
+        build_configurable_devices,
+    )
+
+    await client_with_ccu.bootstrap()
+    devices = build_configurable_devices(client_with_ccu.store)
+    assert devices, "expected configurable devices from the seeded set"
+    device = devices[0]
+    assert device.channels, "expected channels with paramsets"
+    # The daemon ships channel type/labels/paramset_keys.
+    channel = device.channels[0]
+    assert channel.paramset_keys  # VALUES / MASTER
+    assert channel.channel_type
+    # The dataclass serialises to the aiohomematic-shaped dict HA sends out.
+    as_dict = dataclasses.asdict(device)
+    assert set(as_dict) >= {"address", "channels", "model", "maintenance", "interface_id"}
