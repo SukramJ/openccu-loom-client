@@ -40,6 +40,15 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.10",
 ]
+# Opt-in extra: the cross-package protocol-parity test (tests/compat/)
+# checks the compat shim's data-point twins against the real
+# aiohomematic runtime_checkable protocols, so it needs aiohomematic
+# installed. Deliberately NOT in `dev` / requirements_test.txt — the
+# default suite skips tests/compat via importorskip. Run it with:
+#   pip install -e '.[compat-test]' && pytest tests/compat
+compat-test = [
+    "aiohomematic>=2026.6.1",
+]
 
 [tool.setuptools.dynamic]
 version = { attr = "openccu_loom_client.const.VERSION" }
