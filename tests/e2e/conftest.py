@@ -112,6 +112,20 @@ def find_writable_bool_dp(client: LoomClient) -> DataPoint:
     pytest.skip("no writable BOOL STATE data point in the simulated device set")
 
 
+def device_address_by_model(client: LoomClient, model: str) -> str:
+    """
+    Return the address of the first device with the given model.
+
+    godevccu assigns ``VCU…`` addresses derived from a fixed serial, but
+    tests resolve by model (``HmIP-BSM`` …) rather than hard-coding the
+    derived address. Skips if no such device was seeded.
+    """
+    for device in client.store.devices:
+        if device.model == model:
+            return device.address
+    pytest.skip(f"no {model} device in the simulated device set")
+
+
 def _client_for(handle: DaemonHandle) -> LoomClient:
     config = LoomConfig(
         host="127.0.0.1",

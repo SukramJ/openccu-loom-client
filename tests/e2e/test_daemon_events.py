@@ -59,6 +59,34 @@ async def test_value_changed_pushed_over_ws(client_with_ccu: LoomClient) -> None
     assert captured["value"] == target
 
 
+async def test_store_reflects_value_change(client_with_ccu: LoomClient) -> None:
+    # The bridge applies the broadcast to the store, so the live DataPoint
+    # wrapper's .value updates in place — what HA entities read. Poll the
+    # store (rather than race the event fan-out) until it reflects the write.
+    await client_with_ccu.bootstrap()
+    dp = find_writable_bool_dp(client_with_ccu)
+    target = not bool(dp.value)
+
+    await client_with_ccu.start_events()
+    await asyncio.sleep(_WS_SETTLE_S)
+    await dp.send_value(target)
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + _EVENT_TIMEOUT_S
+    while loop.time() < deadline:
+        refreshed = client_with_ccu.store.get_data_point(
+            address=dp.device_address, channel=dp.channel_number, parameter="STATE"
+        )
+        if (
+            refreshed is not None
+            and refreshed.value is not None
+            and bool(refreshed.value) == target
+        ):
+            return
+        await asyncio.sleep(0.1)
+    pytest.fail(f"store did not reflect STATE={target} within {_EVENT_TIMEOUT_S}s")
+
+
 @pytest.mark.xfail(
     reason="needs the daemon's interface_id for FireEvent; wire it up once "
     "the test can resolve it from the snapshot",
