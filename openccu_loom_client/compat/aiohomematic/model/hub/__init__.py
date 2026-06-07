@@ -23,6 +23,10 @@ from aiohomematic_contract import canonical_unique_id, hub_slug
 from aiohomematic_contract.unique_id import PROGRAM_ADDRESS, SYSVAR_ADDRESS
 from openccu_loom_types.enums import DataPointCategory
 
+from openccu_loom_client.compat.aiohomematic.model._protocol_surface import (
+    _ProgramProtocolSurface,
+    _SysvarProtocolSurface,
+)
 from openccu_loom_client.model import Program, Sysvar
 
 
@@ -93,7 +97,7 @@ class _HubEntitySurface:
 # ---- sysvars ----
 
 
-class _SysvarEntitySurface(_HubEntitySurface):
+class _SysvarEntitySurface(_HubEntitySurface, _SysvarProtocolSurface):
     @property
     def unique_id(self) -> str:
         """Return the canonical HA unique id for this sysvar."""
@@ -156,7 +160,7 @@ class SysvarDpSelect(_SysvarEntitySurface, Sysvar):
 # ---- programs ----
 
 
-class ProgramDpButton(_HubEntitySurface, Program):
+class ProgramDpButton(_HubEntitySurface, _ProgramProtocolSurface, Program):
     """Program triggered as an HA button entity."""
 
     _category: ClassVar[DataPointCategory] = DataPointCategory.HubButton
@@ -171,7 +175,7 @@ class ProgramDpButton(_HubEntitySurface, Program):
         await self.execute()
 
 
-class ProgramDpSwitch(_HubEntitySurface, Program):
+class ProgramDpSwitch(_HubEntitySurface, _ProgramProtocolSurface, Program):
     """Program exposed as an HA switch (toggle 'active')."""
 
     _category: ClassVar[DataPointCategory] = DataPointCategory.HubSwitch
