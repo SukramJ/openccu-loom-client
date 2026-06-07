@@ -44,6 +44,11 @@ from openccu_loom_client.compat.aiohomematic.central.configurable_devices import
     build_configurable_devices,
 )
 from openccu_loom_client.compat.aiohomematic.central.refresh import install_refresh_bridge
+from openccu_loom_client.compat.aiohomematic.central.state_paths import (
+    device_state_path,
+    parse_device_state_path,
+    parse_sysvar_state_path,
+)
 from openccu_loom_client.compat.aiohomematic.const import SystemInformation
 from openccu_loom_client.compat.aiohomematic.model.custom import make_custom_data_point
 from openccu_loom_client.compat.aiohomematic.model.generic import make_generic_data_point
@@ -202,10 +207,14 @@ class _HubCoordinator:
         return tuple(out)
 
     def get_sysvar_data_point(self, *, state_path: str) -> Any:
-        raise _not_implemented(
-            "hub_coordinator.get_sysvar_data_point",
-            "state-path addressing has no daemon equivalent; look up by sysvar name",
-        )
+        """Resolve a categorised sysvar data point from its MQTT state path."""
+        name = parse_sysvar_state_path(state_path)
+        if name is None:
+            return None
+        sysvar = self._client.store.get_sysvar(name=name)
+        if sysvar is None:
+            return None
+        return make_sysvar_data_point(summary=sysvar.summary, store=self._client.store)
 
     @property
     def install_mode_dps(self) -> dict[str, Any]:
@@ -252,7 +261,14 @@ class _QueryFacade:
         return tuple(out)
 
     def get_generic_data_point(self, *, state_path: str) -> Any:
-        raise _not_implemented("query_facade.get_generic_data_point", _MODEL_PORT_TODO)
+        """Resolve a generic data point from its MQTT state path."""
+        parsed = parse_device_state_path(state_path)
+        if parsed is None:
+            return None
+        address, channel, parameter = parsed
+        return self._client.store.get_data_point(
+            address=address, channel=channel, parameter=parameter
+        )
 
     def get_event_groups(self, **_kwargs: Any) -> tuple[Any, ...]:
         raise _not_implemented(
@@ -263,11 +279,24 @@ class _QueryFacade:
             "docs/optimization-needs.md",
         )
 
-    def get_state_paths(self, **_kwargs: Any) -> tuple[Any, ...]:
-        raise _not_implemented(
-            "query_facade.get_state_paths",
-            "aiohomematic state-path addressing has no daemon equivalent; "
-            "the loom client addresses by (address, channel, parameter)",
+    def get_state_paths(
+        self, *, rpc_callback_supported: bool | None = None, **_kwargs: Any
+    ) -> tuple[str, ...]:
+        """
+        Synthesise the MQTT state path of every generic data point.
+
+        The daemon mediates all interfaces, so the ``rpc_callback_supported``
+        filter aiohomematic uses to pick MQTT-only devices does not apply —
+        every generic DP gets a path. Sysvars are handled by the bridge's
+        ``sysvar/status/+`` wildcard, not enumerated here.
+        """
+        return tuple(
+            device_state_path(
+                address=dp.device_address,
+                channel=dp.channel_number,
+                parameter=dp.parameter,
+            )
+            for dp in self._client.store.data_points
         )
 
 
