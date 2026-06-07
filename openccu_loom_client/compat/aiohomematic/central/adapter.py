@@ -119,12 +119,24 @@ class _DeviceCoordinator:
         # exposes them as ordinary devices, so there is no separate list.
         return ()
 
-    def add_new_devices_manually(self, *_args: Any, **_kwargs: Any) -> None:
-        raise _not_implemented(
-            "device_coordinator.add_new_devices_manually",
-            "device creation is daemon-driven; accept pairing candidates "
-            "via json_rpc_client.accept_device_in_inbox instead",
-        )
+    async def add_new_devices_manually(
+        self,
+        *,
+        interface_id: str | None = None,
+        address_names: dict[str, str] | None = None,
+        **_kwargs: Any,
+    ) -> None:
+        """
+        Confirm devices HA discovered — a no-op for loom plus any rename.
+
+        Device creation is daemon-driven: the addresses HA passes are
+        already in the store (broadcast as ``device.created``), so there
+        is nothing to add. Any non-empty name supplied alongside is
+        applied via ``PATCH /devices/{addr}``.
+        """
+        for address, name in (address_names or {}).items():
+            if name:
+                await self._client.devices.patch_device(address=address, name=name)
 
 
 class _HubCoordinator:
@@ -278,28 +290,71 @@ class _ClientCoordinator:
         return self._interface_ids
 
 
+def _incident_list(payload: Any) -> list[dict[str, Any]]:
+    """Pull the incident list out of the daemon's ``GET /incidents`` envelope."""
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, dict):
+        for key in ("incidents", "items", "entries"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                return value
+    return []
+
+
+class _IncidentStore:
+    """``cache_coordinator.incident_store`` surface over ``client.diagnostics``."""
+
+    def __init__(self, client: LoomClient) -> None:
+        self._client = client
+
+    async def get_diagnostics(self) -> dict[str, Any]:
+        return await self._client.diagnostics.list_incidents()
+
+    async def get_incidents_by_interface(self, *, interface_id: str) -> list[dict[str, Any]]:
+        incidents = _incident_list(await self._client.diagnostics.list_incidents())
+        return [i for i in incidents if i.get("interface_id") == interface_id]
+
+    async def get_recent_incidents(self, *, limit: int) -> list[dict[str, Any]]:
+        incidents = _incident_list(await self._client.diagnostics.list_incidents())
+        return incidents[:limit] if limit > 0 else incidents
+
+    def clear_incidents(self) -> None:
+        # The daemon owns the incident store; there is no client-side clear.
+        _LOGGER.debug("clear_incidents() is a no-op on the loom backend")
+
+
+class _Recorder:
+    """``cache_coordinator.recorder`` surface over the daemon's RPC recording."""
+
+    def __init__(self, client: LoomClient) -> None:
+        self._client = client
+
+    async def activate(self, **options: Any) -> Any:
+        return await self._client.diagnostics.start_rpc_recording(options=options)
+
+    async def deactivate(self, **options: Any) -> Any:
+        return await self._client.diagnostics.stop_rpc_recording(options=options)
+
+
 class _CacheCoordinator:
     """``central.cache_coordinator`` surface."""
 
     def __init__(self, client: LoomClient) -> None:
         self._client = client
+        self._incident_store = _IncidentStore(client)
+        self._recorder = _Recorder(client)
 
     async def clear_all(self) -> None:
         await self._client.diagnostics.reset_values_cache()
 
     @property
-    def incident_store(self) -> Any:
-        raise _not_implemented(
-            "cache_coordinator.incident_store",
-            "expose incidents via client.diagnostics.list_incidents() instead",
-        )
+    def incident_store(self) -> _IncidentStore:
+        return self._incident_store
 
     @property
-    def recorder(self) -> Any:
-        raise _not_implemented(
-            "cache_coordinator.recorder",
-            "use client.diagnostics.start_rpc_recording() / list_rpc_recordings()",
-        )
+    def recorder(self) -> _Recorder:
+        return self._recorder
 
 
 class _JsonRpcClient:
