@@ -228,6 +228,31 @@ class TestSystemAdminExtensions:
         result = await SystemOperations(transport=t).restart()
         assert result["status"] == "restarting"
 
+    async def test_list_system_ccus_unwraps_entries_envelope(self, http) -> None:
+        # The daemon returns {"entries": [...]}, not a bare list.
+        t, mock = http
+        entry = {
+            "name": "ccu-e2e",
+            "host": "127.0.0.1",
+            "available": True,
+            "model": "CCU3",
+            "version": "3.0",
+            "hostname": "ccu",
+            "serial": "ABC1234567",
+            "url": "http://127.0.0.1",
+            "is_ha_app": False,
+            "configured_interfaces": [],
+        }
+        mock.get("/api/v1/system/ccu", payload={"entries": [entry]})
+        ccus = await SystemOperations(transport=t).list_system_ccus()
+        assert [c.name for c in ccus] == ["ccu-e2e"]
+
+    async def test_list_system_ccus_tolerates_bare_list(self, http) -> None:
+        # Forward-compatibility: a bare list must still parse.
+        t, mock = http
+        mock.get("/api/v1/system/ccu", payload=[])
+        assert await SystemOperations(transport=t).list_system_ccus() == []
+
 
 class TestDevicesAdminExtensions:
     async def test_accept_device(self, http) -> None:
