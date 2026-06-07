@@ -66,7 +66,9 @@ A namespace shim that presents `aiohomematic`'s public surface so existing `home
 - Retries: only mark a call `allow_retry=True` when it is genuinely idempotent. `set_value`/`set_sysvar` (PUT, daemon-serialized) are retried; `execute_program` and `invoke_custom_data_point` (POST, side effects like cover-open) are not.
 - Every source file carries the SPDX MIT header. `mypy --strict` and the full ruff ruleset (incl. `PL`, `B`, `SIM`, `ASYNC`, `UP`) must pass.
 
-## Known daemon-side gaps (not closeable from the client)
+## Daemon broadcasts now live (formerly deferred)
 
-- `OptimisticRollback` is not yet broadcast by the daemon — synthesized client-side from `set_value` failures (`events/synthetic.py`).
-- Device trigger/keypress events are not yet emitted. The `DeviceTriggerEvent` compat class is ready to bind once the daemon ships the broadcast.
+These two broadcasts were once daemon-side gaps; the daemon now emits them and the client binds them:
+
+- `datapoint.optimistic_rolled_back` is broadcast by the daemon and consumed as `DataPointOptimisticRolledBackEvent`. The compat refresh bridge (`compat/aiohomematic/central/refresh.py`) translates it into the HA-facing `OptimisticRollbackEvent`. The `events/synthetic.py` factory `new_optimistic_rollback_event` is still available to synthesize the same event locally from a `set_value` failure when no broadcast is in flight.
+- Device trigger/keypress events are emitted on the `device.{address}.channels.{channel}.trigger` topic and bound to `DeviceTriggerEvent`. The remaining client-side work is the HA _event-group_ surface on top of them (`query_facade.get_event_groups` still raises `NotImplementedError` — see the compat shim's `_MODEL_PORT_TODO`).
