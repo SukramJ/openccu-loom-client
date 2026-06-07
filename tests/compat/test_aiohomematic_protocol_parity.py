@@ -24,12 +24,13 @@ skips cleanly when absent. Install the opt-in extra to run it::
     pip install -e '.[compat-test]'
     pytest tests/compat
 
-The cases are currently ``xfail``: the categorized data-point-model port
-onto ``LoomStore`` (the ``_MODEL_PORT_TODO`` workstream) is incomplete,
-so the twins do not yet satisfy the full protocol surface. Each failure
-message lists the exact missing members — the executable to-do list.
-When a class starts satisfying its protocol the case ``xpass``es, which
-is the signal to drop its ``xfail``.
+The twins satisfy the protocols via the shared ``_protocol_surface``
+mixins (``_GenericProtocolSurface`` / ``_CustomProtocolSurface`` /
+``_SysvarProtocolSurface`` / ``_ProgramProtocolSurface``). If a protocol
+member is dropped from a twin, the corresponding case fails with a
+message listing the missing members. (Daemon-sourced *values* — accurate
+per-parameter ``data_point_type``, rooms, translations — are a separate
+Strategy-B refinement; this test guards structural satisfaction only.)
 """
 
 from __future__ import annotations
@@ -170,11 +171,6 @@ def _missing_members(instance: Any, protocol: Any) -> list[str]:
     return missing
 
 
-@pytest.mark.xfail(
-    reason="compat data-point twins do not yet structurally satisfy aiohomematic's "
-    "runtime_checkable protocols — categorized-data-point-model port (_MODEL_PORT_TODO)",
-    strict=False,
-)
 @pytest.mark.parametrize(
     ("class_name", "builder", "protocol"),
     _CASES,

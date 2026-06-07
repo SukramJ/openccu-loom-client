@@ -39,9 +39,19 @@ from typing import TYPE_CHECKING, Any, Final
 
 from openccu_loom_types.enums import CentralState, DataPointCategory
 
+from openccu_loom_client.compat.aiohomematic.central.configurable_devices import (
+    ConfigurableDevice,
+    build_configurable_devices,
+)
 from openccu_loom_client.compat.aiohomematic.central.refresh import install_refresh_bridge
+from openccu_loom_client.compat.aiohomematic.central.state_paths import (
+    device_state_path,
+    parse_device_state_path,
+    parse_sysvar_state_path,
+)
 from openccu_loom_client.compat.aiohomematic.const import SystemInformation
 from openccu_loom_client.compat.aiohomematic.model.custom import make_custom_data_point
+from openccu_loom_client.compat.aiohomematic.model.event_group import build_event_groups
 from openccu_loom_client.compat.aiohomematic.model.generic import make_generic_data_point
 from openccu_loom_client.compat.aiohomematic.model.hub import (
     make_program_data_point,
@@ -119,12 +129,24 @@ class _DeviceCoordinator:
         # exposes them as ordinary devices, so there is no separate list.
         return ()
 
-    def add_new_devices_manually(self, *_args: Any, **_kwargs: Any) -> None:
-        raise _not_implemented(
-            "device_coordinator.add_new_devices_manually",
-            "device creation is daemon-driven; accept pairing candidates "
-            "via json_rpc_client.accept_device_in_inbox instead",
-        )
+    async def add_new_devices_manually(
+        self,
+        *,
+        interface_id: str | None = None,
+        address_names: dict[str, str] | None = None,
+        **_kwargs: Any,
+    ) -> None:
+        """
+        Confirm devices HA discovered — a no-op for loom plus any rename.
+
+        Device creation is daemon-driven: the addresses HA passes are
+        already in the store (broadcast as ``device.created``), so there
+        is nothing to add. Any non-empty name supplied alongside is
+        applied via ``PATCH /devices/{addr}``.
+        """
+        for address, name in (address_names or {}).items():
+            if name:
+                await self._client.devices.patch_device(address=address, name=name)
 
 
 class _HubCoordinator:
@@ -186,14 +208,29 @@ class _HubCoordinator:
         return tuple(out)
 
     def get_sysvar_data_point(self, *, state_path: str) -> Any:
-        raise _not_implemented(
-            "hub_coordinator.get_sysvar_data_point",
-            "state-path addressing has no daemon equivalent; look up by sysvar name",
-        )
+        """Resolve a categorised sysvar data point from its MQTT state path."""
+        name = parse_sysvar_state_path(state_path)
+        if name is None:
+            return None
+        sysvar = self._client.store.get_sysvar(name=name)
+        if sysvar is None:
+            return None
+        return make_sysvar_data_point(summary=sysvar.summary, store=self._client.store)
 
     @property
     def install_mode_dps(self) -> dict[str, Any]:
-        raise _not_implemented("hub_coordinator.install_mode_dps", _MODEL_PORT_TODO)
+        """
+        Per-interface install-mode button/sensor pairs.
+
+        Returns an empty mapping for now: the daemon exposes install-mode
+        state (``GET /install-mode`` + ``hub.install_mode_changed``), but
+        the button/sensor *entity* pair carries a dual unique_id whose
+        exact derivation must match aiohomematic's registry format — left
+        as a focused follow-up rather than risk orphaned HA entities. The
+        empty mapping keeps HA's orphan-cleanup and platform setup working
+        (no install-mode entities spawn) instead of raising.
+        """
+        return {}
 
 
 class _QueryFacade:
@@ -236,22 +273,48 @@ class _QueryFacade:
         return tuple(out)
 
     def get_generic_data_point(self, *, state_path: str) -> Any:
-        raise _not_implemented("query_facade.get_generic_data_point", _MODEL_PORT_TODO)
-
-    def get_event_groups(self, **_kwargs: Any) -> tuple[Any, ...]:
-        raise _not_implemented(
-            "query_facade.get_event_groups",
-            "device trigger (keypress/impulse) events ARE now broadcast "
-            "(device.trigger → DeviceTriggerEvent), but the HA event-group "
-            "surface that groups them per device is not modelled yet — see "
-            "docs/optimization-needs.md",
+        """Resolve a generic data point from its MQTT state path."""
+        parsed = parse_device_state_path(state_path)
+        if parsed is None:
+            return None
+        address, channel, parameter = parsed
+        return self._client.store.get_data_point(
+            address=address, channel=channel, parameter=parameter
         )
 
-    def get_state_paths(self, **_kwargs: Any) -> tuple[Any, ...]:
-        raise _not_implemented(
-            "query_facade.get_state_paths",
-            "aiohomematic state-path addressing has no daemon equivalent; "
-            "the loom client addresses by (address, channel, parameter)",
+    def get_event_groups(
+        self,
+        *,
+        event_type: Any = None,
+        registered: bool | None = None,
+        **_kwargs: Any,
+    ) -> tuple[Any, ...]:
+        """Return device-trigger event groups built from the store's trigger DPs."""
+        return build_event_groups(
+            store=self._client.store,
+            central_id=self._client.store.serial_suffix,
+            event_type=event_type,
+            registered=registered,
+        )
+
+    def get_state_paths(
+        self, *, rpc_callback_supported: bool | None = None, **_kwargs: Any
+    ) -> tuple[str, ...]:
+        """
+        Synthesise the MQTT state path of every generic data point.
+
+        The daemon mediates all interfaces, so the ``rpc_callback_supported``
+        filter aiohomematic uses to pick MQTT-only devices does not apply —
+        every generic DP gets a path. Sysvars are handled by the bridge's
+        ``sysvar/status/+`` wildcard, not enumerated here.
+        """
+        return tuple(
+            device_state_path(
+                address=dp.device_address,
+                channel=dp.channel_number,
+                parameter=dp.parameter,
+            )
+            for dp in self._client.store.data_points
         )
 
 
@@ -278,28 +341,71 @@ class _ClientCoordinator:
         return self._interface_ids
 
 
+def _incident_list(payload: Any) -> list[dict[str, Any]]:
+    """Pull the incident list out of the daemon's ``GET /incidents`` envelope."""
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, dict):
+        for key in ("incidents", "items", "entries"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                return value
+    return []
+
+
+class _IncidentStore:
+    """``cache_coordinator.incident_store`` surface over ``client.diagnostics``."""
+
+    def __init__(self, client: LoomClient) -> None:
+        self._client = client
+
+    async def get_diagnostics(self) -> dict[str, Any]:
+        return await self._client.diagnostics.list_incidents()
+
+    async def get_incidents_by_interface(self, *, interface_id: str) -> list[dict[str, Any]]:
+        incidents = _incident_list(await self._client.diagnostics.list_incidents())
+        return [i for i in incidents if i.get("interface_id") == interface_id]
+
+    async def get_recent_incidents(self, *, limit: int) -> list[dict[str, Any]]:
+        incidents = _incident_list(await self._client.diagnostics.list_incidents())
+        return incidents[:limit] if limit > 0 else incidents
+
+    def clear_incidents(self) -> None:
+        # The daemon owns the incident store; there is no client-side clear.
+        _LOGGER.debug("clear_incidents() is a no-op on the loom backend")
+
+
+class _Recorder:
+    """``cache_coordinator.recorder`` surface over the daemon's RPC recording."""
+
+    def __init__(self, client: LoomClient) -> None:
+        self._client = client
+
+    async def activate(self, **options: Any) -> Any:
+        return await self._client.diagnostics.start_rpc_recording(options=options)
+
+    async def deactivate(self, **options: Any) -> Any:
+        return await self._client.diagnostics.stop_rpc_recording(options=options)
+
+
 class _CacheCoordinator:
     """``central.cache_coordinator`` surface."""
 
     def __init__(self, client: LoomClient) -> None:
         self._client = client
+        self._incident_store = _IncidentStore(client)
+        self._recorder = _Recorder(client)
 
     async def clear_all(self) -> None:
         await self._client.diagnostics.reset_values_cache()
 
     @property
-    def incident_store(self) -> Any:
-        raise _not_implemented(
-            "cache_coordinator.incident_store",
-            "expose incidents via client.diagnostics.list_incidents() instead",
-        )
+    def incident_store(self) -> _IncidentStore:
+        return self._incident_store
 
     @property
-    def recorder(self) -> Any:
-        raise _not_implemented(
-            "cache_coordinator.recorder",
-            "use client.diagnostics.start_rpc_recording() / list_rpc_recordings()",
-        )
+    def recorder(self) -> _Recorder:
+        return self._recorder
 
 
 class _JsonRpcClient:
@@ -327,12 +433,14 @@ class _JsonRpcClient:
         await self._client.hub.ack_service_message(message_id=message_id)
 
     async def rename_device(self, *, ise_id: int, name: str) -> None:
-        raise _not_implemented(
-            "json_rpc_client.rename_device",
-            "the daemon renames by device address (PATCH /devices/{addr}); "
-            "map the CCU ise_id to an address before calling "
-            "client.devices.patch_device",
+        """Rename a device by its CCU ise_id (mapped to the address)."""
+        address = next(
+            (d.address for d in self._client.store.devices if d.ise_id == ise_id),
+            None,
         )
+        if address is None:
+            raise ValueError(f"no device with ise_id {ise_id} in the store")
+        await self._client.devices.patch_device(address=address, name=name)
 
 
 class _LinkCoordinator:
@@ -370,28 +478,96 @@ class _LinkCoordinator:
         )
 
 
+def _paramset_token(paramset_key: Any) -> str:
+    """Normalise a ParamsetKey enum / string to the daemon's wire token."""
+    return str(getattr(paramset_key, "value", paramset_key))
+
+
+def _split_channel_address(channel_address: str) -> tuple[str, int]:
+    """Split ``ABC1234567:3`` into ``("ABC1234567", 3)`` (channel 0 if absent)."""
+    device, _, channel = channel_address.partition(":")
+    return device, int(channel) if channel else 0
+
+
 class _Configuration:
-    """``central.configuration`` surface (paramset descriptors)."""
+    """
+    ``central.configuration`` surface (paramset values + descriptors).
+
+    The daemon exposes the renderable parameter descriptions as the
+    channel *ui-schema* (``GET /devices/{addr}/channels/{no}/ui-schema``,
+    ``paramset=VALUES|MASTER|LINK``), so the description getters are async
+    here — unlike aiohomematic's cached, synchronous variants. HA's config
+    websocket handlers must ``await`` them on the loom backend.
+    """
 
     def __init__(self, client: LoomClient) -> None:
         self._client = client
 
-    async def get_paramset(self, *, address: str, paramset_key: str) -> dict[str, Any]:
+    async def get_paramset(
+        self,
+        *,
+        paramset_key: Any,
+        channel_address: str | None = None,
+        address: str | None = None,
+        interface_id: str | None = None,
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        """Read current paramset values. Wire: ``GET /devices/{addr}/paramsets/{key}``."""
+        target = channel_address or address
+        if target is None:
+            raise ValueError("get_paramset requires channel_address (or address)")
         return await self._client.datapoints.get_paramset(
-            address=address, paramset_key=paramset_key
+            address=target, paramset_key=_paramset_token(paramset_key)
         )
 
-    def get_link_paramset_description(self, **_kwargs: Any) -> Any:
-        raise _not_implemented(
-            "configuration.get_link_paramset_description",
-            "available over WS (links.get_form_schema), not yet wrapped in the REST client",
+    async def get_paramset_description(
+        self,
+        *,
+        channel_address: str,
+        paramset_key: Any,
+        peer: str | None = None,
+        locale: str = "en",
+        expert: bool | None = None,
+        interface_id: str | None = None,
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        """Return renderable parameter descriptions for a channel paramset (ui-schema)."""
+        device, channel = _split_channel_address(channel_address)
+        return await self._client.devices.get_ui_schema(
+            address=device,
+            channel=channel,
+            paramset=_paramset_token(paramset_key),
+            peer=peer,
+            locale=locale,
+            expert=expert,
         )
 
-    def get_configurable_devices(self, **_kwargs: Any) -> Any:
-        raise _not_implemented(
-            "configuration.get_configurable_devices",
-            "derive from client.store.devices once the config-panel routing lands",
+    async def get_link_paramset_description(
+        self,
+        *,
+        channel_address: str,
+        peer: str,
+        locale: str = "en",
+        expert: bool | None = None,
+        interface_id: str | None = None,
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        """Return renderable LINK-paramset descriptions between a channel and a peer."""
+        device, channel = _split_channel_address(channel_address)
+        return await self._client.devices.get_ui_schema(
+            address=device,
+            channel=channel,
+            paramset="LINK",
+            peer=peer,
+            locale=locale,
+            expert=expert,
         )
+
+    def get_configurable_devices(
+        self, *, locale: str = "en", **_kwargs: Any
+    ) -> tuple[ConfigurableDevice, ...]:
+        """Return configurable-device descriptors for the config UI."""
+        return build_configurable_devices(self._client.store)
 
 
 class LoomCentralAdapter:

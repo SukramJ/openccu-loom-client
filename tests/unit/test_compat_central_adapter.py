@@ -12,12 +12,15 @@ rather than returning a wrong shape.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from openccu_loom_types.enums import DataPointCategory
 from openccu_loom_types.rest import DataPointSummary, Snapshot
 import pytest
 
 from openccu_loom_client import BasicAuth, BearerAuth
 from openccu_loom_client.compat.aiohomematic.central import CentralConfig, check_config
+from openccu_loom_client.compat.aiohomematic.central.adapter import _JsonRpcClient
 from tests.helpers import MockDaemon
 
 
@@ -339,13 +342,47 @@ class TestHubDataPointModel:
         )
 
 
-class TestStillStubbedModelSurface:
-    async def test_get_event_groups_raises_with_daemon_reason(self) -> None:
+class TestEventGroupsAndInstallMode:
+    async def test_get_event_groups_returns_tuple(self) -> None:
         central = await _make_config().create_central()
-        # device.trigger IS broadcast now and bound to DeviceTriggerEvent;
-        # what's still missing is the HA event-group surface on top of it.
-        with pytest.raises(NotImplementedError, match="event-group surface"):
-            central.query_facade.get_event_groups(event_type="keypress")
+        # No devices loaded → empty, but it no longer raises.
+        groups = central.query_facade.get_event_groups()
+        assert isinstance(groups, tuple)
+
+    async def test_install_mode_dps_empty_mapping(self) -> None:
+        central = await _make_config().create_central()
+        assert central.hub_coordinator.install_mode_dps == {}
+
+
+class TestRenameDeviceByIseId:
+    @staticmethod
+    def _fake_client(
+        devices: list[SimpleNamespace], calls: list[tuple[str, str]]
+    ) -> SimpleNamespace:
+        async def patch_device(*, address: str, name: str) -> None:
+            calls.append((address, name))
+
+        return SimpleNamespace(
+            store=SimpleNamespace(devices=devices),
+            devices=SimpleNamespace(patch_device=patch_device),
+        )
+
+    async def test_maps_ise_id_to_address(self) -> None:
+        calls: list[tuple[str, str]] = []
+        client = self._fake_client(
+            [
+                SimpleNamespace(ise_id=4711, address="VCU0000001"),
+                SimpleNamespace(ise_id=4712, address="VCU0000002"),
+            ],
+            calls,
+        )
+        await _JsonRpcClient(client).rename_device(ise_id=4712, name="Kitchen")
+        assert calls == [("VCU0000002", "Kitchen")]
+
+    async def test_unknown_ise_id_raises(self) -> None:
+        client = self._fake_client([SimpleNamespace(ise_id=1, address="VCU1")], [])
+        with pytest.raises(ValueError, match="ise_id 9999"):
+            await _JsonRpcClient(client).rename_device(ise_id=9999, name="x")
 
 
 class TestCheckConfig:

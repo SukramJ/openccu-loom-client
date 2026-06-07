@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Final
 
 from openccu_loom_types.enums import DataPointCategory
 
+from openccu_loom_client.compat.aiohomematic.model._protocol_surface import _GenericProtocolSurface
 from openccu_loom_client.events.types import data_point_event_key
 from openccu_loom_client.model import DataPoint
 
@@ -39,7 +40,7 @@ if TYPE_CHECKING:
 _LOGGER: Final = logging.getLogger(__name__)
 
 
-class _GenericEntitySurface:
+class _GenericEntitySurface(_GenericProtocolSurface):
     """
     Entity-facing attributes HA reads off a generic data point.
 

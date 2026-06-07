@@ -44,8 +44,23 @@ class Channel:
 
     @property
     def paramset_key(self) -> str:
-        """Return the paramset key of this channel."""
+        """Return the canonical (input) paramset key of this channel."""
         return self._summary.paramset_key
+
+    @property
+    def paramset_keys(self) -> tuple[str, ...]:
+        """Return the paramsets this channel exposes (e.g. ``VALUES``, ``MASTER``)."""
+        return tuple(self._summary.paramset_keys or ())
+
+    @property
+    def channel_type(self) -> str | None:
+        """Return the OCCU channel-type string, or ``None`` if unset."""
+        return self._summary.type
+
+    @property
+    def type_label(self) -> str | None:
+        """Return the localised channel-type label, or ``None`` if unset."""
+        return self._summary.type_label
 
     @property
     def custom_dp_name(self) -> str | None:

@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from aiohomematic_contract import canonical_unique_id
 from openccu_loom_types.enums import DataPointCategory
 
+from openccu_loom_client.compat.aiohomematic.model._protocol_surface import _CustomProtocolSurface
 from openccu_loom_client.model import CustomDataPoint
 
 if TYPE_CHECKING:
@@ -97,7 +98,7 @@ _CATEGORY_BY_STRING: dict[str, DataPointCategory] = {
 }
 
 
-class _CustomEntitySurface(CustomDataPoint):
+class _CustomEntitySurface(_CustomProtocolSurface, CustomDataPoint):
     """Entity-facing surface shared by every ``CustomDp*`` class."""
 
     _category: ClassVar[DataPointCategory] = DataPointCategory.Switch
