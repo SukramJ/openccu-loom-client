@@ -11,11 +11,15 @@ Two events live here:
    becomes addressable in the store. The Home-Assistant integration
    subscribes to this to spawn HA entities for the new DPs (mirrors
    ``aiohomematic.central.events.DataPointsCreatedEvent``).
-2. :class:`OptimisticRollbackEvent` — placeholder for the daemon's
-   deferred ``DataPointOptimisticRolledBackEvent`` broadcast. While
-   that broadcast isn't wired on the wire we synthesize it client-side
-   from REST set_value failures so the HA-side subscriber doesn't
-   have to wait for the daemon work.
+2. :class:`OptimisticRollbackEvent` — the aiohomematic-shaped,
+   HA-facing rollback event. The daemon now emits the raw
+   ``datapoint.optimistic_rolled_back`` broadcast
+   (:class:`~openccu_loom_client.events.types.DataPointOptimisticRolledBackEvent`),
+   which the compat refresh bridge translates into this event so the
+   HA-side subscriber surface matches aiohomematic. The
+   :func:`new_optimistic_rollback_event` factory also lets callers
+   synthesize it locally (e.g. from a REST ``set_value`` failure) when
+   no broadcast is in flight.
 
 Both carry envelope-shaped metadata so the :class:`EventBus` can route
 them with the same machinery as wire events.
@@ -72,11 +76,13 @@ class OptimisticRollbackEvent(LoomEvent):
     """
     A previously-optimistic write was rolled back.
 
-    Stub for the daemon's deferred broadcast (see
-    ``docs/external-clients/topic-hierarchy.md`` "Not yet pushed").
-    Until the daemon emits it, the high-level client synthesizes this
-    event locally from REST ``set_value`` failures so the HA-side
-    subscriber surface stays stable across the deferral.
+    The aiohomematic-shaped, HA-facing event. It is produced by the
+    compat refresh bridge from the daemon's raw
+    ``datapoint.optimistic_rolled_back`` broadcast
+    (:class:`~openccu_loom_client.events.types.DataPointOptimisticRolledBackEvent`),
+    and can also be synthesized locally from a REST ``set_value``
+    failure via :func:`new_optimistic_rollback_event` when no broadcast
+    is in flight.
     """
 
     device_address: str
@@ -132,8 +138,10 @@ def new_optimistic_rollback_event(
     Construct a ready-to-publish OptimisticRollbackEvent.
 
     Wraps the envelope-metadata defaults so a caller synthesizing the
-    rollback from a ``set_value`` failure need not know about the
-    ``seq=0`` / ``kind=change`` conventions.
+    rollback locally (e.g. from a ``set_value`` failure) need not know
+    about the ``seq=0`` / ``kind=change`` conventions. The refresh
+    bridge builds the event directly when translating the daemon's
+    broadcast.
     """
     return OptimisticRollbackEvent(
         seq=0,
