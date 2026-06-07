@@ -370,27 +370,96 @@ class _LinkCoordinator:
         )
 
 
+def _paramset_token(paramset_key: Any) -> str:
+    """Normalise a ParamsetKey enum / string to the daemon's wire token."""
+    return str(getattr(paramset_key, "value", paramset_key))
+
+
+def _split_channel_address(channel_address: str) -> tuple[str, int]:
+    """Split ``ABC1234567:3`` into ``("ABC1234567", 3)`` (channel 0 if absent)."""
+    device, _, channel = channel_address.partition(":")
+    return device, int(channel) if channel else 0
+
+
 class _Configuration:
-    """``central.configuration`` surface (paramset descriptors)."""
+    """
+    ``central.configuration`` surface (paramset values + descriptors).
+
+    The daemon exposes the renderable parameter descriptions as the
+    channel *ui-schema* (``GET /devices/{addr}/channels/{no}/ui-schema``,
+    ``paramset=VALUES|MASTER|LINK``), so the description getters are async
+    here — unlike aiohomematic's cached, synchronous variants. HA's config
+    websocket handlers must ``await`` them on the loom backend.
+    """
 
     def __init__(self, client: LoomClient) -> None:
         self._client = client
 
-    async def get_paramset(self, *, address: str, paramset_key: str) -> dict[str, Any]:
+    async def get_paramset(
+        self,
+        *,
+        paramset_key: Any,
+        channel_address: str | None = None,
+        address: str | None = None,
+        interface_id: str | None = None,
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        """Read current paramset values. Wire: ``GET /devices/{addr}/paramsets/{key}``."""
+        target = channel_address or address
+        if target is None:
+            raise ValueError("get_paramset requires channel_address (or address)")
         return await self._client.datapoints.get_paramset(
-            address=address, paramset_key=paramset_key
+            address=target, paramset_key=_paramset_token(paramset_key)
         )
 
-    def get_link_paramset_description(self, **_kwargs: Any) -> Any:
-        raise _not_implemented(
-            "configuration.get_link_paramset_description",
-            "available over WS (links.get_form_schema), not yet wrapped in the REST client",
+    async def get_paramset_description(
+        self,
+        *,
+        channel_address: str,
+        paramset_key: Any,
+        peer: str | None = None,
+        locale: str = "en",
+        expert: bool | None = None,
+        interface_id: str | None = None,
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        """Return renderable parameter descriptions for a channel paramset (ui-schema)."""
+        device, channel = _split_channel_address(channel_address)
+        return await self._client.devices.get_ui_schema(
+            address=device,
+            channel=channel,
+            paramset=_paramset_token(paramset_key),
+            peer=peer,
+            locale=locale,
+            expert=expert,
+        )
+
+    async def get_link_paramset_description(
+        self,
+        *,
+        channel_address: str,
+        peer: str,
+        locale: str = "en",
+        expert: bool | None = None,
+        interface_id: str | None = None,
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        """Return renderable LINK-paramset descriptions between a channel and a peer."""
+        device, channel = _split_channel_address(channel_address)
+        return await self._client.devices.get_ui_schema(
+            address=device,
+            channel=channel,
+            paramset="LINK",
+            peer=peer,
+            locale=locale,
+            expert=expert,
         )
 
     def get_configurable_devices(self, **_kwargs: Any) -> Any:
         raise _not_implemented(
             "configuration.get_configurable_devices",
-            "derive from client.store.devices once the config-panel routing lands",
+            "needs the aiohomematic ConfigurableDevice dataclass shape mirrored from "
+            "store.devices/channels — tracked as a follow-up",
         )
 
 
