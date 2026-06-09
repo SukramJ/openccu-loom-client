@@ -7,12 +7,24 @@ from __future__ import annotations
 
 from aiohomematic.async_support import Looper
 from aiohomematic.central.events import EventBus as AioEventBus
-from aiohomematic.event_types import DataPointStateChangedEvent
+from aiohomematic.const import CentralState, DeviceTriggerEventType, ParamsetKey
+from aiohomematic.event_types import (
+    CentralStateChangedEvent as AioCentralStateChangedEvent,
+    DataPointStateChangedEvent,
+    DeviceLifecycleEvent,
+    DeviceLifecycleEventType,
+    DeviceTriggerEvent as AioDeviceTriggerEvent,
+    OptimisticRollbackEvent,
+)
 from openccu_loom_types.enums import DataPointType
 from openccu_loom_types.rest import CustomDPSummary, Kind, Snapshot
 from openccu_loom_types.ws import (
+    CentralStateChangedPayload,
     CustomDataPointStateChangedPayload,
     DataPointValueChangedPayload,
+    DeviceCreatedPayload,
+    DeviceRemovedPayload,
+    DeviceTriggerPayload,
     OptimisticRollbackPayload,
     SysvarChangedPayload,
 )
@@ -27,13 +39,18 @@ from openccu_loom_client.compat.aiohomematic.model.custom import (
     make_custom_data_point,
 )
 from openccu_loom_client.events import (
+    CentralStateChangedEvent as LoomCentralStateChangedEvent,
     CustomDataPointStateChangedEvent,
     DataPointValueChangedEvent,
+    DeviceCreatedEvent,
+    DeviceRemovedEvent,
     EventBus,
-    OptimisticRollbackEvent,
     SysvarChangedEvent,
 )
-from openccu_loom_client.events.types import DataPointOptimisticRolledBackEvent
+from openccu_loom_client.events.types import (
+    DataPointOptimisticRolledBackEvent,
+    DeviceTriggerEvent as LoomDeviceTriggerEvent,
+)
 from openccu_loom_client.store import LoomStore
 
 
@@ -233,7 +250,7 @@ class TestRefreshBridge:
         bus = EventBus()
         group = bus.create_subscription_group(name="t")
         looper, ha_bus, seen = self._ha_setup()
-        install_refresh_bridge(bus=bus, group=group, store=LoomStore(), ha_bus=ha_bus)
+        install_refresh_bridge(group=group, store=LoomStore(), ha_bus=ha_bus, central_name="home")
         await bus.publish(
             DataPointValueChangedEvent(
                 seq=1,
@@ -261,7 +278,7 @@ class TestRefreshBridge:
         bus = EventBus()
         group = bus.create_subscription_group(name="t")
         looper, ha_bus, seen = self._ha_setup()
-        install_refresh_bridge(bus=bus, group=group, store=LoomStore(), ha_bus=ha_bus)
+        install_refresh_bridge(group=group, store=LoomStore(), ha_bus=ha_bus, central_name="home")
         await bus.publish(
             DataPointValueChangedEvent(
                 seq=1,
@@ -290,7 +307,7 @@ class TestRefreshBridge:
         store = LoomStore()
         store.set_serial("3014F711A0001234")  # serial suffix → 11a0001234
         looper, ha_bus, seen = self._ha_setup()
-        install_refresh_bridge(bus=bus, group=group, store=store, ha_bus=ha_bus)
+        install_refresh_bridge(group=group, store=store, ha_bus=ha_bus, central_name="home")
         await bus.publish(
             CustomDataPointStateChangedEvent(
                 seq=2,
@@ -326,14 +343,15 @@ class TestRefreshBridge:
     async def test_optimistic_rollback_broadcast_becomes_public_event(self) -> None:
         bus = EventBus()
         group = bus.create_subscription_group(name="t")
-        _, ha_bus, _ = self._ha_setup()
-        install_refresh_bridge(bus=bus, group=group, store=LoomStore(), ha_bus=ha_bus)
+        looper, ha_bus, _ = self._ha_setup()
+        install_refresh_bridge(group=group, store=LoomStore(), ha_bus=ha_bus, central_name="home")
         seen: list[OptimisticRollbackEvent] = []
-
-        async def recorder(event: OptimisticRollbackEvent) -> None:
-            seen.append(event)
-
-        bus.subscribe(event_type=OptimisticRollbackEvent, handler=recorder)
+        ha_group = ha_bus.create_subscription_group(name="rollback")
+        ha_group.subscribe(
+            event_type=OptimisticRollbackEvent,
+            event_key=None,
+            handler=lambda *, event: seen.append(event),
+        )
         await bus.publish(
             DataPointOptimisticRolledBackEvent(
                 seq=7,
@@ -353,14 +371,127 @@ class TestRefreshBridge:
                 ),
             )
         )
+        await looper.block_till_done()
         assert len(seen) == 1
         ev = seen[0]
-        # Raw daemon broadcast → public aiohomematic-shaped event, with
-        # field mapping (sent→rolled_back, present→restored) and the
-        # envelope seq preserved (not reset to 0 by local synthesis).
-        assert ev.device_address == "VCU1"
-        assert ev.parameter == "LEVEL"
+        # Raw daemon broadcast → real aiohomematic OptimisticRollbackEvent;
+        # sent→rolled_back, present→restored, addressed via the DataPointKey.
+        assert ev.dpk.channel_address == "VCU1:1"
+        assert ev.dpk.parameter == "LEVEL"
+        assert ev.dpk.paramset_key == ParamsetKey.VALUES
         assert ev.rolled_back_value == 0.8
         assert ev.restored_value == 0.5
         assert ev.reason == "timeout"
-        assert ev.seq == 7
+
+
+class TestEventBridge:
+    """The bridge republishes daemon wire events as real aiohomematic events."""
+
+    @staticmethod
+    def _wire() -> tuple[EventBus, Looper, AioEventBus]:
+        bus = EventBus()
+        group = bus.create_subscription_group(name="t")
+        looper = Looper()
+        ha_bus = AioEventBus(task_scheduler=looper)
+        install_refresh_bridge(group=group, store=LoomStore(), ha_bus=ha_bus, central_name="home")
+        return bus, looper, ha_bus
+
+    async def test_device_trigger_becomes_aiohomematic_event(self) -> None:
+        bus, looper, ha_bus = self._wire()
+        seen: list[AioDeviceTriggerEvent] = []
+        ha_bus.create_subscription_group(name="x").subscribe(
+            event_type=AioDeviceTriggerEvent,
+            event_key=None,
+            handler=lambda *, event: seen.append(event),
+        )
+        await bus.publish(
+            LoomDeviceTriggerEvent(
+                seq=1,
+                kind=Kind.change,
+                ts="2026-05-24T08:00:00Z",
+                payload=DeviceTriggerPayload.model_validate(
+                    {
+                        "central": "home",
+                        "interface_id": "home:HmIP-RF",
+                        "device_address": "VCU1",
+                        "channel": 1,
+                        "event_type": "keypress",  # daemon short token
+                        "parameter": "PRESS_SHORT",
+                        "value": True,
+                    }
+                ),
+            )
+        )
+        await looper.block_till_done()
+        assert len(seen) == 1
+        ev = seen[0]
+        assert ev.trigger_type == DeviceTriggerEventType.KEYPRESS
+        assert ev.interface_id == "home:HmIP-RF"
+        assert ev.device_address == "VCU1"
+        assert ev.channel_no == 1
+        assert ev.parameter == "PRESS_SHORT"
+        assert ev.value is True
+
+    async def test_central_state_change_becomes_aiohomematic_event(self) -> None:
+        bus, looper, ha_bus = self._wire()
+        seen: list[AioCentralStateChangedEvent] = []
+        # Routed by the central name, exactly as control_unit subscribes.
+        ha_bus.create_subscription_group(name="x").subscribe(
+            event_type=AioCentralStateChangedEvent,
+            event_key="home",
+            handler=lambda *, event: seen.append(event),
+        )
+        await bus.publish(
+            LoomCentralStateChangedEvent(
+                seq=1,
+                kind=Kind.change,
+                ts="2026-05-24T08:00:00Z",
+                payload=CentralStateChangedPayload.model_validate(
+                    {"central": "home", "old_state": "starting", "new_state": "running"}
+                ),
+            )
+        )
+        await looper.block_till_done()
+        assert len(seen) == 1
+        assert seen[0].new_state == CentralState.RUNNING
+        assert seen[0].central_name == "home"
+
+    async def test_device_create_remove_become_lifecycle_events(self) -> None:
+        bus, looper, ha_bus = self._wire()
+        seen: list[DeviceLifecycleEvent] = []
+        ha_bus.create_subscription_group(name="x").subscribe(
+            event_type=DeviceLifecycleEvent,
+            event_key=None,
+            handler=lambda *, event: seen.append(event),
+        )
+        await bus.publish(
+            DeviceCreatedEvent(
+                seq=1,
+                kind=Kind.change,
+                ts="2026-05-24T08:00:00Z",
+                payload=DeviceCreatedPayload.model_validate(
+                    {
+                        "central": "home",
+                        "interface_id": "home:HmIP-RF",
+                        "device_address": "VCU1",
+                        "model": "HmIP-PSM",
+                    }
+                ),
+            )
+        )
+        await bus.publish(
+            DeviceRemovedEvent(
+                seq=2,
+                kind=Kind.change,
+                ts="2026-05-24T08:00:00Z",
+                payload=DeviceRemovedPayload.model_validate(
+                    {"central": "home", "interface_id": "home:HmIP-RF", "device_address": "VCU1"}
+                ),
+            )
+        )
+        await looper.block_till_done()
+        assert [e.event_type for e in seen] == [
+            DeviceLifecycleEventType.CREATED,
+            DeviceLifecycleEventType.REMOVED,
+        ]
+        assert seen[0].device_addresses == ("VCU1",)

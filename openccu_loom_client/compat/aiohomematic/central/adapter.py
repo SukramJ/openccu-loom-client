@@ -684,10 +684,10 @@ class LoomCentralAdapter:
             name="loom-compat-refresh"
         )
         install_refresh_bridge(
-            bus=self._client.events,
             group=self._refresh_group,
             store=self._client.store,
             ha_bus=self._ha_bus,
+            central_name=self._name,
         )
         # Announce every data point (generic + custom) in one batch *after*
         # the custom DPs are attached, so HA's platforms spawn entities for

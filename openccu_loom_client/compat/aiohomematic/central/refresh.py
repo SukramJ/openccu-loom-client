@@ -32,45 +32,84 @@ consuming the original typed events without an ``event_key`` filter.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from aiohomematic.event_types import DataPointStateChangedEvent
+from aiohomematic.const import CentralState, DataPointKey, DeviceTriggerEventType, ParamsetKey
+from aiohomematic.event_types import (
+    CentralStateChangedEvent,
+    DataPointStateChangedEvent,
+    DeviceLifecycleEvent,
+    DeviceLifecycleEventType,
+    DeviceTriggerEvent,
+    OptimisticRollbackEvent,
+)
 
 from openccu_loom_client.compat.aiohomematic.model.custom import custom_unique_id
 from openccu_loom_client.compat.aiohomematic.model.hub import sysvar_unique_id
 from openccu_loom_client.events import (
+    CentralStateChangedEvent as LoomCentralStateChangedEvent,
     CustomDataPointStateChangedEvent,
     DataPointValueChangedEvent,
-    OptimisticRollbackEvent,
+    DeviceCreatedEvent as LoomDeviceCreatedEvent,
+    DeviceRemovedEvent as LoomDeviceRemovedEvent,
     SysvarChangedEvent,
 )
 from openccu_loom_client.events.types import (
     DataPointOptimisticRolledBackEvent,
+    DeviceTriggerEvent as LoomDeviceTriggerEvent,
     data_point_event_key,
 )
 
 if TYPE_CHECKING:
     from aiohomematic.central.events import EventBus as AioEventBus
 
-    from openccu_loom_client.events import EventBus, SubscriptionGroup
+    from openccu_loom_client.events import SubscriptionGroup
     from openccu_loom_client.store import LoomStore
 
 
 def install_refresh_bridge(
-    *, bus: EventBus, group: SubscriptionGroup, store: LoomStore, ha_bus: AioEventBus
+    *,
+    group: SubscriptionGroup,
+    store: LoomStore,
+    ha_bus: AioEventBus,
+    central_name: str,
 ) -> None:
     """
-    Wire the daemon value events to aiohomematic's ``DataPointStateChangedEvent``.
+    Bridge daemon wire events onto aiohomematic's own event bus.
 
-    Daemon wire events are consumed on the loom ``bus`` (via ``group``); the
-    HA-facing :class:`DataPointStateChangedEvent` is published on ``ha_bus``,
-    aiohomematic's own event bus, so a HA entity's ``type(event)``/``.key``
-    subscription matches. Each event's routing key is the daemon-supplied
-    canonical ``payload.unique_id`` when present; otherwise it is rebuilt from
-    the raw payload fields and ``store.serial_suffix`` via the shared contract
-    (so it stays bit-identical). All subscriptions are tracked on ``group`` so
-    the caller tears them down with a single ``group.cancel()``.
+    Daemon wire events are consumed on the loom bus (via ``group``); the
+    HA-facing aiohomematic events are published on ``ha_bus`` so a consumer's
+    ``type(event)``/``.key`` subscription matches. Value changes become
+    :class:`DataPointStateChangedEvent` (keyed by the canonical ``unique_id``,
+    supplied by the daemon or rebuilt via the shared contract); device triggers,
+    optimistic rollbacks, central-state transitions and device create/remove
+    become their aiohomematic equivalents. All subscriptions are tracked on
+    ``group`` so the caller tears them down with a single ``group.cancel()``.
     """
+    _wire_value_events(group=group, store=store, ha_bus=ha_bus)
+    _wire_trigger_and_rollback(group=group, store=store, ha_bus=ha_bus)
+    _wire_central_and_lifecycle(group=group, ha_bus=ha_bus, central_name=central_name)
+
+
+def _device_attrs(store: LoomStore, address: str) -> tuple[str, str, str | None]:
+    """Return ``(interface_id, model, name)`` for a device, with safe fallbacks."""
+    device = store.get_device(address=address)
+    if device is None:
+        return "", "", None
+    return device.interface_id or "", device.model or "", device.name
+
+
+def _trigger_type(token: str) -> DeviceTriggerEventType:
+    """Map the daemon's short token (``keypress``) to the aiohomematic member."""
+    for member in DeviceTriggerEventType:
+        if token in (member.short, member.value):
+            return member
+    return DeviceTriggerEventType.KEYPRESS
+
+
+def _wire_value_events(*, group: SubscriptionGroup, store: LoomStore, ha_bus: AioEventBus) -> None:
+    """Bridge daemon value/custom/sysvar changes to ``DataPointStateChangedEvent``."""
 
     async def _emit(*, ts: Any, event_key: str, value: Any = None) -> None:
         await ha_bus.publish(
@@ -110,29 +149,101 @@ def install_refresh_bridge(
             value=getattr(event.payload, "value", None),
         )
 
-    async def on_rollback(event: DataPointOptimisticRolledBackEvent) -> None:
-        # Translate the raw daemon broadcast into the public,
-        # aiohomematic-shaped event HA subscribes to, preserving the
-        # envelope's seq/kind/ts (the local-synthesis factory would
-        # reset them to seq=0).
-        p = event.payload
-        await bus.publish(
-            OptimisticRollbackEvent(
-                seq=event.seq,
-                kind=event.kind,
-                ts=event.ts,
-                type=OptimisticRollbackEvent.type_id,
-                device_address=p.device_address,
-                channel=p.channel,
-                parameter=p.parameter,
-                rolled_back_value=p.sent,
-                restored_value=p.present,
-                central=p.central,
-                reason=p.reason,
-            )
-        )
-
     group.subscribe(event_type=DataPointValueChangedEvent, handler=on_value)
     group.subscribe(event_type=CustomDataPointStateChangedEvent, handler=on_custom)
     group.subscribe(event_type=SysvarChangedEvent, handler=on_sysvar)
+
+
+def _wire_trigger_and_rollback(
+    *, group: SubscriptionGroup, store: LoomStore, ha_bus: AioEventBus
+) -> None:
+    """Bridge device triggers and optimistic rollbacks to their aiohomematic events."""
+
+    async def on_trigger(event: LoomDeviceTriggerEvent) -> None:
+        p = event.payload
+        interface_id, model, device_name = _device_attrs(store, p.device_address)
+        await ha_bus.publish(
+            event=DeviceTriggerEvent(
+                timestamp=datetime.now(tz=UTC),
+                trigger_type=_trigger_type(p.event_type),
+                model=model,
+                interface_id=p.interface_id or interface_id,
+                device_address=p.device_address,
+                channel_no=p.channel,
+                parameter=p.parameter,
+                value=p.value,
+                device_name=device_name,
+            )
+        )
+
+    async def on_rollback(event: DataPointOptimisticRolledBackEvent) -> None:
+        # Translate the raw daemon broadcast into the public aiohomematic event
+        # HA subscribes to (raw ``sent``/``present`` map to rolled_back/restored).
+        p = event.payload
+        interface_id, _model, device_name = _device_attrs(store, p.device_address)
+        await ha_bus.publish(
+            event=OptimisticRollbackEvent(
+                timestamp=datetime.now(tz=UTC),
+                dpk=DataPointKey(
+                    interface_id=interface_id,
+                    channel_address=f"{p.device_address}:{p.channel}",
+                    paramset_key=ParamsetKey(p.paramset_key),
+                    parameter=p.parameter,
+                ),
+                reason=p.reason,
+                rolled_back_value=p.sent,
+                restored_value=p.present,
+                device_name=device_name,
+            )
+        )
+
+    group.subscribe(event_type=LoomDeviceTriggerEvent, handler=on_trigger)
     group.subscribe(event_type=DataPointOptimisticRolledBackEvent, handler=on_rollback)
+
+
+def _wire_central_and_lifecycle(
+    *, group: SubscriptionGroup, ha_bus: AioEventBus, central_name: str
+) -> None:
+    """Bridge central-state transitions and device create/remove to lifecycle events."""
+
+    async def on_central_state(event: LoomCentralStateChangedEvent) -> None:
+        p = event.payload
+        await ha_bus.publish(
+            event=CentralStateChangedEvent(
+                timestamp=datetime.now(tz=UTC),
+                central_name=central_name,
+                old_state=CentralState(p.old_state),
+                new_state=CentralState(p.new_state),
+                trigger=None,
+            )
+        )
+
+    async def _emit_lifecycle(
+        *, event_type: DeviceLifecycleEventType, device_address: str, interface_id: str
+    ) -> None:
+        await ha_bus.publish(
+            event=DeviceLifecycleEvent(
+                timestamp=datetime.now(tz=UTC),
+                event_type=event_type,
+                device_addresses=(device_address,),
+                interface_id=interface_id,
+            )
+        )
+
+    async def on_device_created(event: LoomDeviceCreatedEvent) -> None:
+        await _emit_lifecycle(
+            event_type=DeviceLifecycleEventType.CREATED,
+            device_address=event.payload.device_address,
+            interface_id=event.payload.interface_id,
+        )
+
+    async def on_device_removed(event: LoomDeviceRemovedEvent) -> None:
+        await _emit_lifecycle(
+            event_type=DeviceLifecycleEventType.REMOVED,
+            device_address=event.payload.device_address,
+            interface_id=event.payload.interface_id,
+        )
+
+    group.subscribe(event_type=LoomCentralStateChangedEvent, handler=on_central_state)
+    group.subscribe(event_type=LoomDeviceCreatedEvent, handler=on_device_created)
+    group.subscribe(event_type=LoomDeviceRemovedEvent, handler=on_device_removed)
