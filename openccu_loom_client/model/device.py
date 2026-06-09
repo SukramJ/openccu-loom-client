@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 from openccu_loom_types.rest import Availability, DeviceSummary, Firmware
@@ -108,6 +109,34 @@ class Device:
     def availability(self) -> Availability | None:
         """Return the availability detail, or ``None`` until detail is attached."""
         return self._availability
+
+    # ---- aiohomematic-compat surface (read by homematicip_local entities) ----
+
+    @property
+    def identifier(self) -> str:
+        """Return the HA device identifier (``address@interface_id``, matching aiohomematic)."""
+        return f"{self.address}@{self.interface_id}"
+
+    @property
+    def central_info(self) -> SimpleNamespace:
+        """Return the owning central, exposing its HA-facing ``name`` (the via-device)."""
+        return SimpleNamespace(name=self._store.central_name)
+
+    @property
+    def room(self) -> str | None:
+        """Return the single assigned room, or ``None`` unless exactly one is set."""
+        rooms = self.rooms
+        return rooms[0] if len(rooms) == 1 else None
+
+    @property
+    def has_sub_devices(self) -> bool:
+        """Return whether the device exposes sub-devices (not modelled for the loom backend)."""
+        return False
+
+    @property
+    def model_description(self) -> str:
+        """Return the human-readable model description (the model for the loom backend)."""
+        return self.model
 
     # ---- graph navigation ----
 

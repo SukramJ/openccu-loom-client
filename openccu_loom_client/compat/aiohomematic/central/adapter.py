@@ -594,6 +594,9 @@ class LoomCentralAdapter:
         # set before bootstrap() runs.
         client.store.set_data_point_factory(make_generic_data_point)
         client.store.set_custom_data_point_factory(make_custom_data_point)
+        # HA links every device to this central via Device.central_info.name,
+        # which must equal the adapter name (the integration's instance name).
+        client.store.set_central_name(name)
         self._refresh_group: Any = None
         # HA entities subscribe on aiohomematic's *own* event bus and match
         # events by ``type(event)``/``.key``. The adapter therefore exposes a
