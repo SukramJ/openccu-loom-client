@@ -461,6 +461,10 @@ class LoomStore:
             }
         )
         dp._replace_summary(new_summary)
+        # A fresh daemon value supersedes any optimistic value HA wrote
+        # (the compat data-point layer overlays ``_value_override``).
+        if hasattr(dp, "_value_override"):
+            del dp._value_override
 
     def apply_device_created(self, payload: DeviceCreatedPayload) -> None:
         """

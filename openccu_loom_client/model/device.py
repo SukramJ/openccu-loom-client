@@ -138,6 +138,11 @@ class Device:
         """Return the human-readable model description (the model for the loom backend)."""
         return self.model
 
+    @property
+    def week_profile_data_point(self) -> None:
+        """Return the device's climate week-profile data point (not modelled for loom)."""
+        return None
+
     # ---- graph navigation ----
 
     @property
