@@ -192,6 +192,20 @@ class DpSensor(_GenericEntitySurface, DataPoint):
 
     _category: ClassVar[DataPointCategory] = DataPointCategory.Sensor
 
+    @property
+    def value(self) -> Any:
+        """Resolve an ENUM index to its option string (mirrors aiohomematic's sensor value)."""
+        raw = DataPoint.value.fget(self)  # type: ignore[attr-defined]
+        value_list = self.value_list
+        if (
+            self.type == "ENUM"
+            and value_list
+            and isinstance(raw, int)
+            and 0 <= raw < len(value_list)
+        ):
+            return value_list[raw]
+        return raw
+
 
 class DpSelect(_GenericEntitySurface, DataPoint):
     """ENUM-typed parameter (read+write)."""
