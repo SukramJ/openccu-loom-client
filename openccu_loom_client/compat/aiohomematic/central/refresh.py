@@ -34,7 +34,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from openccu_loom_client.compat.aiohomematic.central.events import DataPointStateChangedEvent
+from aiohomematic.event_types import DataPointStateChangedEvent
+
 from openccu_loom_client.compat.aiohomematic.model.custom import custom_unique_id
 from openccu_loom_client.compat.aiohomematic.model.hub import sysvar_unique_id
 from openccu_loom_client.events import (
@@ -49,36 +50,35 @@ from openccu_loom_client.events.types import (
 )
 
 if TYPE_CHECKING:
+    from aiohomematic.central.events import EventBus as AioEventBus
+
     from openccu_loom_client.events import EventBus, SubscriptionGroup
     from openccu_loom_client.store import LoomStore
 
 
-def install_refresh_bridge(*, bus: EventBus, group: SubscriptionGroup, store: LoomStore) -> None:
+def install_refresh_bridge(
+    *, bus: EventBus, group: SubscriptionGroup, store: LoomStore, ha_bus: AioEventBus
+) -> None:
     """
-    Wire the daemon value events to ``DataPointStateChangedEvent``.
+    Wire the daemon value events to aiohomematic's ``DataPointStateChangedEvent``.
 
-    Each event's routing key is the daemon-supplied canonical
-    ``payload.unique_id`` when present; otherwise it is rebuilt from the
-    raw payload fields and ``store.serial_suffix`` via the shared
-    contract (so it stays bit-identical). All subscriptions are tracked
-    on ``group`` so the caller tears them down with a single
-    ``group.cancel()``.
+    Daemon wire events are consumed on the loom ``bus`` (via ``group``); the
+    HA-facing :class:`DataPointStateChangedEvent` is published on ``ha_bus``,
+    aiohomematic's own event bus, so a HA entity's ``type(event)``/``.key``
+    subscription matches. Each event's routing key is the daemon-supplied
+    canonical ``payload.unique_id`` when present; otherwise it is rebuilt from
+    the raw payload fields and ``store.serial_suffix`` via the shared contract
+    (so it stays bit-identical). All subscriptions are tracked on ``group`` so
+    the caller tears them down with a single ``group.cancel()``.
     """
 
-    async def _emit(*, seq: int, kind: Any, ts: Any, event_key: str) -> None:
-        await bus.publish(
-            DataPointStateChangedEvent(
-                seq=seq,
-                kind=kind,
-                ts=ts,
-                event_key=event_key,
-            )
+    async def _emit(*, ts: Any, event_key: str, value: Any = None) -> None:
+        await ha_bus.publish(
+            event=DataPointStateChangedEvent(timestamp=ts, unique_id=event_key, new_value=value)
         )
 
     async def on_value(event: DataPointValueChangedEvent) -> None:
         await _emit(
-            seq=event.seq,
-            kind=event.kind,
             ts=event.ts,
             event_key=event.payload.unique_id
             or data_point_event_key(
@@ -87,12 +87,11 @@ def install_refresh_bridge(*, bus: EventBus, group: SubscriptionGroup, store: Lo
                 channel=event.payload.channel,
                 parameter=event.payload.parameter,
             ),
+            value=getattr(event.payload, "value", None),
         )
 
     async def on_custom(event: CustomDataPointStateChangedEvent) -> None:
         await _emit(
-            seq=event.seq,
-            kind=event.kind,
             ts=event.ts,
             event_key=event.payload.unique_id
             or custom_unique_id(
@@ -100,15 +99,15 @@ def install_refresh_bridge(*, bus: EventBus, group: SubscriptionGroup, store: Lo
                 device_address=event.payload.device_address,
                 channel_no=event.payload.channel,
             ),
+            value=getattr(event.payload, "value", None),
         )
 
     async def on_sysvar(event: SysvarChangedEvent) -> None:
         await _emit(
-            seq=event.seq,
-            kind=event.kind,
             ts=event.ts,
             event_key=event.payload.unique_id
             or sysvar_unique_id(serial_suffix=store.serial_suffix, name=event.payload.name),
+            value=getattr(event.payload, "value", None),
         )
 
     async def on_rollback(event: DataPointOptimisticRolledBackEvent) -> None:

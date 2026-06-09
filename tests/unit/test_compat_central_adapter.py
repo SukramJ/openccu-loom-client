@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from aiohomematic.central.events import EventBus as AioEventBus
 from openccu_loom_types.enums import DataPointCategory
 from openccu_loom_types.rest import DataPointSummary, Snapshot
 import pytest
@@ -104,7 +105,10 @@ class TestIdentity:
         assert central.url == "http://loom.test:8080/api/v1"
         assert central.state.value == "stopped"
         assert central.available is False
-        assert central.event_bus is central.events
+        # event_bus is aiohomematic's own bus (HA entities subscribe on it and
+        # match real aiohomematic event types); the loom wire bus is `events`.
+        assert isinstance(central.event_bus, AioEventBus)
+        assert central.event_bus is not central.events
 
 
 @pytest.fixture

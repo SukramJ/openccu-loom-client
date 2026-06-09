@@ -5,6 +5,9 @@
 
 from __future__ import annotations
 
+from aiohomematic.async_support import Looper
+from aiohomematic.central.events import EventBus as AioEventBus
+from aiohomematic.event_types import DataPointStateChangedEvent
 from openccu_loom_types.enums import DataPointType
 from openccu_loom_types.rest import CustomDPSummary, Kind, Snapshot
 from openccu_loom_types.ws import (
@@ -15,7 +18,6 @@ from openccu_loom_types.ws import (
 )
 
 from openccu_loom_client.compat.aiohomematic.central import CentralConfig
-from openccu_loom_client.compat.aiohomematic.central.events import DataPointStateChangedEvent
 from openccu_loom_client.compat.aiohomematic.central.refresh import install_refresh_bridge
 from openccu_loom_client.compat.aiohomematic.model.custom import (
     CustomDpCover,
@@ -212,22 +214,26 @@ class TestCustomDeepParity:
 
 
 class TestRefreshBridge:
-    async def _collect(self, bus: EventBus) -> list[str]:
+    def _ha_setup(self) -> tuple[Looper, AioEventBus, list[str]]:
+        """Build a real aiohomematic bus and collect the ``unique_id`` of each published state event."""
+        looper = Looper()
+        ha_bus = AioEventBus(task_scheduler=looper)
         seen: list[str] = []
-
-        async def recorder(event: DataPointStateChangedEvent) -> None:
-            seen.append(event.event_key or "")
-
-        bus.subscribe(event_type=DataPointStateChangedEvent, handler=recorder)
-        return seen
+        group = ha_bus.create_subscription_group(name="entity")
+        group.subscribe(
+            event_type=DataPointStateChangedEvent,
+            event_key=None,
+            handler=lambda *, event: seen.append(event.unique_id),
+        )
+        return looper, ha_bus, seen
 
     async def test_value_change_becomes_state_changed(self) -> None:
         # Payload without unique_id → the bridge rebuilds the canonical key
         # from the store's serial suffix. A normal device carries no prefix.
         bus = EventBus()
         group = bus.create_subscription_group(name="t")
-        install_refresh_bridge(bus=bus, group=group, store=LoomStore())
-        seen = await self._collect(bus)
+        looper, ha_bus, seen = self._ha_setup()
+        install_refresh_bridge(bus=bus, group=group, store=LoomStore(), ha_bus=ha_bus)
         await bus.publish(
             DataPointValueChangedEvent(
                 seq=1,
@@ -246,6 +252,7 @@ class TestRefreshBridge:
                 ),
             )
         )
+        await looper.block_till_done()
         assert seen == ["loom_vcu1_1_state"]
 
     async def test_value_change_consumes_payload_unique_id(self) -> None:
@@ -253,8 +260,8 @@ class TestRefreshBridge:
         # (no rebuild) — the drift-free path.
         bus = EventBus()
         group = bus.create_subscription_group(name="t")
-        install_refresh_bridge(bus=bus, group=group, store=LoomStore())
-        seen = await self._collect(bus)
+        looper, ha_bus, seen = self._ha_setup()
+        install_refresh_bridge(bus=bus, group=group, store=LoomStore(), ha_bus=ha_bus)
         await bus.publish(
             DataPointValueChangedEvent(
                 seq=1,
@@ -274,6 +281,7 @@ class TestRefreshBridge:
                 ),
             )
         )
+        await looper.block_till_done()
         assert seen == ["loom_vcu1_1_state"]
 
     async def test_custom_and_sysvar_changes_become_state_changed(self) -> None:
@@ -281,8 +289,8 @@ class TestRefreshBridge:
         group = bus.create_subscription_group(name="t")
         store = LoomStore()
         store.set_serial("3014F711A0001234")  # serial suffix → 11a0001234
-        install_refresh_bridge(bus=bus, group=group, store=store)
-        seen = await self._collect(bus)
+        looper, ha_bus, seen = self._ha_setup()
+        install_refresh_bridge(bus=bus, group=group, store=store, ha_bus=ha_bus)
         await bus.publish(
             CustomDataPointStateChangedEvent(
                 seq=2,
@@ -312,12 +320,14 @@ class TestRefreshBridge:
         # Rebuilt canonical keys: a custom DP keys on its primary channel
         # address (no serial prefix for the non-virtual VCU1); a sysvar on
         # ``loom_<serial>_sysvar_<hub_slug(name)>`` (space folds to a dash).
+        await looper.block_till_done()
         assert seen == ["loom_vcu1_1", "loom_11a0001234_sysvar_my-var"]
 
     async def test_optimistic_rollback_broadcast_becomes_public_event(self) -> None:
         bus = EventBus()
         group = bus.create_subscription_group(name="t")
-        install_refresh_bridge(bus=bus, group=group, store=LoomStore())
+        _, ha_bus, _ = self._ha_setup()
+        install_refresh_bridge(bus=bus, group=group, store=LoomStore(), ha_bus=ha_bus)
         seen: list[OptimisticRollbackEvent] = []
 
         async def recorder(event: OptimisticRollbackEvent) -> None:
