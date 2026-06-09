@@ -703,8 +703,10 @@ class LoomCentralAdapter:
             loom_category = getattr(dp, "category", None)
             if loom_category is None:
                 continue
-            # Loom and aiohomematic share identical category *values*; map by value.
-            grouped.setdefault(AioDataPointCategory(str(loom_category)), []).append(dp)
+            # Loom and aiohomematic share identical category *values*; map by
+            # value (the loom StrEnum's ``str()`` yields its repr, not the value).
+            category_value = getattr(loom_category, "value", loom_category)
+            grouped.setdefault(AioDataPointCategory(category_value), []).append(dp)
         if grouped:
             await self._ha_bus.publish(
                 event=AioDataPointsCreatedEvent(

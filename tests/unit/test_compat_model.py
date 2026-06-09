@@ -7,9 +7,15 @@ from __future__ import annotations
 
 from aiohomematic.async_support import Looper
 from aiohomematic.central.events import EventBus as AioEventBus
-from aiohomematic.const import CentralState, DeviceTriggerEventType, ParamsetKey
+from aiohomematic.const import (
+    CentralState,
+    DataPointCategory as AioDataPointCategory,
+    DeviceTriggerEventType,
+    ParamsetKey,
+)
 from aiohomematic.event_types import (
     CentralStateChangedEvent as AioCentralStateChangedEvent,
+    DataPointsCreatedEvent as AioDataPointsCreatedEvent,
     DataPointStateChangedEvent,
     DeviceLifecycleEvent,
     DeviceLifecycleEventType,
@@ -17,7 +23,7 @@ from aiohomematic.event_types import (
     OptimisticRollbackEvent,
 )
 from openccu_loom_types.enums import DataPointType
-from openccu_loom_types.rest import CustomDPSummary, Kind, Snapshot
+from openccu_loom_types.rest import CustomDPSummary, DataPointSummary, Kind, Snapshot
 from openccu_loom_types.ws import (
     CentralStateChangedPayload,
     CustomDataPointStateChangedPayload,
@@ -495,3 +501,36 @@ class TestEventBridge:
             DeviceLifecycleEventType.REMOVED,
         ]
         assert seen[0].device_addresses == ("VCU1",)
+
+    async def test_data_points_created_groups_by_aiohomematic_category(self) -> None:
+        # Regression: the loom DataPointCategory StrEnum's ``str()`` yields its
+        # repr (``DataPointCategory.BinarySensor``), so the bootstrap must map
+        # to the aiohomematic category by ``.value`` — not ``str()``.
+        central = await _adapter()
+        central._client.store.attach_channel_data_points(
+            device_address="VCU1",
+            channel_number=1,
+            data_points=[
+                DataPointSummary.model_validate(
+                    {
+                        "parameter": "STATE",
+                        "type": "BOOL",
+                        "category": "binary_sensor",
+                        "data_point_type": "binary_sensor",
+                        "value": True,
+                        "observed": True,
+                        "operations": {"read": True, "write": False, "event": True},
+                    }
+                )
+            ],
+        )
+        seen: list[AioDataPointsCreatedEvent] = []
+        central.event_bus.create_subscription_group(name="x").subscribe(
+            event_type=AioDataPointsCreatedEvent,
+            event_key=None,
+            handler=lambda *, event: seen.append(event),
+        )
+        await central._emit_data_points_created()
+        await central._looper.block_till_done()
+        assert len(seen) == 1
+        assert AioDataPointCategory.BINARY_SENSOR in seen[0].new_data_points
