@@ -34,18 +34,26 @@ Homepage = "https://github.com/SukramJ/openccu-loom-client"
 
 [project.optional-dependencies]
 dev = [
+    "aiohomematic>=2026.6.1",
     "pytest>=7.4",
     "pytest-asyncio>=0.23",
     "aioresponses>=0.7.6",
     "ruff>=0.6",
     "mypy>=1.10",
 ]
-# Opt-in extra: the cross-package protocol-parity test (tests/compat/)
-# checks the compat shim's data-point twins against the real
-# aiohomematic runtime_checkable protocols, so it needs aiohomematic
-# installed. Deliberately NOT in `dev` / requirements_test.txt — the
-# default suite skips tests/compat via importorskip. Run it with:
-#   pip install -e '.[compat-test]' && pytest tests/compat
+# The compat shim's central layer (adapter + refresh bridge) republishes
+# events as real aiohomematic.event_types instances on a real
+# aiohomematic EventBus, so importing
+# openccu_loom_client.compat.aiohomematic.central requires the real
+# package at runtime. The core client (transport/store/events/model/
+# operations) stays free of it; install this extra to use the compat
+# layer:
+#   pip install 'openccu-loom-client[compat]'
+compat = [
+    "aiohomematic>=2026.6.1",
+]
+# Backwards-compatible alias for the old opt-in test extra
+# (tests/compat protocol-parity suite + compat unit tests).
 compat-test = [
     "aiohomematic>=2026.6.1",
 ]

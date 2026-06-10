@@ -18,10 +18,11 @@ twins. For protocol-based dispatch to work, those twins must
 
 This test constructs one instance of each compat class and checks it
 against the corresponding aiohomematic protocol. It needs ``aiohomematic``
-installed (it is not a runtime/dev dependency of this package), so it
-skips cleanly when absent. Install the opt-in extra to run it::
+installed (a dev/test dependency, but not a core runtime dependency of
+this package), so it skips cleanly when absent. The default dev setup
+covers it::
 
-    pip install -e '.[compat-test]'
+    pip install -e '.[dev]'
     pytest tests/compat
 
 The twins satisfy the protocols via the shared ``_protocol_surface``
