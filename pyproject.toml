@@ -13,7 +13,7 @@ requires-python = ">=3.14"
 dependencies = [
     "aiohomematic-contract==2026.6.1",
     "aiohttp>=3.9",
-    "openccu-loom-types>=0.1.5,<0.2",
+    "openccu-loom-types>=0.1.8,<0.2",
     "pydantic>=2.6",
 ]
 classifiers = [

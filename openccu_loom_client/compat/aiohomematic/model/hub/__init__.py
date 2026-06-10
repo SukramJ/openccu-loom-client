@@ -194,7 +194,7 @@ class HmUpdate:
     Type marker for the HA update platform.
 
     The daemon exposes per-device firmware metadata on
-    :class:`openccu_loom_client.model.Device.firmware` (populated by
+    :class:`openccu_loom_client.model.Device.firmware_detail` (populated by
     ``GET /devices/{addr}``). Wiring HA update entities to it is part of
     the custom/update data-point workstream.
     """

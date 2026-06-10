@@ -314,6 +314,30 @@ def resolve_generic_class(
     )
 
 
+# The daemon derives the authoritative DataPointCategory from the full
+# paramset + CONTROL context; clients spawn entities off ``category``
+# rather than re-deriving from raw (type, operations) — see the
+# DataPointSummary.category contract in the daemon's openapi.yaml. The
+# heuristic resolver below is the fallback only when the daemon omits
+# the category (e.g. a DP that does not implement the categorised
+# surface).
+_CLASS_BY_CATEGORY: dict[str, type[DataPoint]] = {
+    cls._category.value: cls
+    for cls in (
+        DpSwitch,
+        DpBinarySensor,
+        DpSensor,
+        DpSelect,
+        DpText,
+        BaseDpNumber,
+        DpAction,
+        DpButton,
+        DpActionSelect,
+        BaseDpActionNumber,
+    )
+}
+
+
 def make_generic_data_point(
     *,
     summary: Any,
@@ -322,13 +346,17 @@ def make_generic_data_point(
     store: LoomStore,
 ) -> DataPoint:
     """Store data-point factory: build the categorised ``Dp*`` instance."""
-    ops = summary.operations
-    cls = resolve_generic_class(
-        type_token=summary.type,
-        read=bool(ops.read),
-        write=bool(ops.write),
-        has_value_list=bool(summary.value_list),
-    )
+    cls: type[DataPoint] | None = None
+    if category := getattr(summary, "category", None):
+        cls = _CLASS_BY_CATEGORY.get(str(category))
+    if cls is None:
+        ops = summary.operations
+        cls = resolve_generic_class(
+            type_token=summary.type,
+            read=bool(ops.read),
+            write=bool(ops.write),
+            has_value_list=bool(summary.value_list),
+        )
     return cls(
         summary=summary,
         device_address=device_address,

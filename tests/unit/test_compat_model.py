@@ -44,6 +44,7 @@ from openccu_loom_client.compat.aiohomematic.model.custom import (
     CustomDpIpThermostat,
     make_custom_data_point,
 )
+from openccu_loom_client.compat.aiohomematic.model.generic import DpBinarySensor, DpSensor
 from openccu_loom_client.events import (
     CentralStateChangedEvent as LoomCentralStateChangedEvent,
     CustomDataPointStateChangedEvent,
@@ -534,3 +535,95 @@ class TestEventBridge:
         await central._looper.block_till_done()
         assert len(seen) == 1
         assert AioDataPointCategory.BINARY_SENSOR in seen[0].new_data_points
+
+
+class TestGenericDataPointFactory:
+    """The generic factory trusts the daemon's category + translated name."""
+
+    async def test_uses_daemon_category_over_heuristic_resolver(self) -> None:
+        # A read-only ENUM with a value_list: the heuristic resolver would
+        # pick a sensor (only BOOL → binary_sensor), but the daemon
+        # authoritatively classifies the door state as a binary_sensor.
+        # The factory must trust summary.category.
+        central = await _adapter()
+        central._client.store.attach_channel_data_points(
+            device_address="VCU1",
+            channel_number=1,
+            data_points=[
+                DataPointSummary.model_validate(
+                    {
+                        "parameter": "STATE",
+                        "type": "ENUM",
+                        "category": "binary_sensor",
+                        "value_list": ["CLOSED", "OPEN", "TILTED"],
+                        "value": "CLOSED",
+                        "observed": True,
+                        "operations": {"read": True, "write": False, "event": True},
+                    }
+                )
+            ],
+        )
+        dps = [dp for dp in central._client.store.data_points if dp.parameter == "STATE"]
+        assert len(dps) == 1
+        assert isinstance(dps[0], DpBinarySensor)
+        assert dps[0].category.value == "binary_sensor"
+
+    async def test_falls_back_to_resolver_when_category_absent(self) -> None:
+        # No daemon category → the heuristic resolver applies (read-only
+        # non-BOOL → sensor).
+        central = await _adapter()
+        central._client.store.attach_channel_data_points(
+            device_address="VCU1",
+            channel_number=1,
+            data_points=[
+                DataPointSummary.model_validate(
+                    {
+                        "parameter": "TEMPERATURE",
+                        "type": "FLOAT",
+                        "value": 21.5,
+                        "observed": True,
+                        "operations": {"read": True, "write": False, "event": True},
+                    }
+                )
+            ],
+        )
+        dps = [dp for dp in central._client.store.data_points if dp.parameter == "TEMPERATURE"]
+        assert len(dps) == 1
+        assert isinstance(dps[0], DpSensor)
+
+    async def test_translated_name_from_summary_and_label_omitted(self) -> None:
+        # The daemon supplies the locale-aware name; a label_omitted
+        # "primary" parameter collapses to the device name (None).
+        central = await _adapter()
+        central._client.store.attach_channel_data_points(
+            device_address="VCU1",
+            channel_number=1,
+            data_points=[
+                DataPointSummary.model_validate(
+                    {
+                        "parameter": "LOW_BAT",
+                        "type": "BOOL",
+                        "category": "binary_sensor",
+                        "translated_name": "Batterie",
+                        "value": False,
+                        "observed": True,
+                        "operations": {"read": True, "write": False, "event": True},
+                    }
+                ),
+                DataPointSummary.model_validate(
+                    {
+                        "parameter": "STATE",
+                        "type": "ENUM",
+                        "category": "binary_sensor",
+                        "label_omitted": True,
+                        "value_list": ["CLOSED", "OPEN"],
+                        "value": "CLOSED",
+                        "observed": True,
+                        "operations": {"read": True, "write": False, "event": True},
+                    }
+                ),
+            ],
+        )
+        by_param = {dp.parameter: dp for dp in central._client.store.data_points}
+        assert by_param["LOW_BAT"].translated_name == "Batterie"
+        assert by_param["STATE"].translated_name is None

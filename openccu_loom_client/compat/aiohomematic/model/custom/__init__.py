@@ -334,9 +334,37 @@ class CustomDpDimmer(_CustomEntitySurface):
 class CustomDpIpFixedColorLight(CustomDpDimmer):
     """HmIP fixed-colour light."""
 
+    # Fixed-colour name state is not carried in the daemon's light CDP
+    # state yet; these read as ``None`` until the daemon surfaces them.
+    @property
+    def color_name(self) -> str | None:
+        """Return the active fixed-colour name, or ``None`` if not surfaced."""
+        val = self._state.get("color_name")
+        return str(val) if val is not None else None
+
+    @property
+    def channel_color_name(self) -> str | None:
+        """Return the channel fixed-colour name, or ``None`` if not surfaced."""
+        val = self._state.get("channel_color_name")
+        return str(val) if val is not None else None
+
 
 class CustomDpSoundPlayerLed(CustomDpDimmer):
     """Sound-player LED light variant."""
+
+    # Colour state is not carried in the daemon's light CDP state yet;
+    # these read as ``None`` until the daemon surfaces them.
+    @property
+    def available_colors(self) -> tuple[str, ...] | None:
+        """Return the selectable LED colours, or ``None`` if not surfaced."""
+        raw = self._state.get("available_colors")
+        return tuple(str(c) for c in raw) if raw else None
+
+    @property
+    def color_name(self) -> str | None:
+        """Return the active LED colour name, or ``None`` if not surfaced."""
+        val = self._state.get("color_name")
+        return str(val) if val is not None else None
 
 
 # ---- cover / blind / garage ----
@@ -554,6 +582,19 @@ class BaseCustomDpClimate(_CustomEntitySurface):
     def activity(self) -> str | None:
         """Return the current HVAC action; alias of :attr:`action`."""
         return self.action
+
+    # Link-peer activity sources are a CCU-only mechanism (a thermostat
+    # inferring "idle" from a linked actuator). The daemon reports the
+    # action directly via ``activity``, so loom has no link peers.
+    @property
+    def _peer_level_dp(self) -> None:
+        """Return the link-peer level data point (CCU-only; ``None`` on loom)."""
+        return None
+
+    @property
+    def _peer_state_dp(self) -> None:
+        """Return the link-peer state data point (CCU-only; ``None`` on loom)."""
+        return None
 
     @property
     def profile(self) -> str:

@@ -101,8 +101,8 @@ class Device:
         return tuple(self._summary.rooms or ())
 
     @property
-    def firmware(self) -> Firmware | None:
-        """Return the firmware detail, or ``None`` until detail is attached."""
+    def firmware_detail(self) -> Firmware | None:
+        """Return the firmware detail record, or ``None`` until detail is attached."""
         return self._firmware
 
     @property
@@ -111,6 +111,13 @@ class Device:
         return self._availability
 
     # ---- aiohomematic-compat surface (read by homematicip_local entities) ----
+
+    @property
+    def firmware(self) -> str:
+        """Return the installed firmware version (aiohomematic exposes this as ``sw_version``)."""
+        if self._firmware is not None and self._firmware.Current:
+            return self._firmware.Current
+        return "0.0"
 
     @property
     def identifier(self) -> str:

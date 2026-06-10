@@ -78,17 +78,6 @@ class ConfigurableDevice:
     maintenance: MaintenanceData
 
 
-def _firmware_str(device: Device) -> str:
-    firmware = getattr(device.summary, "firmware", None)
-    if firmware is None:
-        return ""
-    for attr in ("current", "version", "installed"):
-        value = getattr(firmware, attr, None)
-        if value:
-            return str(value)
-    return ""
-
-
 def _maintenance_for(device: Device) -> MaintenanceData:
     channel = device.get_channel(number=0)
     if channel is None:
@@ -132,7 +121,7 @@ def build_configurable_devices(store: LoomStore) -> tuple[ConfigurableDevice, ..
                 model=device.model,
                 model_description=getattr(device.summary, "model_label", "") or "",
                 name=device.name,
-                firmware=_firmware_str(device),
+                firmware=device.firmware,
                 channels=tuple(channels),
                 maintenance=_maintenance_for(device),
             )
