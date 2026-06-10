@@ -39,9 +39,11 @@ import logging
 from typing import TYPE_CHECKING, Any, Final
 
 from aiohomematic.async_support import Looper
-from aiohomematic.central.events import EventBus as AioEventBus
+from aiohomematic.central.events import (
+    DataPointsCreatedEvent as AioDataPointsCreatedEvent,
+    EventBus as AioEventBus,
+)
 from aiohomematic.const import DataPointCategory as AioDataPointCategory
-from aiohomematic.event_types import DataPointsCreatedEvent as AioDataPointsCreatedEvent
 from openccu_loom_types.enums import CentralState, DataPointCategory
 
 from openccu_loom_client.compat.aiohomematic.central.configurable_devices import (

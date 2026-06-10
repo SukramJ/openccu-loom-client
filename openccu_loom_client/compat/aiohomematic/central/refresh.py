@@ -35,8 +35,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
-from aiohomematic.const import CentralState, DataPointKey, DeviceTriggerEventType, ParamsetKey
-from aiohomematic.event_types import (
+from aiohomematic.central.events import (
     CentralStateChangedEvent,
     DataPointStateChangedEvent,
     DeviceLifecycleEvent,
@@ -44,6 +43,7 @@ from aiohomematic.event_types import (
     DeviceTriggerEvent,
     OptimisticRollbackEvent,
 )
+from aiohomematic.const import CentralState, DataPointKey, DeviceTriggerEventType, ParamsetKey
 
 from openccu_loom_client.compat.aiohomematic.model.custom import custom_unique_id
 from openccu_loom_client.compat.aiohomematic.model.hub import sysvar_unique_id
