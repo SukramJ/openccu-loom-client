@@ -634,10 +634,13 @@ class LoomStore:
             body["params"] = params
         if priority is not None:
             body["priority"] = priority
+        # Always send a JSON body: the daemon parses the body strictly and
+        # rejects an empty payload with 400 "Invalid JSON: EOF", so a bare
+        # operation (turn_on without params) must POST ``{}``.
         await self._transport.request(
             "POST",
             f"/devices/{address}/cdps/{name}/{operation}",
-            json_body=body or None,
+            json_body=body,
             allow_retry=False,  # CDP operations may not be idempotent (e.g. cover open).
         )
 
