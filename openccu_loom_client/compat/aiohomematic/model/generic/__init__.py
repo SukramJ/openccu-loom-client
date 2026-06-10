@@ -72,6 +72,17 @@ class _GenericEntitySurface(_GenericProtocolSurface):
         return self.parameter_label or self.parameter  # type: ignore[attr-defined,no-any-return]
 
     @property
+    def translation_key(self) -> str:
+        """
+        Return the HA translation key derived from the parameter name.
+
+        Mirrors aiohomematic's ``generate_translation_key`` — CCU
+        parameter names are ASCII upper-snake, so lowercasing matches
+        its slugify-based output ("STATE" → "state").
+        """
+        return str(self.parameter).lower()  # type: ignore[attr-defined]
+
+    @property
     def full_name(self) -> str:
         device = self.device  # type: ignore[attr-defined]
         device_name = device.name if device is not None else self.device_address  # type: ignore[attr-defined]
