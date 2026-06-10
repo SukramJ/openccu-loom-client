@@ -70,7 +70,17 @@ class DataPoint:
 
     @property
     def value(self) -> Any:
-        """Return the current value of this data point."""
+        """
+        Return the current value of this data point.
+
+        An unobserved data point (the daemon has never seen a wire value
+        nor a cache entry for it) reads ``None`` so consumers render
+        "unknown" — mirroring aiohomematic's ``NO_CACHE_ENTRY`` semantics.
+        Passing through the wire default (0/False) would fabricate a
+        plausible-looking measurement.
+        """
+        if getattr(self._summary, "observed", None) is False:
+            return None
         return self._summary.value
 
     @property
