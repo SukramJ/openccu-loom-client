@@ -41,22 +41,6 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.10",
 ]
-# The compat shim's central layer (adapter + refresh bridge) republishes
-# events as real aiohomematic.event_types instances on a real
-# aiohomematic EventBus, so importing
-# openccu_loom_client.compat.aiohomematic.central requires the real
-# package at runtime. The core client (transport/store/events/model/
-# operations) stays free of it; install this extra to use the compat
-# layer:
-#   pip install 'openccu-loom-client[compat]'
-compat = [
-    "aiohomematic>=2026.6.1",
-]
-# Backwards-compatible alias for the old opt-in test extra
-# (tests/compat protocol-parity suite + compat unit tests).
-compat-test = [
-    "aiohomematic>=2026.6.1",
-]
 
 [tool.setuptools.dynamic]
 version = { attr = "openccu_loom_client.const.VERSION" }
