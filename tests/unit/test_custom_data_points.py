@@ -162,7 +162,9 @@ class TestInvoke:
         assert cdp is not None
         await cdp.invoke("turn_off")
         body = transport.calls[0][2]
-        assert body is None  # no params + no priority → empty body
+        # No params + no priority still POSTs {} — the daemon parses the
+        # body strictly and rejects an absent payload with 400.
+        assert body == {}
 
     async def test_invoke_without_transport_raises(self) -> None:
         store = LoomStore()
