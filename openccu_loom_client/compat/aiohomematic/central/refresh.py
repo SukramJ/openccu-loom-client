@@ -33,7 +33,7 @@ consuming the original typed events without an ``event_key`` filter.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from aiohomematic.const import CentralState, DataPointKey, DeviceTriggerEventType, ParamsetKey
 from aiohomematic.event_types import (
@@ -171,7 +171,10 @@ def _wire_trigger_and_rollback(
                 device_address=p.device_address,
                 channel_no=p.channel,
                 parameter=p.parameter,
-                value=p.value,
+                # The wire payload's value is optional; aiohomematic's frozen
+                # dataclass carries it unvalidated, so the cast only documents
+                # the contract without changing runtime behaviour.
+                value=cast("str | int | float | bool", p.value),
                 device_name=device_name,
             )
         )
