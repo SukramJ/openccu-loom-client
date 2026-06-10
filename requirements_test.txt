@@ -4,7 +4,6 @@
 # The compat shim (openccu_loom_client.compat.aiohomematic.central) bridges
 # events onto the real aiohomematic event bus, so its unit tests need the
 # real package installed.
-aiohomematic==2026.6.1
 coverage==7.14.1
 mypy==2.1.0
 prek==0.4.4
