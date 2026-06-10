@@ -11,7 +11,7 @@ license = { text = "MIT" }
 authors = [{ name = "OpenCCU-Loom authors" }]
 requires-python = ">=3.14"
 dependencies = [
-    "aiohomemati==2026.6.1",
+    "aiohomematic==2026.6.1",
     "aiohttp>=3.9",
     "openccu-loom-types>=0.1.9,<0.2",
     "pydantic>=2.6",
