@@ -334,9 +334,14 @@ class LoomStore:
             del self._cdps[k]
         for summary in cdps:
             key = (device_address, summary.name)
+            # Seed the live state from the summary's snapshot (daemon
+            # >= 0.x includes it in GET .../cdps) so entities start on
+            # the real state instead of defaults until the first WS
+            # ``custom_data_point.state_changed`` push arrives.
             self._cdps[key] = self._build_custom_data_point(
                 summary=summary,
                 device_address=device_address,
+                initial_state=getattr(summary, "state", None),
             )
 
     # ---- bulk load (bootstrap) ----
