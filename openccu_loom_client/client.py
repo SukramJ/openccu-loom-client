@@ -79,9 +79,19 @@ if TYPE_CHECKING:
 _LOGGER: Final = logging.getLogger(__name__)
 
 # Default WS topic subscriptions for the HA-equivalent feature set:
-# device + central + system + hub events from every CCU. Callers
-# that want narrower scope can pass an explicit list to start_events().
-_DEFAULT_WS_SUBSCRIPTIONS: Final = ("device.*", "central.*", "system.*", "hub.*")
+# datapoint value pushes, custom-DP state pushes, plus device +
+# central + system + hub events from every CCU. ``datapoint.*`` and
+# ``custom_data_point.*`` are the live-state plane — without them every
+# entity freezes on its bootstrap value. Callers that want narrower
+# scope can pass an explicit list to start_events().
+_DEFAULT_WS_SUBSCRIPTIONS: Final = (
+    "datapoint.*",
+    "custom_data_point.*",
+    "device.*",
+    "central.*",
+    "system.*",
+    "hub.*",
+)
 
 
 class LoomClient:
