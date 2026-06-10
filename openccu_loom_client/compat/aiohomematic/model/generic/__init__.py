@@ -252,12 +252,14 @@ class DpBinarySensor(_GenericEntitySurface, DataPoint):
         if isinstance(raw, bool):
             return raw
         value_list: tuple[str, ...] = self.value_list
-        if value_list:
-            true_value = _BINARY_SENSOR_TRUE_VALUE_BY_VALUE_LIST.get(tuple(value_list))
+        if value_list and (
+            true_value := _BINARY_SENSOR_TRUE_VALUE_BY_VALUE_LIST.get(tuple(value_list))
+        ):
             if isinstance(raw, int) and 0 <= raw < len(value_list):
                 raw = value_list[raw]
-            if true_value is not None and isinstance(raw, str):
+            if isinstance(raw, str):
                 return raw == true_value
+        # Unknown lists / plain numerics: index 0 is the inactive option.
         return bool(raw)
 
     @property
