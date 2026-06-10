@@ -73,6 +73,11 @@ class LoomStore:
         # == ``payload.central``). Used to scope/annotate events, NOT as a
         # routing-key prefix.
         self._central_id: str = ""
+        # The HA-facing central *name* (the integration's instance name, ==
+        # the LoomCentralAdapter ``name``). HA links every device to this
+        # central via ``Device.central_info.name``, so it must match the
+        # adapter name — which may differ from the daemon ``central_id``.
+        self._central_name: str = ""
         # The CCU serial suffix (last 10 chars, lower-cased). This is the
         # central-id slot of every canonical HA routing key for hub /
         # internal / virtual-remote addresses (see
@@ -108,6 +113,15 @@ class LoomStore:
     def set_central_id(self, central_id: str | None) -> None:
         """Record the daemon central name (from the bootstrap snapshot)."""
         self._central_id = central_id or ""
+
+    @property
+    def central_name(self) -> str:
+        """The HA-facing central name (adapter name), falling back to the daemon id."""
+        return self._central_name or self._central_id
+
+    def set_central_name(self, central_name: str | None) -> None:
+        """Record the HA-facing central name (the integration's instance name)."""
+        self._central_name = central_name or ""
 
     @property
     def serial_suffix(self) -> str:
@@ -447,6 +461,10 @@ class LoomStore:
             }
         )
         dp._replace_summary(new_summary)
+        # A fresh daemon value supersedes any optimistic value HA wrote
+        # (the compat data-point layer overlays ``_value_override``).
+        if hasattr(dp, "_value_override"):
+            del dp._value_override
 
     def apply_device_created(self, payload: DeviceCreatedPayload) -> None:
         """

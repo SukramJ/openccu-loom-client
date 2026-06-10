@@ -11,9 +11,9 @@ license = { text = "MIT" }
 authors = [{ name = "OpenCCU-Loom authors" }]
 requires-python = ">=3.14"
 dependencies = [
-    "aiohomematic-contract==2026.6.1",
+    "aiohomemati==2026.6.1",
     "aiohttp>=3.9",
-    "openccu-loom-types>=0.1.5,<0.2",
+    "openccu-loom-types>=0.1.9,<0.2",
     "pydantic>=2.6",
 ]
 classifiers = [
@@ -34,20 +34,12 @@ Homepage = "https://github.com/SukramJ/openccu-loom-client"
 
 [project.optional-dependencies]
 dev = [
+    "aiohomematic>=2026.6.1",
     "pytest>=7.4",
     "pytest-asyncio>=0.23",
     "aioresponses>=0.7.6",
     "ruff>=0.6",
     "mypy>=1.10",
-]
-# Opt-in extra: the cross-package protocol-parity test (tests/compat/)
-# checks the compat shim's data-point twins against the real
-# aiohomematic runtime_checkable protocols, so it needs aiohomematic
-# installed. Deliberately NOT in `dev` / requirements_test.txt — the
-# default suite skips tests/compat via importorskip. Run it with:
-#   pip install -e '.[compat-test]' && pytest tests/compat
-compat-test = [
-    "aiohomematic>=2026.6.1",
 ]
 
 [tool.setuptools.dynamic]

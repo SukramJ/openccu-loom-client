@@ -39,6 +39,8 @@ if TYPE_CHECKING:
 
 _LOGGER: Final = logging.getLogger(__name__)
 
+_UNSET: Final = object()
+
 
 class _GenericEntitySurface(_GenericProtocolSurface):
     """
@@ -84,9 +86,42 @@ class _GenericEntitySurface(_GenericProtocolSurface):
 
     # ---- value / state ----
 
+    def _resolve_enum(self, raw: Any) -> Any:
+        """Map an ENUM index to its ``value_list`` option string (mirrors aiohomematic)."""
+        value_list: tuple[str, ...] = self.value_list  # type: ignore[attr-defined]
+        is_enum: bool = self.type == "ENUM"  # type: ignore[attr-defined]
+        if is_enum and value_list and isinstance(raw, int) and 0 <= raw < len(value_list):
+            return value_list[raw]
+        return raw
+
+    @property
+    def value(self) -> Any:
+        """
+        Return the data point's value, ENUM-resolved.
+
+        An ENUM index is mapped to its ``value_list`` option string so HA's
+        sensor/select read a string. A value written by HA (optimistic /
+        restored default) takes precedence until the daemon reports a fresh
+        one (the store clears the override in ``apply_value_changed``).
+        """
+        override = getattr(self, "_value_override", _UNSET)
+        if override is not _UNSET:
+            return override
+        return self._resolve_enum(DataPoint.value.fget(self))  # type: ignore[attr-defined]
+
+    @value.setter
+    def value(self, new_value: Any) -> None:
+        """Store an HA-written value (optimistic); the next daemon update clears it."""
+        self._value_override = new_value
+
+    @property
+    def default(self) -> Any:
+        """Return the parameter's default, ENUM-resolved (HA restores this when unset)."""
+        return self._resolve_enum(getattr(self.summary, "default", None))  # type: ignore[attr-defined]
+
     @property
     def is_valid(self) -> bool:
-        return self.value is not None  # type: ignore[attr-defined]
+        return self.value is not None
 
     @property
     def state_uncertain(self) -> bool:
@@ -279,6 +314,30 @@ def resolve_generic_class(
     )
 
 
+# The daemon derives the authoritative DataPointCategory from the full
+# paramset + CONTROL context; clients spawn entities off ``category``
+# rather than re-deriving from raw (type, operations) — see the
+# DataPointSummary.category contract in the daemon's openapi.yaml. The
+# heuristic resolver below is the fallback only when the daemon omits
+# the category (e.g. a DP that does not implement the categorised
+# surface).
+_CLASS_BY_CATEGORY: dict[str, type[DataPoint]] = {
+    cls._category.value: cls
+    for cls in (
+        DpSwitch,
+        DpBinarySensor,
+        DpSensor,
+        DpSelect,
+        DpText,
+        BaseDpNumber,
+        DpAction,
+        DpButton,
+        DpActionSelect,
+        BaseDpActionNumber,
+    )
+}
+
+
 def make_generic_data_point(
     *,
     summary: Any,
@@ -287,13 +346,17 @@ def make_generic_data_point(
     store: LoomStore,
 ) -> DataPoint:
     """Store data-point factory: build the categorised ``Dp*`` instance."""
-    ops = summary.operations
-    cls = resolve_generic_class(
-        type_token=summary.type,
-        read=bool(ops.read),
-        write=bool(ops.write),
-        has_value_list=bool(summary.value_list),
-    )
+    cls: type[DataPoint] | None = None
+    if category := getattr(summary, "category", None):
+        cls = _CLASS_BY_CATEGORY.get(str(category))
+    if cls is None:
+        ops = summary.operations
+        cls = resolve_generic_class(
+            type_token=summary.type,
+            read=bool(ops.read),
+            write=bool(ops.write),
+            has_value_list=bool(summary.value_list),
+        )
     return cls(
         summary=summary,
         device_address=device_address,

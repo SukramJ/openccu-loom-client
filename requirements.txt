@@ -1,5 +1,5 @@
-aiohomematic-contract==2026.6.1
+aiohomematic==2026.6.1
 aiohttp>=3.14.0
-openccu-loom-types>=0.1.5,<0.2
+openccu-loom-types>=0.1.9,<0.2
 pydantic>=2.13.4
 # orjson is optional - see pyproject.toml [project.optional-dependencies]

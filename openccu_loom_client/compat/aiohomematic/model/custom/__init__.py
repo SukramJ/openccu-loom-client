@@ -231,6 +231,11 @@ class CustomDpDimmer(_CustomEntitySurface):
         return _as_int(self._state.get("brightness"))
 
     @property
+    def group_brightness(self) -> int | None:
+        """Return the group-channel brightness (not modelled for loom)."""
+        return None
+
+    @property
     def has_color_temperature(self) -> bool:
         """Return whether the light supports colour temperature."""
         return self.capabilities.color_temp
@@ -329,9 +334,37 @@ class CustomDpDimmer(_CustomEntitySurface):
 class CustomDpIpFixedColorLight(CustomDpDimmer):
     """HmIP fixed-colour light."""
 
+    # Fixed-colour name state is not carried in the daemon's light CDP
+    # state yet; these read as ``None`` until the daemon surfaces them.
+    @property
+    def color_name(self) -> str | None:
+        """Return the active fixed-colour name, or ``None`` if not surfaced."""
+        val = self._state.get("color_name")
+        return str(val) if val is not None else None
+
+    @property
+    def channel_color_name(self) -> str | None:
+        """Return the channel fixed-colour name, or ``None`` if not surfaced."""
+        val = self._state.get("channel_color_name")
+        return str(val) if val is not None else None
+
 
 class CustomDpSoundPlayerLed(CustomDpDimmer):
     """Sound-player LED light variant."""
+
+    # Colour state is not carried in the daemon's light CDP state yet;
+    # these read as ``None`` until the daemon surfaces them.
+    @property
+    def available_colors(self) -> tuple[str, ...] | None:
+        """Return the selectable LED colours, or ``None`` if not surfaced."""
+        raw = self._state.get("available_colors")
+        return tuple(str(c) for c in raw) if raw else None
+
+    @property
+    def color_name(self) -> str | None:
+        """Return the active LED colour name, or ``None`` if not surfaced."""
+        val = self._state.get("color_name")
+        return str(val) if val is not None else None
 
 
 # ---- cover / blind / garage ----
@@ -550,6 +583,19 @@ class BaseCustomDpClimate(_CustomEntitySurface):
         """Return the current HVAC action; alias of :attr:`action`."""
         return self.action
 
+    # Link-peer activity sources are a CCU-only mechanism (a thermostat
+    # inferring "idle" from a linked actuator). The daemon reports the
+    # action directly via ``activity``, so loom has no link peers.
+    @property
+    def _peer_level_dp(self) -> None:
+        """Return the link-peer level data point (CCU-only; ``None`` on loom)."""
+        return None
+
+    @property
+    def _peer_state_dp(self) -> None:
+        """Return the link-peer state data point (CCU-only; ``None`` on loom)."""
+        return None
+
     @property
     def profile(self) -> str:
         """Return the active profile; alias of :attr:`preset_mode`."""
@@ -760,6 +806,49 @@ class CustomDpTextDisplay(_CustomEntitySurface):
     """Two-line text-display CDP."""
 
     _category: ClassVar[DataPointCategory] = DataPointCategory.TextDisplay
+
+    # The daemon's text-display CDP does not yet surface the selectable
+    # option lists; expose empty sets so the HA notify entity's state
+    # attributes render without the per-option ActionSelects.
+    @property
+    def available_icons(self) -> tuple[str, ...]:
+        """Return the selectable icons (none surfaced by the daemon yet)."""
+        return ()
+
+    @property
+    def available_sounds(self) -> tuple[str, ...]:
+        """Return the selectable sounds (none surfaced by the daemon yet)."""
+        return ()
+
+    @property
+    def available_background_colors(self) -> tuple[str, ...]:
+        """Return the selectable background colours (none surfaced by the daemon yet)."""
+        return ()
+
+    @property
+    def available_text_colors(self) -> tuple[str, ...]:
+        """Return the selectable text colours (none surfaced by the daemon yet)."""
+        return ()
+
+    @property
+    def available_alignments(self) -> tuple[str, ...]:
+        """Return the selectable alignments (none surfaced by the daemon yet)."""
+        return ()
+
+    @property
+    def has_icons(self) -> bool:
+        """Return whether the display supports icons (not surfaced yet)."""
+        return False
+
+    @property
+    def has_sounds(self) -> bool:
+        """Return whether the display supports sounds (not surfaced yet)."""
+        return False
+
+    @property
+    def burst_limit_warning(self) -> bool:
+        """Return whether the display is in burst-limit warning (not surfaced yet)."""
+        return False
 
     async def write(self, **params: Any) -> None:
         """Write text to the display, passing through line/content params."""

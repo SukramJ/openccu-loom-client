@@ -246,11 +246,23 @@ class _GenericProtocolSurface(_CommonProtocolSurface):
 
     @property
     def translated_name(self) -> str | None:
-        return None
+        # The daemon resolves the locale-aware entity name (identical to
+        # the MQTT discovery `name`) and the "primary parameter" marker.
+        # label_omitted → None so HA collapses the entity to the device
+        # name alone, mirroring MQTT discovery's `name: null`.
+        summary = getattr(self, "summary", None)
+        if summary is None or getattr(summary, "label_omitted", False):
+            return None
+        return getattr(summary, "translated_name", None) or None
 
     @property
     def translated_full_name(self) -> str | None:
-        return None
+        name = self.translated_name
+        if name is None:
+            return None
+        device = getattr(self, "device", None)
+        device_name = device.name if device is not None else getattr(self, "device_address", "")
+        return f"{device_name} {name}".strip()
 
     @property
     def timer_on_time(self) -> float | None:

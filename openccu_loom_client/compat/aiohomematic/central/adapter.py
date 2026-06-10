@@ -34,9 +34,14 @@ Scope of this adapter:
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 import logging
 from typing import TYPE_CHECKING, Any, Final
 
+from aiohomematic.async_support import Looper
+from aiohomematic.central.events import EventBus as AioEventBus
+from aiohomematic.const import DataPointCategory as AioDataPointCategory
+from aiohomematic.event_types import DataPointsCreatedEvent as AioDataPointsCreatedEvent
 from openccu_loom_types.enums import CentralState, DataPointCategory
 
 from openccu_loom_client.compat.aiohomematic.central.configurable_devices import (
@@ -589,7 +594,16 @@ class LoomCentralAdapter:
         # set before bootstrap() runs.
         client.store.set_data_point_factory(make_generic_data_point)
         client.store.set_custom_data_point_factory(make_custom_data_point)
+        # HA links every device to this central via Device.central_info.name,
+        # which must equal the adapter name (the integration's instance name).
+        client.store.set_central_name(name)
         self._refresh_group: Any = None
+        # HA entities subscribe on aiohomematic's *own* event bus and match
+        # events by ``type(event)``/``.key``. The adapter therefore exposes a
+        # real aiohomematic EventBus (not the loom wire bus) as ``event_bus``
+        # and the bridges publish real aiohomematic events onto it.
+        self._looper: Final = Looper()
+        self._ha_bus: Final = AioEventBus(task_scheduler=self._looper)
         self.device_coordinator: Final = _DeviceCoordinator(client)
         self.hub_coordinator: Final = _HubCoordinator(client)
         self.query_facade: Final = _QueryFacade(client)
@@ -648,9 +662,9 @@ class LoomCentralAdapter:
         return self._client.events
 
     @property
-    def event_bus(self) -> EventBus:
-        """Return the client's event bus (aiohomematic alias for ``events``)."""
-        return self._client.events
+    def event_bus(self) -> AioEventBus:
+        """Return the real aiohomematic event bus HA entities subscribe on."""
+        return self._ha_bus
 
     async def health(self) -> Any:
         """Return the daemon's health report."""
@@ -673,11 +687,36 @@ class LoomCentralAdapter:
             name="loom-compat-refresh"
         )
         install_refresh_bridge(
-            bus=self._client.events,
             group=self._refresh_group,
             store=self._client.store,
+            ha_bus=self._ha_bus,
+            central_name=self._name,
         )
+        # Announce every data point (generic + custom) in one batch *after*
+        # the custom DPs are attached, so HA's platforms spawn entities for
+        # them too. Published on the real aiohomematic bus as the real
+        # DataPointsCreatedEvent HA subscribes to.
+        await self._emit_data_points_created()
         self._state = CentralState.Running
+
+    async def _emit_data_points_created(self) -> None:
+        """Publish a real ``DataPointsCreatedEvent`` grouped by aiohomematic category."""
+        grouped: dict[AioDataPointCategory, list[Any]] = {}
+        for dp in (*self._client.store.data_points, *self._client.store.custom_data_points):
+            loom_category = getattr(dp, "category", None)
+            if loom_category is None:
+                continue
+            # Loom and aiohomematic share identical category *values*; map by
+            # value (the loom StrEnum's ``str()`` yields its repr, not the value).
+            category_value = getattr(loom_category, "value", loom_category)
+            grouped.setdefault(AioDataPointCategory(category_value), []).append(dp)
+        if grouped:
+            await self._ha_bus.publish(
+                event=AioDataPointsCreatedEvent(
+                    timestamp=datetime.now(tz=UTC),
+                    new_data_points={category: tuple(dps) for category, dps in grouped.items()},
+                )
+            )
 
     async def _bootstrap_custom_data_points(self) -> None:
         """
@@ -699,6 +738,7 @@ class LoomCentralAdapter:
         if self._refresh_group is not None:
             self._refresh_group.cancel()
             self._refresh_group = None
+        self._looper.cancel_tasks()
         await self._client.close()
         self._state = CentralState.Stopped
 
