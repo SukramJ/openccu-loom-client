@@ -116,6 +116,26 @@ class _SysvarEntitySurface(_HubEntitySurface, _SysvarProtocolSurface):
         """Return the allowed value list for an enum sysvar."""
         return self.value_list  # type: ignore[attr-defined,no-any-return]
 
+    @property
+    def value(self) -> Any:
+        """
+        Return the sysvar value, LIST indices resolved to option strings.
+
+        The CCU stores LIST sysvars as a numeric index; HA's enum sensor
+        rejects a state that is not in its options list, so the index is
+        mapped to its option (mirroring aiohomematic).
+        """
+        raw = Sysvar.value.fget(self)  # type: ignore[attr-defined]
+        value_list: tuple[str, ...] = self.value_list  # type: ignore[attr-defined]
+        if value_list and raw is not None:
+            try:
+                idx = int(raw)
+            except TypeError, ValueError:
+                return raw
+            if 0 <= idx < len(value_list):
+                return value_list[idx]
+        return raw
+
     async def send_variable(self, value: Any) -> None:
         """Write a new value back to the sysvar."""
         await self.set_value(value)  # type: ignore[attr-defined]
