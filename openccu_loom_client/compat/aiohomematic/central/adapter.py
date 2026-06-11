@@ -109,10 +109,13 @@ def _category_for_type(data_point_type: Any) -> DataPointCategory | None:
 
 # Usage verdicts that never spawn an HA entity. The daemon pipeline
 # computes the full aiohomematic visibility model (forced sensors,
-# un-ignore, HIDDEN_PARAMETERS, custom-DP absorption) and ships the
-# verdict on DataPointSummary.usage — the same gate the MQTT discovery
-# plane applies.
-_NON_CREATABLE_USAGES: Final = frozenset({"no_create", "ignored"})
+# un-ignore, HIDDEN_PARAMETERS, custom-DP absorption, click events) and
+# ships the verdict on DataPointSummary.usage — the same gate the MQTT
+# discovery plane applies. "event" covers physical devices' PRESS_*
+# parameters: they surface through keypress event groups, never as
+# generic button entities (virtual remotes report data_point and keep
+# their buttons).
+_NON_CREATABLE_USAGES: Final = frozenset({"no_create", "ignored", "event"})
 
 
 def _is_creatable(dp: Any) -> bool:
@@ -221,12 +224,15 @@ class _HubCoordinator:
     @staticmethod
     def _is_internal(summary: Any) -> bool:
         """
-        Return whether a sysvar is CCU-internal (``${…}`` names).
+        Return whether a sysvar is CCU-internal.
 
-        aiohomematic surfaces these through dedicated hub singletons
-        (alarm/service messages, presence), never as generic sysvar
-        entities.
+        Prefers the wire flag (``is_internal`` from SysVar.getAll);
+        falls back to the ``${…}`` name heuristic for daemons that do
+        not ship it yet. aiohomematic surfaces internals through
+        dedicated hub singletons, never as generic sysvar entities.
         """
+        if getattr(summary, "is_internal", None):
+            return True
         return str(getattr(summary, "name", "")).startswith("${")
 
     def _all_hub_data_points(self) -> list[Any]:

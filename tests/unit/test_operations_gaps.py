@@ -36,6 +36,7 @@ _INFO = {
     "started_at": "2026-05-24T10:01:00Z",
     "uptime": "PT60S",
     "capabilities": ["rest.v1", "ws.broadcasts.v1"],
+    "schema_digest": "sha256:test",
 }
 
 
