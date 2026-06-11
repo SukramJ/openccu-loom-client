@@ -15,6 +15,7 @@ dependencies = [
     "aiohttp>=3.9",
     "openccu-loom-types>=0.1.10,<0.2",
     "pydantic>=2.6",
+    "python-slugify>=8.0.0",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",

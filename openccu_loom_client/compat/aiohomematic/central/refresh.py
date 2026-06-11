@@ -9,9 +9,9 @@ to :class:`DataPointStateChangedEvent` keyed by their ``unique_id`` to
 know when to re-read state. The daemon instead emits distinct typed
 events. This bridge subscribes to them on the same bus and re-publishes
 one :class:`DataPointStateChangedEvent` per change, keyed by the matching
-``unique_id``. Each key is built by the shared ``aiohomematic_contract``
-reference (bit-identical to aiohomematic), using the ``central`` id the
-daemon stamps on every payload:
+``unique_id``. Each key is built on aiohomematic's reference algorithm
+(via ``openccu_loom_client.canonical``, bit-identical to aiohomematic),
+using the ``central`` id the daemon stamps on every payload:
 
 * ``DataPointValueChangedEvent`` → generic DP unique id
   (``generate_unique_id(address=addr:channel, parameter=…)``)

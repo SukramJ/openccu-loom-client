@@ -32,7 +32,6 @@ from collections.abc import Callable
 import logging
 from typing import TYPE_CHECKING, Any, Final
 
-from aiohomematic_contract import serial_suffix as contract_serial_suffix
 from openccu_loom_types.rest import (
     ChannelSummary,
     CustomDPSummary,
@@ -44,6 +43,7 @@ from openccu_loom_types.rest import (
     SysvarSummary,
 )
 
+from openccu_loom_client.canonical import serial_suffix as canonical_serial_suffix
 from openccu_loom_client.model import Channel, CustomDataPoint, DataPoint, Device, Program, Sysvar
 
 if TYPE_CHECKING:
@@ -81,7 +81,7 @@ class LoomStore:
         # The CCU serial suffix (last 10 chars, lower-cased). This is the
         # central-id slot of every canonical HA routing key for hub /
         # internal / virtual-remote addresses (see
-        # ``aiohomematic_contract.canonical_unique_id``); the categorised
+        # ``openccu_loom_client.canonical.canonical_unique_id``); the categorised
         # data-point layer reads it back off the store to build
         # ``unique_id``s bit-identical to the daemon's.
         self._serial_suffix: str = ""
@@ -135,7 +135,7 @@ class LoomStore:
         The serial comes from ``GET /system/ccu`` (``SystemCCUEntry.serial``)
         or is injected by the integration (HA's ``entry.unique_id``).
         """
-        self._serial_suffix = contract_serial_suffix(serial) if serial else ""
+        self._serial_suffix = canonical_serial_suffix(serial) if serial else ""
 
     # ---- transport wiring ----
 

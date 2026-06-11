@@ -1,14 +1,17 @@
 # Optimization needs — openccu-loom-client
 
 Running log of follow-up work surfaced while reconciling the client with
-`aiohomematic-contract` and the `openccu-loom` daemon. Each item notes
+`aiohomematic` and the `openccu-loom` daemon. Each item notes
 priority, the evidence (file:line / commit), and the suggested fix.
 
 > Done so far:
 >
-> - All unique_id / slug construction routes through `aiohomematic_contract`
->   (generic, custom, sysvar, program); golden cross-checks in
->   `tests/unit/test_contract_parity.py`.
+> - All unique_id / slug construction routes through
+>   `openccu_loom_client.canonical`, which calls aiohomematic's reference
+>   algorithm directly (generic, custom, sysvar, program; the
+>   `aiohomematic-contract` package was retired with aiohomematic#3221);
+>   golden cross-checks in `tests/unit/test_contract_parity.py` against
+>   fixtures vendored under `tests/fixtures/`.
 > - **Canonical `loom_`/serial scheme adopted** (the daemon's resolved
 >   direction, ADR-0024 + `ha-unique-id-migration.md`): keys are
 >   `canonical_unique_id` = `loom_` + routing key, with the **CCU serial
@@ -107,10 +110,10 @@ Evidence: `events/synthetic.py` (local synthesis),
 ## P3 — mypy cannot resolve editable first-party deps
 
 Under `strict = true`, mypy reports "Cannot find implementation or library
-stub" for both `openccu_loom_types.*` and `aiohomematic_contract` even
-though both ship `py.typed` (editable installs aren't followed). This
-cascades into spurious `no-any-return` errors (74 baseline → 84 after the
-contract imports). Logic is unaffected; the type gate is just noisy.
+stub" for `openccu_loom_types.*` even though it ships `py.typed`
+(editable installs aren't followed). This cascades into spurious
+`no-any-return` errors. Logic is unaffected; the type gate is just
+noisy. Workaround in use: install the package non-editable.
 
 Suggested: set `mypy_path` / `explicit_package_bases`, or install the
 first-party deps non-editable in the type-check environment, so strict

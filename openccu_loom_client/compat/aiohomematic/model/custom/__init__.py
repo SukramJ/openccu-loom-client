@@ -32,9 +32,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from aiohomematic_contract import canonical_unique_id
 from openccu_loom_types.enums import DataPointCategory
 
+from openccu_loom_client.canonical import canonical_unique_id
 from openccu_loom_client.compat.aiohomematic.model._protocol_surface import _CustomProtocolSurface
 from openccu_loom_client.model import CustomDataPoint
 
