@@ -107,6 +107,20 @@ def _category_for_type(data_point_type: Any) -> DataPointCategory | None:
     return DataPointCategory.__members__.get(name)
 
 
+# Usage verdicts that never spawn an HA entity. The daemon pipeline
+# computes the full aiohomematic visibility model (forced sensors,
+# un-ignore, HIDDEN_PARAMETERS, custom-DP absorption) and ships the
+# verdict on DataPointSummary.usage — the same gate the MQTT discovery
+# plane applies.
+_NON_CREATABLE_USAGES: Final = frozenset({"no_create", "ignored"})
+
+
+def _is_creatable(dp: Any) -> bool:
+    """Return whether the DP's usage verdict allows an HA entity."""
+    usage = getattr(getattr(dp, "summary", None), "usage", None)
+    return usage not in _NON_CREATABLE_USAGES
+
+
 class _DeviceCoordinator:
     """``central.device_coordinator`` surface."""
 
@@ -346,6 +360,8 @@ class _QueryFacade:
             if target is not None and dp_category != target:
                 continue
             if registered is not None and getattr(dp, "is_registered", False) != registered:
+                continue
+            if exclude_no_create and not _is_creatable(dp):
                 continue
             out.append(dp)
         return tuple(out)
@@ -829,6 +845,8 @@ class LoomCentralAdapter:
         ):
             loom_category = getattr(dp, "category", None)
             if loom_category is None:
+                continue
+            if not _is_creatable(dp):
                 continue
             # Loom and aiohomematic share identical category *values*; map by
             # value (the loom StrEnum's ``str()`` yields its repr, not the value).
