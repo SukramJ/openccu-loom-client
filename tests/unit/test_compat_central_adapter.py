@@ -349,6 +349,56 @@ class TestHubDataPointModel:
         )
 
 
+class TestInternalSysvarInclusion:
+    async def test_internal_included_disabled_dollar_excluded(self) -> None:
+        from openccu_loom_client.compat.aiohomematic.model.hub import SysvarDpSensor
+
+        central = await _make_config().create_central()
+        central._client.store.load_snapshot(
+            Snapshot.model_validate(
+                {
+                    "generated_at": "2026-05-24T08:00:00Z",
+                    "devices": [],
+                    "programs": [],
+                    "sysvars": [
+                        # CCU bookkeeping variable: included, disabled by
+                        # default (DEFAULT_INCLUDE_INTERNAL_SYSVARS=True).
+                        {
+                            "name": "svEnergyCounter_14179",
+                            "value_type": "FLOAT",
+                            "value": 1.0,
+                            "observed": True,
+                            "is_internal": True,
+                        },
+                        # ${...} variables back dedicated hub singletons —
+                        # never a generic sysvar entity.
+                        {
+                            "name": "${sysVarAlarmMessages}",
+                            "value_type": "FLOAT",
+                            "value": 0.0,
+                            "observed": True,
+                            "is_internal": True,
+                        },
+                        # Plain user variable: included, disabled (no markers).
+                        {
+                            "name": "Temperatur Garten",
+                            "value_type": "FLOAT",
+                            "value": 21.5,
+                            "observed": True,
+                        },
+                    ],
+                }
+            )
+        )
+        central._client.store.set_serial("3014F711A0001234")
+        sensors = central.hub_coordinator.get_hub_data_points(
+            category=SysvarDpSensor.default_category()
+        )
+        names = sorted(dp.name for dp in sensors)
+        assert names == ["Temperatur Garten", "svEnergyCounter_14179"]
+        assert all(dp.enabled_default is False for dp in sensors)
+
+
 class TestEventGroupsAndInstallMode:
     async def test_get_event_groups_returns_tuple(self) -> None:
         central = await _make_config().create_central()

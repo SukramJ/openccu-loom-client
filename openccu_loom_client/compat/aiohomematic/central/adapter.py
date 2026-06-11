@@ -241,16 +241,21 @@ class _HubCoordinator:
         for sysvar in self._client.store.sysvars:
             if not self._is_local(sysvar.summary):
                 continue
+            # ${…} system variables (sysVarAlarmMessages, …) back dedicated
+            # hub singletons in aiohomematic and never spawn as generic
+            # sysvar entities — regardless of the include-internal default.
+            if str(sysvar.summary.name).startswith("${"):
+                continue
             include, enabled = resolve_hub_inclusion(
                 name=sysvar.summary.name,
                 description=getattr(sysvar.summary, "description", None),
                 is_internal=self._is_internal(sysvar.summary),
                 markers=self._sysvar_markers,
                 # aiohomematic includes internal sysvars by default
-                # (DEFAULT_INCLUDE_INTERNAL_SYSVARS) — but the ${…} ones
-                # are surfaced via dedicated hub singletons, so the
-                # generic layer keeps skipping them.
-                include_internal_default=False,
+                # (DEFAULT_INCLUDE_INTERNAL_SYSVARS=True): CCU bookkeeping
+                # variables (svEnergyCounter_…, CCU-Reboot, …) spawn
+                # disabled-by-default, exactly like the ccu twin.
+                include_internal_default=True,
             )
             if not include:
                 continue
