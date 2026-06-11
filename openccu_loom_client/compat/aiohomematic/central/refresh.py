@@ -32,6 +32,7 @@ consuming the original typed events without an ``event_key`` filter.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
@@ -74,6 +75,7 @@ def install_refresh_bridge(
     store: LoomStore,
     ha_bus: AioEventBus,
     central_name: str,
+    event_group_resolver: Callable[..., Any] | None = None,
 ) -> None:
     """
     Bridge daemon wire events onto aiohomematic's own event bus.
@@ -88,7 +90,9 @@ def install_refresh_bridge(
     ``group`` so the caller tears them down with a single ``group.cancel()``.
     """
     _wire_value_events(group=group, store=store, ha_bus=ha_bus)
-    _wire_trigger_and_rollback(group=group, store=store, ha_bus=ha_bus)
+    _wire_trigger_and_rollback(
+        group=group, store=store, ha_bus=ha_bus, event_group_resolver=event_group_resolver
+    )
     _wire_central_and_lifecycle(group=group, ha_bus=ha_bus, central_name=central_name)
 
 
@@ -155,7 +159,11 @@ def _wire_value_events(*, group: SubscriptionGroup, store: LoomStore, ha_bus: Ai
 
 
 def _wire_trigger_and_rollback(
-    *, group: SubscriptionGroup, store: LoomStore, ha_bus: AioEventBus
+    *,
+    group: SubscriptionGroup,
+    store: LoomStore,
+    ha_bus: AioEventBus,
+    event_group_resolver: Callable[..., Any] | None = None,
 ) -> None:
     """Bridge device triggers and optimistic rollbacks to their aiohomematic events."""
 
@@ -178,6 +186,24 @@ def _wire_trigger_and_rollback(
                 device_name=device_name,
             )
         )
+        # Feed the matching event-group entity: record the member trigger
+        # and ping its keyed state-changed subscription so HA fires the
+        # event (the entity reads ``last_triggered_event.parameter``).
+        if event_group_resolver is not None and (
+            eg := event_group_resolver(
+                device_address=p.device_address,
+                channel_no=p.channel,
+                event_type=_trigger_type(p.event_type),
+            )
+        ):
+            eg.record_trigger(parameter=p.parameter, value=p.value)
+            await ha_bus.publish(
+                event=DataPointStateChangedEvent(
+                    timestamp=datetime.now(tz=UTC),
+                    unique_id=eg.unique_id,
+                    new_value=p.parameter,
+                )
+            )
 
     async def on_rollback(event: DataPointOptimisticRolledBackEvent) -> None:
         # Translate the raw daemon broadcast into the public aiohomematic event

@@ -272,6 +272,10 @@ class _QueryFacade:
 
     def __init__(self, client: LoomClient) -> None:
         self._client = client
+        # Event groups carry per-instance state (registered flag, last
+        # trigger); cache them by unique_id so repeated scans and the
+        # refresh bridge's trigger recording hit the same instances.
+        self._event_groups: dict[str, Any] = {}
 
     async def get_un_ignore_candidates(self) -> Any:
         return await self._client.visibility.get_unignore_candidates()
@@ -324,12 +328,31 @@ class _QueryFacade:
         **_kwargs: Any,
     ) -> tuple[Any, ...]:
         """Return device-trigger event groups built from the store's trigger DPs."""
-        return build_event_groups(
+        out = []
+        for built in build_event_groups(
             store=self._client.store,
             central_id=self._client.store.serial_suffix,
             event_type=event_type,
-            registered=registered,
-        )
+            registered=None,
+        ):
+            group = self._event_groups.setdefault(built.unique_id, built)
+            if registered is None or group.is_registered == registered:
+                out.append(group)
+        return tuple(out)
+
+    def find_event_group(
+        self, *, device_address: str, channel_no: int | None, event_type: Any
+    ) -> Any:
+        """Return the cached event group for one channel + trigger type, or ``None``."""
+        for group in self._event_groups.values():
+            channel = group.channel
+            if (
+                channel.device_address == device_address
+                and channel.number == channel_no
+                and group.device_trigger_event_type == event_type
+            ):
+                return group
+        return None
 
     def get_state_paths(
         self, *, rpc_callback_supported: bool | None = None, **_kwargs: Any
@@ -721,6 +744,7 @@ class LoomCentralAdapter:
             store=self._client.store,
             ha_bus=self._ha_bus,
             central_name=self._name,
+            event_group_resolver=self.query_facade.find_event_group,
         )
         # Announce every data point (generic + custom) in one batch *after*
         # the custom DPs are attached, so HA's platforms spawn entities for
@@ -744,11 +768,13 @@ class LoomCentralAdapter:
             for device in self._client.store.devices
             if getattr(device.summary, "updatable", True)
         ]
+        event_groups = self.query_facade.get_event_groups(registered=False)
         for dp in (
             *self._client.store.data_points,
             *self._client.store.custom_data_points,
             *hub_dps,
             *update_dps,
+            *event_groups,
         ):
             loom_category = getattr(dp, "category", None)
             if loom_category is None:

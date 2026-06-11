@@ -46,7 +46,7 @@ def _group(parameter: str = "PRESS_SHORT", central_id: str = "") -> ChannelEvent
 
 def test_unique_id_format() -> None:
     # event_group_{short}_{channel_unique_id} — matches aiohomematic.
-    assert _group().unique_id == "event_group_keypress_vcu1769958_1"
+    assert _group().unique_id == "loom_event_group_keypress_vcu1769958_1"
 
 
 def test_event_types_lowercased() -> None:

@@ -18,11 +18,12 @@ identities stay in lock-step.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from openccu_loom_types.enums import DataPointCategory, DataPointUsage, DeviceTriggerEventType
 
-from openccu_loom_client.canonical import generate_channel_unique_id
+from openccu_loom_client.canonical import LOOM_NAMESPACE, generate_channel_unique_id
 
 if TYPE_CHECKING:
     from openccu_loom_client.model import Channel, DataPoint
@@ -66,7 +67,14 @@ def _trigger_type(parameter: str) -> DeviceTriggerEventType | None:
 class ChannelEventGroup:
     """One device-trigger event group bound to a channel (per event type)."""
 
-    __slots__ = ("_central_id", "_channel", "_event_type", "_events", "_registered")
+    __slots__ = (
+        "_central_id",
+        "_channel",
+        "_event_type",
+        "_events",
+        "_last_triggered",
+        "_registered",
+    )
 
     _category = DataPointCategory.EventGroup
 
@@ -84,14 +92,22 @@ class ChannelEventGroup:
         self._events = events
         self._central_id = central_id
         self._registered = False
+        self._last_triggered: TriggeredEvent | None = None
 
     @property
     def unique_id(self) -> str:
-        """Return the canonical event-group key HA entities are bound to."""
+        """
+        Return the canonical event-group key HA entities are bound to.
+
+        Carries the ``loom_`` namespace like every other loom key — the
+        aiohomematic twin registers ``event_group_<type>_<channel_uid>``
+        for the same channel, and both entries may run in one HA
+        instance.
+        """
         channel_uid = generate_channel_unique_id(
             central_id=self._central_id, address=self._channel.address
         )
-        return f"event_group_{_TRIGGER_SHORT[self._event_type]}_{channel_uid}"
+        return f"{LOOM_NAMESPACE}_event_group_{_TRIGGER_SHORT[self._event_type]}_{channel_uid}"
 
     @property
     def category(self) -> DataPointCategory:
@@ -152,9 +168,13 @@ class ChannelEventGroup:
         return bool(getattr(device, "available", True)) if device is not None else True
 
     @property
-    def last_triggered_event(self) -> Any:
-        """Return the last triggered event (not tracked on loom)."""
-        return None
+    def last_triggered_event(self) -> TriggeredEvent | None:
+        """Return the most recent member trigger, or ``None`` before the first."""
+        return self._last_triggered
+
+    def record_trigger(self, *, parameter: str, value: Any) -> None:
+        """Record an incoming member trigger (called by the refresh bridge)."""
+        self._last_triggered = TriggeredEvent(parameter=parameter, value=value)
 
     @property
     def is_registered(self) -> bool:
@@ -168,6 +188,14 @@ class ChannelEventGroup:
     def unregister(self) -> None:
         """Mark the group as no longer registered."""
         self._registered = False
+
+
+@dataclass(frozen=True, kw_only=True, slots=True)
+class TriggeredEvent:
+    """One recorded member trigger (HA reads ``parameter`` to fire the event)."""
+
+    parameter: str
+    value: Any = None
 
 
 def build_event_groups(
