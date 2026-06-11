@@ -46,6 +46,12 @@ _CLICK_PARAMS = frozenset(
 _IMPULSE_PARAMS = frozenset({"SEQUENCE_OK"})
 _DEVICE_ERROR_PARAMS = frozenset({"ERROR", "SENSOR_ERROR"})
 
+# Usage verdicts that exclude a DP from event groups. Mirrors the
+# reference stack's creation gate: a suppressed parameter (e.g. HmIP-PS
+# click events via IGNORE_DEVICES_FOR_DATA_POINT_EVENTS) never spawns an
+# event there, so no keypress group may form around it here either.
+_SUPPRESSED_USAGES = frozenset({"no_create", "ignored"})
+
 # aiohomematic's DeviceTriggerEventType.short — the unique_id infix.
 _TRIGGER_SHORT: dict[DeviceTriggerEventType, str] = {
     DeviceTriggerEventType.Keypress: "keypress",
@@ -212,6 +218,8 @@ def build_event_groups(
             by_type: dict[DeviceTriggerEventType, list[DataPoint]] = {}
             for dp in channel.data_points:
                 if not dp.emits_events:
+                    continue
+                if getattr(dp.summary, "usage", None) in _SUPPRESSED_USAGES:
                     continue
                 resolved = _trigger_type(dp.parameter)
                 if resolved is None:
