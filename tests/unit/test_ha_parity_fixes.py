@@ -164,6 +164,21 @@ class TestClimateConfigBlock:
         # the tuples must carry the aiohomematic enums, not bare strings.
         assert [m.value for m in cdp.modes] == ["auto", "heat", "off"]
         assert [p.value for p in cdp.profiles] == ["boost", "week_program_1"]
+
+    def test_capability_aliases(self) -> None:
+        cdp = _make_cdp(
+            _cdp_summary(
+                name="LEVEL",
+                category="light",
+                kind="light",
+                capabilities={"dimmable": True, "acoustic": True, "profile": True},
+            )
+        )
+        # HA-side names map onto the daemon's flag names.
+        assert cdp.capabilities.brightness is True
+        assert cdp.capabilities.tones is True
+        assert cdp.capabilities.profiles is True
+        assert cdp.capabilities.color is False
         # HA checks capabilities.profiles (plural) for PRESET_MODE.
         assert cdp.capabilities.profiles is True
 

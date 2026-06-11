@@ -64,10 +64,16 @@ def custom_unique_id(*, serial_suffix: str, device_address: str, channel_no: int
 
 
 # HA-side capability names whose daemon flag is named differently —
-# e.g. HA checks ``capabilities.profiles`` (plural, drives
-# ClimateEntityFeature.PRESET_MODE) while the daemon's mixins.go flag
-# is ``profile``.
-_CAPABILITY_ALIASES: dict[str, str] = {"profiles": "profile"}
+# HA checks ``capabilities.profiles`` (daemon: ``profile``, drives
+# ClimateEntityFeature.PRESET_MODE), ``capabilities.brightness``
+# (daemon: ``dimmable``, drives ColorMode.BRIGHTNESS) and
+# ``capabilities.tones`` (daemon: ``acoustic``, drives the siren
+# TONES feature).
+_CAPABILITY_ALIASES: dict[str, str] = {
+    "brightness": "dimmable",
+    "profiles": "profile",
+    "tones": "acoustic",
+}
 
 
 class _Capabilities:
