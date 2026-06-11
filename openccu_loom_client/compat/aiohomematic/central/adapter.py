@@ -62,8 +62,9 @@ from openccu_loom_client.compat.aiohomematic.model.custom import make_custom_dat
 from openccu_loom_client.compat.aiohomematic.model.event_group import build_event_groups
 from openccu_loom_client.compat.aiohomematic.model.generic import make_generic_data_point
 from openccu_loom_client.compat.aiohomematic.model.hub import (
-    make_program_data_point,
+    make_program_data_points,
     make_sysvar_data_point,
+    resolve_hub_inclusion,
 )
 from openccu_loom_client.compat.aiohomematic.model.update import make_update_data_point
 
@@ -161,8 +162,16 @@ class _DeviceCoordinator:
 class _HubCoordinator:
     """``central.hub_coordinator`` surface (sysvars, programs, messages)."""
 
-    def __init__(self, client: LoomClient) -> None:
+    def __init__(
+        self,
+        client: LoomClient,
+        *,
+        sysvar_markers: tuple[str, ...] = (),
+        program_markers: tuple[str, ...] = (),
+    ) -> None:
         self._client = client
+        self._sysvar_markers = sysvar_markers
+        self._program_markers = program_markers
         # Cache hub data points by unique_id so register()/unregister()
         # bookkeeping survives repeated get_hub_data_points() scans.
         self._cache: dict[str, Any] = {}
@@ -210,15 +219,45 @@ class _HubCoordinator:
         """Build (and cache) categorised hub data points from the store."""
         live: dict[str, Any] = {}
         for sysvar in self._client.store.sysvars:
-            if not self._is_local(sysvar.summary) or self._is_internal(sysvar.summary):
+            if not self._is_local(sysvar.summary):
                 continue
-            sv_dp: Any = make_sysvar_data_point(summary=sysvar.summary, store=self._client.store)
+            include, enabled = resolve_hub_inclusion(
+                name=sysvar.summary.name,
+                description=getattr(sysvar.summary, "description", None),
+                is_internal=self._is_internal(sysvar.summary),
+                markers=self._sysvar_markers,
+                # aiohomematic includes internal sysvars by default
+                # (DEFAULT_INCLUDE_INTERNAL_SYSVARS) — but the ${…} ones
+                # are surfaced via dedicated hub singletons, so the
+                # generic layer keeps skipping them.
+                include_internal_default=False,
+            )
+            if not include:
+                continue
+            sv_dp: Any = make_sysvar_data_point(
+                summary=sysvar.summary, store=self._client.store, enabled_default=enabled
+            )
             live[sv_dp.unique_id] = sv_dp
         for program in self._client.store.programs:
             if not self._is_local(program.summary):
                 continue
-            pr_dp: Any = make_program_data_point(summary=program.summary, store=self._client.store)
-            live[pr_dp.unique_id] = pr_dp
+            include, enabled = resolve_hub_inclusion(
+                name=program.summary.name,
+                description=getattr(program.summary, "description", None),
+                is_internal=bool(getattr(program.summary, "is_internal", False)),
+                markers=self._program_markers,
+                # DEFAULT_INCLUDE_INTERNAL_PROGRAMS is False — CCU-internal
+                # helper programs (prgEnergyCounter-…) never spawn.
+                include_internal_default=False,
+            )
+            if not include:
+                continue
+            for pr_dp in make_program_data_points(
+                summary=program.summary, store=self._client.store, enabled_default=enabled
+            ):
+                # Button and switch share the canonical key; HA scopes
+                # unique_ids per platform, the cache needs both.
+                live[f"{pr_dp.category}:{pr_dp.unique_id}"] = pr_dp
         # Reuse cached instances (preserving their registered flag) and
         # drop entries whose sysvar/program disappeared.
         for uid, dp in live.items():
@@ -631,7 +670,15 @@ class _Configuration:
 class LoomCentralAdapter:
     """Presents the ``aiohomematic.CentralUnit`` surface over ``LoomClient``."""
 
-    def __init__(self, *, client: LoomClient, name: str, serial: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        client: LoomClient,
+        name: str,
+        serial: str | None = None,
+        sysvar_markers: tuple[str, ...] = (),
+        program_markers: tuple[str, ...] = (),
+    ) -> None:
         """Wire the coordinator surface and data-point factories onto ``client``."""
         self._client = client
         self._name = name
@@ -659,7 +706,9 @@ class LoomCentralAdapter:
         self._looper: Final = Looper()
         self._ha_bus: Final = AioEventBus(task_scheduler=self._looper)
         self.device_coordinator: Final = _DeviceCoordinator(client)
-        self.hub_coordinator: Final = _HubCoordinator(client)
+        self.hub_coordinator: Final = _HubCoordinator(
+            client, sysvar_markers=sysvar_markers, program_markers=program_markers
+        )
         self.query_facade: Final = _QueryFacade(client)
         self.client_coordinator: Final = _ClientCoordinator(client)
         self.cache_coordinator: Final = _CacheCoordinator(client)

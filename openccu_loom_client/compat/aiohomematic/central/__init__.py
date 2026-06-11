@@ -66,6 +66,8 @@ class CentralConfig:
         verify_tls: bool = True,
         serial: str | None = None,
         client_session: Any | None = None,
+        sysvar_markers: tuple[Any, ...] = (),
+        program_markers: tuple[Any, ...] = (),
         **_ignored: Any,
     ) -> None:
         """Capture the daemon-relevant config and resolve the auth method."""
@@ -82,6 +84,10 @@ class CentralConfig:
         # serial when omitted.
         self._serial = serial
         self._client_session = client_session
+        # Description markers gate which CCU sysvars / programs spawn HA
+        # entities (and enabled-by-default), mirroring aiohomematic.
+        self._sysvar_markers = tuple(str(m) for m in sysvar_markers)
+        self._program_markers = tuple(str(m) for m in program_markers)
         self._auth = self._resolve_auth(
             auth=auth, token=token, username=username, password=password
         )
@@ -114,7 +120,13 @@ class CentralConfig:
         )
         transport = HttpTransport(config, session=self._client_session)
         client = LoomClient(config, http_transport=transport)
-        return LoomCentralAdapter(client=client, name=self._name, serial=self._serial)
+        return LoomCentralAdapter(
+            client=client,
+            name=self._name,
+            serial=self._serial,
+            sysvar_markers=self._sysvar_markers,
+            program_markers=self._program_markers,
+        )
 
 
 async def check_config(

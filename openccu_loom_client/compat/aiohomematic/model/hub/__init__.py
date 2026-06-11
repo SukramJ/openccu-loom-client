@@ -17,7 +17,7 @@ value is read straight off the store-held model.
 
 from __future__ import annotations
 
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 from aiohomematic.const import PROGRAM_ADDRESS, SYSVAR_ADDRESS
 from openccu_loom_types.enums import DataPointCategory
@@ -85,8 +85,18 @@ class _HubEntitySurface:
 
     @property
     def enabled_default(self) -> bool:
-        """Return whether the entity is enabled by default."""
-        return True
+        """
+        Return whether the entity is enabled by default.
+
+        Mirrors aiohomematic: hub entities default to disabled unless a
+        configured description marker matched (the resolver sets the
+        flag at build time).
+        """
+        return getattr(self, "_enabled_default", False)
+
+    def set_enabled_default(self, enabled: bool) -> None:
+        """Record the marker-resolved enabled_default flag."""
+        self._enabled_default = enabled
 
     @property
     def state_uncertain(self) -> bool:
@@ -220,6 +230,41 @@ class HmUpdate:
     """
 
 
+def resolve_hub_inclusion(
+    *,
+    name: str,
+    description: str | None,
+    is_internal: bool,
+    markers: tuple[str, ...],
+    include_internal_default: bool,
+) -> tuple[bool, bool]:
+    """
+    Resolve ``(include, enabled_default)`` for a sysvar/program.
+
+    Mirrors aiohomematic's ``_resolve_sysvar_enabled_default``: internal
+    entries need the ``INTERNAL`` marker (or the type's
+    include-internal default); non-internal entries with configured
+    markers are included (and enabled) only when the description starts
+    with one of them; without markers everything non-excluded is
+    included but disabled by default.
+    """
+    del name
+    enabled_default = False
+    if is_internal:
+        if markers:
+            if "INTERNAL" not in markers:
+                return False, enabled_default
+            enabled_default = True
+        elif not include_internal_default:
+            return False, enabled_default
+    elif markers:
+        desc = description or ""
+        if not any(desc.startswith(str(marker)) for marker in markers):
+            return False, enabled_default
+        enabled_default = True
+    return True, enabled_default
+
+
 # ---- factories ----
 
 # CCU SysvarType → class, mirroring aiohomematic's non-extended default
@@ -245,12 +290,31 @@ def resolve_sysvar_class(*, value_type: str | None, has_value_list: bool) -> typ
     return _SYSVAR_BY_TYPE.get((value_type or "").upper(), SysvarDpSensor)
 
 
-def make_sysvar_data_point(*, summary: Any, store: Any) -> Sysvar:
+def make_sysvar_data_point(*, summary: Any, store: Any, enabled_default: bool = False) -> Sysvar:
     """Build the categorised ``SysvarDp*`` wrapper for a sysvar summary."""
     cls = resolve_sysvar_class(
         value_type=summary.value_type, has_value_list=bool(summary.value_list)
     )
-    return cls(summary=summary, store=store)
+    dp: Any = cls(summary=summary, store=store)
+    dp.set_enabled_default(enabled_default)
+    return cast("Sysvar", dp)
+
+
+def make_program_data_points(
+    *, summary: Any, store: Any, enabled_default: bool = False
+) -> tuple[ProgramDpButton | ProgramDpSwitch, ...]:
+    """
+    Build both program wrappers for one program summary.
+
+    aiohomematic spawns two entities per CCU program: a button
+    (execute) and a switch (toggle ``active``) — they share the
+    canonical key; HA unique_ids are scoped per platform.
+    """
+    button = ProgramDpButton(summary=summary, store=store)
+    button.set_enabled_default(enabled_default)
+    switch = ProgramDpSwitch(summary=summary, store=store)
+    switch.set_enabled_default(enabled_default)
+    return (button, switch)
 
 
 def make_program_data_point(*, summary: Any, store: Any) -> Program:
@@ -269,8 +333,10 @@ __all__ = [
     "SysvarDpSwitch",
     "SysvarDpText",
     "make_program_data_point",
+    "make_program_data_points",
     "make_sysvar_data_point",
     "program_unique_id",
+    "resolve_hub_inclusion",
     "resolve_sysvar_class",
     "sysvar_unique_id",
 ]
