@@ -959,6 +959,8 @@ _KIND_TO_CLASS: dict[str, type[_CustomEntitySurface]] = {
     "climate_hmip": CustomDpIpThermostat,
     "lock": BaseCustomDpLock,
     "siren": BaseCustomDpSiren,
+    "siren_smoke": BaseCustomDpSiren,
+    "siren_sound": CustomDpSoundPlayer,
     "switch": CustomDpSwitch,
     "valve_irrigation": CustomDpIpIrrigationValve,
     "valve_modulating": CustomDpIpIrrigationValve,
