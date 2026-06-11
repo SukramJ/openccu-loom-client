@@ -31,6 +31,7 @@ import logging
 from typing import TYPE_CHECKING, Any, Final, Self
 
 import aiohttp
+import openccu_loom_types
 from openccu_loom_types.rest import Info
 
 from openccu_loom_client.exceptions import (
@@ -136,6 +137,8 @@ class HttpTransport:
             )
             raise LoomTransportError(msg)
 
+        self._check_schema_digest(info_payload)
+
         _LOGGER.info(
             "connected to openccu-loom %s at %s (api_version=%s)",
             self._info.version,
@@ -143,6 +146,37 @@ class HttpTransport:
             self._info.api_version,
         )
         return self._info
+
+    def _check_schema_digest(self, info_payload: Any) -> None:
+        """
+        Compare the daemon's ``schema_digest`` with the installed types package.
+
+        The reference value is stamped into ``openccu-loom-types`` at
+        generation time (daemon ADR 0028); equality means the generated
+        types match the daemon build exactly. A mismatch is logged as a
+        warning, not raised: the contract may still be compatible —
+        ``api_version`` and the capability set govern hard compatibility.
+        Silently skipped when either side predates the digest (old
+        daemon or unstamped types package).
+        """
+        daemon_digest = (
+            info_payload.get("schema_digest", "") if isinstance(info_payload, dict) else ""
+        )
+        types_digest = getattr(openccu_loom_types, "SCHEMA_DIGEST", "")
+        if not daemon_digest or not types_digest:
+            return
+        if daemon_digest != types_digest:
+            _LOGGER.warning(
+                "openccu-loom-types was generated from a different daemon build: "
+                "daemon at %s reports schema_digest=%s, installed types carry %s "
+                "(types daemon_api_version=%s, daemon api_version=%s) — "
+                "update openccu-loom-types to match the daemon release",
+                self._config.host,
+                daemon_digest,
+                types_digest,
+                getattr(openccu_loom_types, "DAEMON_API_VERSION", "?"),
+                self._info.api_version if self._info else "?",
+            )
 
     async def close(self) -> None:
         """Tear down the session (only if this transport owns it)."""
