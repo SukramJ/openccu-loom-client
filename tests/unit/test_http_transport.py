@@ -5,6 +5,9 @@
 
 from __future__ import annotations
 
+import logging
+
+import openccu_loom_types
 import pytest
 
 from openccu_loom_client import (
@@ -63,6 +66,65 @@ class TestConnect:
     ) -> None:
         mock_daemon.get("/api/v1/info", payload=_INFO_RESPONSE)
         await transport.connect(required_capabilities=["ws.broadcasts.v1"])
+        await transport.close()
+
+
+_DIGEST_A = "sha256:" + "a" * 64
+_DIGEST_B = "sha256:" + "b" * 64
+
+
+class TestSchemaDigestHandshake:
+    """Connect-time digest comparison against openccu-loom-types (daemon ADR 0028)."""
+
+    async def test_digest_mismatch_warns_but_connects(
+        self,
+        mock_daemon: MockDaemon,
+        transport: HttpTransport,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        monkeypatch.setattr(openccu_loom_types, "SCHEMA_DIGEST", _DIGEST_A, raising=False)
+        mock_daemon.get("/api/v1/info", payload={**_INFO_RESPONSE, "schema_digest": _DIGEST_B})
+        with caplog.at_level(logging.WARNING):
+            await transport.connect()
+        assert any("different daemon build" in r.message for r in caplog.records)
+        await transport.close()
+
+    async def test_digest_match_is_silent(
+        self,
+        mock_daemon: MockDaemon,
+        transport: HttpTransport,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        monkeypatch.setattr(openccu_loom_types, "SCHEMA_DIGEST", _DIGEST_A, raising=False)
+        mock_daemon.get("/api/v1/info", payload={**_INFO_RESPONSE, "schema_digest": _DIGEST_A})
+        with caplog.at_level(logging.WARNING):
+            await transport.connect()
+        assert not any("different daemon build" in r.message for r in caplog.records)
+        await transport.close()
+
+    @pytest.mark.parametrize(
+        ("types_digest", "payload_extra"),
+        [
+            (_DIGEST_A, {}),  # daemon predates schema_digest
+            ("", {"schema_digest": _DIGEST_B}),  # types package not stamped
+        ],
+    )
+    async def test_digest_check_skipped_when_either_side_missing(
+        self,
+        mock_daemon: MockDaemon,
+        transport: HttpTransport,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+        types_digest: str,
+        payload_extra: dict[str, str],
+    ) -> None:
+        monkeypatch.setattr(openccu_loom_types, "SCHEMA_DIGEST", types_digest, raising=False)
+        mock_daemon.get("/api/v1/info", payload={**_INFO_RESPONSE, **payload_extra})
+        with caplog.at_level(logging.WARNING):
+            await transport.connect()
+        assert not any("different daemon build" in r.message for r in caplog.records)
         await transport.close()
 
 

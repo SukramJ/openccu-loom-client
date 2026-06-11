@@ -1,3 +1,8 @@
+# Unreleased
+
+- Chore: **exact types pin** — `openccu-loom-types` is now pinned `==` (deterministic resolution; every shipped client/types combination is a tested one). Bump the pin together with each types release.
+- Feat: **schema-digest handshake** — `connect()` compares the daemon's `schema_digest` (`GET /api/v1/info`, daemon ADR 0028) against the value stamped into the installed `openccu-loom-types` package and logs a warning when the types were generated from a different daemon build; skipped silently when either side predates the digest.
+
 # Version 2026.6.3 (2026-06-11)
 
 - Feat: **hub layer** — sysvars and programs spawn HA entities. The bootstrap merges the complete catalogue via `GET /sysvars`/`GET /programs` (the snapshot's hub block only carries the daemon's first central), filters by central and skips CCU-internal `${…}` variables; ALARM/LOGIC sysvars read as binary sensors, everything else as read-only sensors (aiohomematic default mapping); LIST sysvar indices resolve to their option string. Hub data points ride along in the bootstrap `DataPointsCreatedEvent`.
