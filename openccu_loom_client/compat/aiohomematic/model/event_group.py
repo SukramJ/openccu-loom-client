@@ -20,8 +20,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from aiohomematic_contract import generate_channel_unique_id
 from openccu_loom_types.enums import DataPointCategory, DataPointUsage, DeviceTriggerEventType
+
+from openccu_loom_client.canonical import generate_channel_unique_id
 
 if TYPE_CHECKING:
     from openccu_loom_client.model import Channel, DataPoint

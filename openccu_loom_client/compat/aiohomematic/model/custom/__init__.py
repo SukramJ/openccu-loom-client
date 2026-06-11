@@ -32,9 +32,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from aiohomematic_contract import canonical_unique_id
 from openccu_loom_types.enums import DataPointCategory
 
+from openccu_loom_client.canonical import canonical_unique_id
 from openccu_loom_client.compat.aiohomematic.model._protocol_surface import _CustomProtocolSurface
 from openccu_loom_client.model import CustomDataPoint
 
@@ -57,6 +57,13 @@ def custom_unique_id(*, serial_suffix: str, device_address: str, channel_no: int
     )
 
 
+# HA-side capability names whose daemon flag is named differently —
+# e.g. HA checks ``capabilities.profiles`` (plural, drives
+# ClimateEntityFeature.PRESET_MODE) while the daemon's mixins.go flag
+# is ``profile``.
+_CAPABILITY_ALIASES: dict[str, str] = {"profiles": "profile"}
+
+
 class _Capabilities:
     """
     Attribute-access view over the daemon's ``capabilities`` flag map.
@@ -72,7 +79,11 @@ class _Capabilities:
         self._flags = flags or {}
 
     def __getattr__(self, name: str) -> bool:
-        return bool(self._flags.get(name, False))
+        if name in self._flags:
+            return bool(self._flags[name])
+        if (alias := _CAPABILITY_ALIASES.get(name)) is not None:
+            return bool(self._flags.get(alias, False))
+        return False
 
     def __contains__(self, name: str) -> bool:
         return name in self._flags
@@ -155,6 +166,11 @@ class _CustomEntitySurface(_CustomProtocolSurface, CustomDataPoint):
     def capabilities(self) -> _Capabilities:
         """Return an attribute-access view over the summary's capability flags."""
         return _Capabilities(self._summary.capabilities)
+
+    def _config_value(self, key: str) -> Any:
+        """Return one entry from the CDP's static ``config`` block, or ``None``."""
+        config = getattr(self._summary, "config", None) or {}
+        return config.get(key)
 
     @property
     def is_registered(self) -> bool:
@@ -551,18 +567,30 @@ class BaseCustomDpClimate(_CustomEntitySurface):
 
     @property
     def min_temp(self) -> float:
-        """Return the minimum settable temperature, defaulting to 4.5."""
-        return _as_float(self._state.get("min_temp")) or 4.5
+        """Return the device's minimum settable temperature (config), defaulting to 4.5."""
+        return (
+            _as_float(self._config_value("min_temp"))
+            or _as_float(self._state.get("min_temp"))
+            or 4.5
+        )
 
     @property
     def max_temp(self) -> float:
-        """Return the maximum settable temperature, defaulting to 30.5."""
-        return _as_float(self._state.get("max_temp")) or 30.5
+        """Return the device's maximum settable temperature (config), defaulting to 30.5."""
+        return (
+            _as_float(self._config_value("max_temp"))
+            or _as_float(self._state.get("max_temp"))
+            or 30.5
+        )
 
     @property
     def target_temperature_step(self) -> float:
-        """Return the temperature step, defaulting to 0.5."""
-        return _as_float(self._state.get("target_temperature_step")) or 0.5
+        """Return the temperature step (config), defaulting to 0.5."""
+        return (
+            _as_float(self._config_value("temp_step"))
+            or _as_float(self._state.get("target_temperature_step"))
+            or 0.5
+        )
 
     # ``mode``/``activity``/``profile`` are returned as the daemon's
     # lower-case string tokens; consumers comparing against
@@ -574,9 +602,12 @@ class BaseCustomDpClimate(_CustomEntitySurface):
 
     @property
     def modes(self) -> tuple[str, ...]:
-        """Return the available HVAC modes from the ``hvac_modes`` state key."""
-        raw = self._state.get("hvac_modes") or ()
-        return tuple(str(m) for m in raw)
+        """Return the available HVAC modes (config ``hvac_modes``)."""
+        raw = self._config_value("hvac_modes") or self._state.get("hvac_modes") or ()
+        modes = tuple(str(m) for m in raw)
+        # aiohomematic guarantees at least HEAT so HA renders a usable
+        # climate card even when the device reports nothing.
+        return modes or ("heat",)
 
     @property
     def activity(self) -> str | None:
@@ -603,8 +634,8 @@ class BaseCustomDpClimate(_CustomEntitySurface):
 
     @property
     def profiles(self) -> tuple[str, ...]:
-        """Return the available profiles from the ``available_profiles`` state key."""
-        raw = self._state.get("available_profiles") or ()
+        """Return the available profiles (config ``preset_modes``)."""
+        raw = self._config_value("preset_modes") or self._state.get("available_profiles") or ()
         return tuple(str(p) for p in raw)
 
     async def set_temperature(self, temperature: float) -> None:
@@ -656,6 +687,19 @@ class BaseCustomDpLock(_CustomEntitySurface):
     """Lock CDP."""
 
     _category: ClassVar[DataPointCategory] = DataPointCategory.Lock
+
+    @property
+    def data_point_name_postfix(self) -> str:
+        """
+        Return the data-point name postfix.
+
+        Button locks carry their parameter name ("BUTTON_LOCK") so HA's
+        entity-description registry matches the button-lock rule
+        (entity_category=config, translation_key=button_lock) — exactly
+        like aiohomematic's ``CustomDpButtonLock``.
+        """
+        name = self._summary.name
+        return name if name in ("BUTTON_LOCK", "GLOBAL_BUTTON_LOCK") else ""
 
     @property
     def is_locked(self) -> bool:
@@ -723,13 +767,13 @@ class BaseCustomDpSiren(_CustomEntitySurface):
 
     @property
     def available_tones(self) -> Any:
-        """Return the available tones from the ``available_tones`` state key."""
-        return self._state.get("available_tones") or {}
+        """Return the available tones (config ``available_tones``)."""
+        return self._config_value("available_tones") or self._state.get("available_tones") or ()
 
     @property
     def available_lights(self) -> Any:
-        """Return the available light patterns from the ``available_lights`` state key."""
-        return self._state.get("available_lights") or {}
+        """Return the available light patterns (config ``available_lights``)."""
+        return self._config_value("available_lights") or self._state.get("available_lights") or ()
 
     async def turn_on(self, **params: Any) -> None:
         """Turn the siren on, passing through any tone/light/duration params."""

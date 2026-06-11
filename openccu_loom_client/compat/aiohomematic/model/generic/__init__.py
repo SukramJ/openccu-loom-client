@@ -72,6 +72,17 @@ class _GenericEntitySurface(_GenericProtocolSurface):
         return self.parameter_label or self.parameter  # type: ignore[attr-defined,no-any-return]
 
     @property
+    def translation_key(self) -> str:
+        """
+        Return the HA translation key derived from the parameter name.
+
+        Mirrors aiohomematic's ``generate_translation_key`` — CCU
+        parameter names are ASCII upper-snake, so lowercasing matches
+        its slugify-based output ("STATE" → "state").
+        """
+        return str(self.parameter).lower()  # type: ignore[attr-defined]
+
+    @property
     def full_name(self) -> str:
         device = self.device  # type: ignore[attr-defined]
         device_name = device.name if device is not None else self.device_address  # type: ignore[attr-defined]
@@ -216,10 +227,58 @@ class DpSwitch(_GenericEntitySurface, DataPoint):
         )
 
 
+# ENUM value lists that HA reads as a binary sensor, mapped to the option
+# that means "on". Mirrors aiohomematic's
+# ``_BINARY_SENSOR_TRUE_VALUE_DICT_FOR_VALUE_LIST`` (model/support.py) — a
+# door ``STATE`` of ``CLOSED`` (index 0) MUST read as ``False``; resolving
+# it to the option string would make every contact truthy ("CLOSED" is a
+# non-empty string) and permanently "on" in HA.
+_BINARY_SENSOR_TRUE_VALUE_BY_VALUE_LIST: Final[dict[tuple[str, ...], str]] = {
+    ("CLOSED", "OPEN"): "OPEN",
+    ("DRY", "RAIN"): "RAIN",
+    ("STABLE", "NOT_STABLE"): "NOT_STABLE",
+}
+
+
 class DpBinarySensor(_GenericEntitySurface, DataPoint):
-    """Read-only BOOL parameter."""
+    """Read-only BOOL parameter (or an ENUM retyped to a binary sensor)."""
 
     _category: ClassVar[DataPointCategory] = DataPointCategory.BinarySensor
+
+    def _as_bool(self, raw: Any) -> bool | None:
+        """Convert the raw wire value to the HA ``is_on`` bool (aiohomematic parity)."""
+        if raw is None:
+            return None
+        if isinstance(raw, bool):
+            return raw
+        value_list: tuple[str, ...] = self.value_list
+        if value_list and (
+            true_value := _BINARY_SENSOR_TRUE_VALUE_BY_VALUE_LIST.get(tuple(value_list))
+        ):
+            if isinstance(raw, int) and 0 <= raw < len(value_list):
+                raw = value_list[raw]
+            if isinstance(raw, str):
+                return raw == true_value
+        # Unknown lists / plain numerics: index 0 is the inactive option.
+        return bool(raw)
+
+    @property
+    def value(self) -> bool | None:
+        """Return the binary state as ``bool`` (never the ENUM option string)."""
+        override = getattr(self, "_value_override", _UNSET)
+        if override is not _UNSET:
+            return self._as_bool(override)
+        return self._as_bool(DataPoint.value.fget(self))  # type: ignore[attr-defined]
+
+    @value.setter
+    def value(self, new_value: Any) -> None:
+        """Store an HA-written value (optimistic); the next daemon update clears it."""
+        self._value_override = new_value
+
+    @property
+    def default(self) -> bool | None:
+        """Return the parameter default as ``bool`` (HA restores this when unset)."""
+        return self._as_bool(getattr(self.summary, "default", None))
 
 
 class DpSensor(_GenericEntitySurface, DataPoint):

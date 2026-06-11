@@ -781,6 +781,13 @@ class LoomCentralAdapter:
         # The serial is the central-id slot of every canonical HA routing
         # key (hub / internal / virtual-remote); record it before bootstrap
         # so the categorised data-point layer builds matching unique_ids.
+        if not serial:
+            _LOGGER.warning(
+                "No CCU serial available (neither injected nor reported by the "
+                "daemon) — canonical unique_ids for hub / internal / "
+                "virtual-remote data points will carry an empty central-id "
+                "slot (loom__…) and break the HA registry contract"
+            )
         self._client.store.set_serial(serial)
         interfaces: tuple[str, ...] = ()
         try:

@@ -32,7 +32,6 @@ from collections.abc import Callable
 import logging
 from typing import TYPE_CHECKING, Any, Final
 
-from aiohomematic_contract import serial_suffix as contract_serial_suffix
 from openccu_loom_types.rest import (
     ChannelSummary,
     CustomDPSummary,
@@ -44,6 +43,7 @@ from openccu_loom_types.rest import (
     SysvarSummary,
 )
 
+from openccu_loom_client.canonical import serial_suffix as canonical_serial_suffix
 from openccu_loom_client.model import Channel, CustomDataPoint, DataPoint, Device, Program, Sysvar
 
 if TYPE_CHECKING:
@@ -81,7 +81,7 @@ class LoomStore:
         # The CCU serial suffix (last 10 chars, lower-cased). This is the
         # central-id slot of every canonical HA routing key for hub /
         # internal / virtual-remote addresses (see
-        # ``aiohomematic_contract.canonical_unique_id``); the categorised
+        # ``openccu_loom_client.canonical.canonical_unique_id``); the categorised
         # data-point layer reads it back off the store to build
         # ``unique_id``s bit-identical to the daemon's.
         self._serial_suffix: str = ""
@@ -135,7 +135,7 @@ class LoomStore:
         The serial comes from ``GET /system/ccu`` (``SystemCCUEntry.serial``)
         or is injected by the integration (HA's ``entry.unique_id``).
         """
-        self._serial_suffix = contract_serial_suffix(serial) if serial else ""
+        self._serial_suffix = canonical_serial_suffix(serial) if serial else ""
 
     # ---- transport wiring ----
 
@@ -334,9 +334,14 @@ class LoomStore:
             del self._cdps[k]
         for summary in cdps:
             key = (device_address, summary.name)
+            # Seed the live state from the summary's snapshot (daemon
+            # >= 0.x includes it in GET .../cdps) so entities start on
+            # the real state instead of defaults until the first WS
+            # ``custom_data_point.state_changed`` push arrives.
             self._cdps[key] = self._build_custom_data_point(
                 summary=summary,
                 device_address=device_address,
+                initial_state=getattr(summary, "state", None),
             )
 
     # ---- bulk load (bootstrap) ----
@@ -634,10 +639,13 @@ class LoomStore:
             body["params"] = params
         if priority is not None:
             body["priority"] = priority
+        # Always send a JSON body: the daemon parses the body strictly and
+        # rejects an empty payload with 400 "Invalid JSON: EOF", so a bare
+        # operation (turn_on without params) must POST ``{}``.
         await self._transport.request(
             "POST",
             f"/devices/{address}/cdps/{name}/{operation}",
-            json_body=body or None,
+            json_body=body,
             allow_retry=False,  # CDP operations may not be idempotent (e.g. cover open).
         )
 

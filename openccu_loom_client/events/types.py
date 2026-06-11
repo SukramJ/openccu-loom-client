@@ -23,7 +23,6 @@ from dataclasses import dataclass
 import logging
 from typing import Any, ClassVar, Final
 
-from aiohomematic_contract import canonical_unique_id
 from openccu_loom_types.rest import Kind
 from openccu_loom_types.ws import (
     CentralStateChangedPayload,
@@ -47,6 +46,8 @@ from openccu_loom_types.ws import (
 )
 from pydantic import BaseModel
 
+from openccu_loom_client.canonical import canonical_unique_id
+
 _LOGGER: Final = logging.getLogger(__name__)
 
 
@@ -61,7 +62,8 @@ def data_point_event_key(
     The compat data-point layer derives its ``unique_id`` from the same
     function, keeping the two ends in lock-step.
 
-    The key is built by the shared ``aiohomematic_contract`` reference —
+    The key is built on aiohomematic's reference algorithm (via
+    ``openccu_loom_client.canonical``) —
     the loom-namespaced canonical key ``loom_<routing-key>``, with the CCU
     ``serial_suffix`` in the central-id slot (devices carry no prefix;
     internal/virtual-remote addresses do). This is the rebuild path; when

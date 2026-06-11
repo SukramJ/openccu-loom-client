@@ -19,10 +19,10 @@ from __future__ import annotations
 
 from typing import Any, ClassVar
 
-from aiohomematic_contract import canonical_unique_id, hub_slug
-from aiohomematic_contract.unique_id import PROGRAM_ADDRESS, SYSVAR_ADDRESS
+from aiohomematic.const import PROGRAM_ADDRESS, SYSVAR_ADDRESS
 from openccu_loom_types.enums import DataPointCategory
 
+from openccu_loom_client.canonical import canonical_unique_id, hub_slug
 from openccu_loom_client.compat.aiohomematic.model._protocol_surface import (
     _ProgramProtocolSurface,
     _SysvarProtocolSurface,
