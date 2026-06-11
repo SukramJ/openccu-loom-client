@@ -60,3 +60,30 @@ def test_register_unregister() -> None:
     assert group.is_registered is True
     group.unregister()
     assert group.is_registered is False
+
+
+def test_build_event_groups_skips_suppressed_usage() -> None:
+    """no_create/ignored DPs never feed a group (HmIP-PS click suppression)."""
+    from openccu_loom_client.compat.aiohomematic.model.event_group import build_event_groups
+
+    def _dp(parameter: str, usage: str | None) -> SimpleNamespace:
+        return SimpleNamespace(
+            parameter=parameter,
+            emits_events=True,
+            summary=SimpleNamespace(usage=usage),
+        )
+
+    suppressed_channel = SimpleNamespace(
+        address="VCU100:1",
+        data_points=[_dp("PRESS_SHORT", "no_create"), _dp("PRESS_LONG", "ignored")],
+    )
+    live_channel = SimpleNamespace(
+        address="VCU100:2",
+        data_points=[_dp("PRESS_SHORT", "event"), _dp("PRESS_LONG", None)],
+    )
+    device = SimpleNamespace(channels=[suppressed_channel, live_channel])
+    store = SimpleNamespace(devices=[device])
+
+    groups = build_event_groups(store=store, central_id="")
+    assert [g.channel.address for g in groups] == ["VCU100:2"]
+    assert set(groups[0].event_types) == {"press_long", "press_short"}

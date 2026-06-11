@@ -1,6 +1,9 @@
 # Version 2026.6.4 (2026-06-11)
 
-- Chore: **exact types pin** — `openccu-loom-types` is now pinned `==` (deterministic resolution; every shipped client/types combination is a tested one). Bump the pin together with each types release.
+- Feat: **usage=event filter** — physical devices' PRESS\_\* parameters (daemon verdict `usage=event`) no longer spawn generic button entities; they surface through keypress event groups only, matching aiohomematic (212 surplus buttons in the HA parity run). Virtual remotes keep their buttons.
+- Feat: **sysvar wire flags** — `SysvarSummary.is_internal` is preferred over the `${…}` name heuristic when classifying CCU-internal variables; `is_extended` spawns the writable entity flavour (switch/select/number/text) instead of the read-only default.
+- Fix: **event-group suppression** — DPs with usage `no_create`/`ignored` (e.g. HmIP-PS\* click parameters via `IGNORE_DEVICES_FOR_DATA_POINT_EVENTS`) are excluded from `build_event_groups`; the reference stack never spawns events for them.
+- Chore: **exact types pin** — `openccu-loom-types` is now pinned `==` (deterministic resolution; every shipped client/types combination is a tested one), currently `==0.1.14` (sysvar `is_internal`/`is_extended`, required `Info.schema_digest`). Bump the pin together with each types release.
 - Feat: **schema-digest handshake** — `connect()` compares the daemon's `schema_digest` (`GET /api/v1/info`, daemon ADR 0028) against the value stamped into the installed `openccu-loom-types` package and logs a warning when the types were generated from a different daemon build; skipped silently when either side predates the digest.
 
 # Version 2026.6.3 (2026-06-11)

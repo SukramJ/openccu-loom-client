@@ -278,22 +278,40 @@ _SYSVAR_BY_TYPE: dict[str, type[Sysvar]] = {
 }
 
 
-def resolve_sysvar_class(*, value_type: str | None, has_value_list: bool) -> type[Sysvar]:
+_SYSVAR_EXTENDED_BY_TYPE: dict[str, type[Sysvar]] = {
+    "ALARM": SysvarDpSwitch,
+    "LOGIC": SysvarDpSwitch,
+    "LIST": SysvarDpSelect,
+    "FLOAT": SysvarDpNumber,
+    "INTEGER": SysvarDpNumber,
+    "STRING": SysvarDpText,
+}
+
+
+def resolve_sysvar_class(
+    *, value_type: str | None, has_value_list: bool, extended: bool = False
+) -> type[Sysvar]:
     """
     Pick the ``SysvarDp*`` class from the sysvar's value type.
 
-    Mirrors aiohomematic's default mapping: ALARM/LOGIC read as binary
-    sensors, every other type (including LIST — ``has_value_list``) as a
-    read-only sensor until extended-marker support lands.
+    Mirrors aiohomematic's mapping: ALARM/LOGIC read as binary sensors,
+    everything else as a read-only sensor — unless the variable carries
+    the extended description marker, which unlocks the writable flavour
+    (switch/select/number/text).
     """
     del has_value_list  # LIST without the extended marker is a sensor too
-    return _SYSVAR_BY_TYPE.get((value_type or "").upper(), SysvarDpSensor)
+    token = (value_type or "").upper()
+    if extended and (cls := _SYSVAR_EXTENDED_BY_TYPE.get(token)):
+        return cls
+    return _SYSVAR_BY_TYPE.get(token, SysvarDpSensor)
 
 
 def make_sysvar_data_point(*, summary: Any, store: Any, enabled_default: bool = False) -> Sysvar:
     """Build the categorised ``SysvarDp*`` wrapper for a sysvar summary."""
     cls = resolve_sysvar_class(
-        value_type=summary.value_type, has_value_list=bool(summary.value_list)
+        value_type=summary.value_type,
+        has_value_list=bool(summary.value_list),
+        extended=bool(getattr(summary, "is_extended", False)),
     )
     dp: Any = cls(summary=summary, store=store)
     dp.set_enabled_default(enabled_default)

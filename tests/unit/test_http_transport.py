@@ -31,6 +31,9 @@ _INFO_RESPONSE = {
     # capabilities is a closed enum on the wire — these values come
     # straight from openccu_loom_types.rest.Capability.
     "capabilities": ["rest.v1", "ws.broadcasts.v1", "errors.problem_details.v1"],
+    # Required field since daemon 0.2.0; empty skips the digest handshake
+    # so unrelated tests stay quiet. Digest tests override it explicitly.
+    "schema_digest": "",
 }
 
 
@@ -107,7 +110,7 @@ class TestSchemaDigestHandshake:
     @pytest.mark.parametrize(
         ("types_digest", "payload_extra"),
         [
-            (_DIGEST_A, {}),  # daemon predates schema_digest
+            (_DIGEST_A, {}),  # daemon sends an empty digest
             ("", {"schema_digest": _DIGEST_B}),  # types package not stamped
         ],
     )

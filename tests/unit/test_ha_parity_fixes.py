@@ -14,8 +14,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from openccu_loom_types.rest import CustomDPSummary, DataPointSummary
+from openccu_loom_types.rest import CustomDPSummary, DataPointSummary, SysvarSummary
 
+from openccu_loom_client.compat.aiohomematic.central.adapter import _HubCoordinator, _is_creatable
 from openccu_loom_client.compat.aiohomematic.model.custom import (
     BaseCustomDpLock,
     BaseCustomDpSiren,
@@ -26,6 +27,16 @@ from openccu_loom_client.compat.aiohomematic.model.generic import (
     DpBinarySensor,
     DpSensor,
     make_generic_data_point,
+)
+from openccu_loom_client.compat.aiohomematic.model.hub import (
+    SysvarDpBinarySensor,
+    SysvarDpNumber,
+    SysvarDpSelect,
+    SysvarDpSensor,
+    SysvarDpSwitch,
+    SysvarDpText,
+    make_sysvar_data_point,
+    resolve_sysvar_class,
 )
 from openccu_loom_client.store import LoomStore
 
@@ -535,3 +546,104 @@ class TestCalculatedDataPoints:
         )
         dp = store.get_data_point(address="VCU7", channel=1, parameter="WINDOW_OPEN")
         assert dp.value is True
+
+
+class TestUsageVerdictFilter:
+    """Daemon usage verdicts gate generic entity creation (parity round 3)."""
+
+    @staticmethod
+    def _dp_with_usage(usage: str | None) -> Any:
+        summary = _dp_summary(
+            parameter="PRESS_SHORT", type="ACTION", category="button", usage=usage
+        )
+
+        class _Dp:
+            def __init__(self) -> None:
+                self.summary = summary
+
+        return _Dp()
+
+    def test_event_usage_is_not_creatable(self) -> None:
+        assert _is_creatable(self._dp_with_usage("event")) is False
+
+    def test_no_create_and_ignored_are_not_creatable(self) -> None:
+        assert _is_creatable(self._dp_with_usage("no_create")) is False
+        assert _is_creatable(self._dp_with_usage("ignored")) is False
+
+    def test_data_point_and_ce_verdicts_are_creatable(self) -> None:
+        assert _is_creatable(self._dp_with_usage("data_point")) is True
+        assert _is_creatable(self._dp_with_usage("ce_visible")) is True
+
+    def test_missing_usage_defaults_to_creatable(self) -> None:
+        assert _is_creatable(self._dp_with_usage(None)) is True
+
+
+def _sysvar_summary(**overrides: Any) -> SysvarSummary:
+    payload: dict[str, Any] = {
+        "name": "sv_alarm_messages",
+        "description": "",
+        "value_type": "FLOAT",
+        "value": 1.0,
+        "observed": True,
+    }
+    payload.update(overrides)
+    return SysvarSummary.model_validate(payload)
+
+
+class TestSysvarInternalFlag:
+    """is_internal rides the wire flag, name heuristic is the fallback."""
+
+    def test_wire_flag_wins(self) -> None:
+        assert _HubCoordinator._is_internal(_sysvar_summary(is_internal=True)) is True
+
+    def test_name_heuristic_fallback(self) -> None:
+        assert _HubCoordinator._is_internal(_sysvar_summary(name="${sysVarAlarmMessages}")) is True
+
+    def test_plain_user_variable_is_not_internal(self) -> None:
+        assert _HubCoordinator._is_internal(_sysvar_summary(is_internal=False)) is False
+
+
+class TestSysvarExtendedClasses:
+    """Extended description marker unlocks the writable entity flavour."""
+
+    def test_default_mapping_is_read_only(self) -> None:
+        assert (
+            resolve_sysvar_class(value_type="ALARM", has_value_list=False) is SysvarDpBinarySensor
+        )
+        assert (
+            resolve_sysvar_class(value_type="LOGIC", has_value_list=False) is SysvarDpBinarySensor
+        )
+        assert resolve_sysvar_class(value_type="FLOAT", has_value_list=False) is SysvarDpSensor
+        assert resolve_sysvar_class(value_type="LIST", has_value_list=True) is SysvarDpSensor
+
+    def test_extended_mapping_is_writable(self) -> None:
+        assert (
+            resolve_sysvar_class(value_type="ALARM", has_value_list=False, extended=True)
+            is SysvarDpSwitch
+        )
+        assert (
+            resolve_sysvar_class(value_type="LIST", has_value_list=True, extended=True)
+            is SysvarDpSelect
+        )
+        assert (
+            resolve_sysvar_class(value_type="FLOAT", has_value_list=False, extended=True)
+            is SysvarDpNumber
+        )
+        assert (
+            resolve_sysvar_class(value_type="STRING", has_value_list=False, extended=True)
+            is SysvarDpText
+        )
+
+    def test_factory_honours_is_extended_from_summary(self) -> None:
+        dp = make_sysvar_data_point(
+            summary=_sysvar_summary(value_type="LOGIC", is_extended=True),
+            store=LoomStore(),
+        )
+        assert isinstance(dp, SysvarDpSwitch)
+
+    def test_factory_defaults_to_read_only_without_flag(self) -> None:
+        dp = make_sysvar_data_point(
+            summary=_sysvar_summary(value_type="LOGIC"),
+            store=LoomStore(),
+        )
+        assert isinstance(dp, SysvarDpBinarySensor)
