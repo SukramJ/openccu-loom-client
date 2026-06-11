@@ -30,8 +30,9 @@ State-key reference (daemon ``internal/payload/state.go`` +
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, Final
 
+from aiohomematic.model.custom import ClimateMode, ClimateProfile
 from openccu_loom_types.enums import DataPointCategory
 
 from openccu_loom_client.canonical import canonical_unique_id
@@ -40,6 +41,11 @@ from openccu_loom_client.model import CustomDataPoint
 
 if TYPE_CHECKING:
     from openccu_loom_client.store import LoomStore
+
+# Valid wire tokens for the aiohomematic climate enums; unknown daemon
+# tokens are skipped instead of raising on enum construction.
+_CLIMATE_MODE_VALUES: Final = {m.value for m in ClimateMode}
+_CLIMATE_PROFILE_VALUES: Final = {p.value for p in ClimateProfile}
 
 
 def custom_unique_id(*, serial_suffix: str, device_address: str, channel_no: int) -> str:
@@ -58,10 +64,16 @@ def custom_unique_id(*, serial_suffix: str, device_address: str, channel_no: int
 
 
 # HA-side capability names whose daemon flag is named differently —
-# e.g. HA checks ``capabilities.profiles`` (plural, drives
-# ClimateEntityFeature.PRESET_MODE) while the daemon's mixins.go flag
-# is ``profile``.
-_CAPABILITY_ALIASES: dict[str, str] = {"profiles": "profile"}
+# HA checks ``capabilities.profiles`` (daemon: ``profile``, drives
+# ClimateEntityFeature.PRESET_MODE), ``capabilities.brightness``
+# (daemon: ``dimmable``, drives ColorMode.BRIGHTNESS) and
+# ``capabilities.tones`` (daemon: ``acoustic``, drives the siren
+# TONES feature).
+_CAPABILITY_ALIASES: dict[str, str] = {
+    "brightness": "dimmable",
+    "profiles": "profile",
+    "tones": "acoustic",
+}
 
 
 class _Capabilities:
@@ -171,6 +183,29 @@ class _CustomEntitySurface(_CustomProtocolSurface, CustomDataPoint):
         """Return one entry from the CDP's static ``config`` block, or ``None``."""
         config = getattr(self._summary, "config", None) or {}
         return config.get(key)
+
+    @property
+    def translated_name(self) -> str | None:
+        """
+        Return the channel-derived display name, aiohomematic-style.
+
+        aiohomematic names a custom DP after its CCU channel: the channel
+        name minus the device-name prefix ("Küchenstrahler:vch5" →
+        "vch5", a user-renamed channel keeps its full name). The primary
+        channel usually carries the bare device name, which strips to
+        nothing → ``None`` and HA falls back to the device name alone —
+        exactly the reference behaviour (primary ``None``, secondaries
+        "vch5"/"vch6").
+        """
+        channel = self._store.get_channel(
+            address=self._device_address, number=self._summary.channel_no
+        )
+        raw = (channel.summary.name if channel is not None else None) or ""
+        device = self.device
+        device_name = (device.name if device is not None else "") or ""
+        if device_name and raw.startswith(device_name):
+            raw = raw[len(device_name) :].lstrip(":").strip()
+        return raw or None
 
     @property
     def is_registered(self) -> bool:
@@ -593,21 +628,23 @@ class BaseCustomDpClimate(_CustomEntitySurface):
         )
 
     # ``mode``/``activity``/``profile`` are returned as the daemon's
-    # lower-case string tokens; consumers comparing against
-    # aiohomematic's Climate* enums should compare by ``.value``.
+    # lower-case string tokens (StrEnum hash-equality keeps dict lookups
+    # against aiohomematic's Climate* enums working); ``modes``/``profiles``
+    # return the real aiohomematic enums because HA reads ``.value`` off
+    # their members.
     @property
     def mode(self) -> str:
         """Return the HVAC mode; alias of :attr:`hvac_mode`."""
         return self.hvac_mode
 
     @property
-    def modes(self) -> tuple[str, ...]:
-        """Return the available HVAC modes (config ``hvac_modes``)."""
+    def modes(self) -> tuple[ClimateMode, ...]:
+        """Return the available HVAC modes (config ``hvac_modes``) as enums."""
         raw = self._config_value("hvac_modes") or self._state.get("hvac_modes") or ()
-        modes = tuple(str(m) for m in raw)
+        modes = tuple(ClimateMode(str(m)) for m in raw if str(m) in _CLIMATE_MODE_VALUES)
         # aiohomematic guarantees at least HEAT so HA renders a usable
         # climate card even when the device reports nothing.
-        return modes or ("heat",)
+        return modes or (ClimateMode.HEAT,)
 
     @property
     def activity(self) -> str | None:
@@ -633,10 +670,10 @@ class BaseCustomDpClimate(_CustomEntitySurface):
         return self.preset_mode
 
     @property
-    def profiles(self) -> tuple[str, ...]:
-        """Return the available profiles (config ``preset_modes``)."""
+    def profiles(self) -> tuple[ClimateProfile, ...]:
+        """Return the available profiles (config ``preset_modes``) as enums."""
         raw = self._config_value("preset_modes") or self._state.get("available_profiles") or ()
-        return tuple(str(p) for p in raw)
+        return tuple(ClimateProfile(str(p)) for p in raw if str(p) in _CLIMATE_PROFILE_VALUES)
 
     async def set_temperature(self, temperature: float) -> None:
         """Set the target temperature."""
@@ -698,7 +735,7 @@ class BaseCustomDpLock(_CustomEntitySurface):
         (entity_category=config, translation_key=button_lock) — exactly
         like aiohomematic's ``CustomDpButtonLock``.
         """
-        name = self._summary.name
+        name = self._summary.name.split("@", 1)[0]
         return name if name in ("BUTTON_LOCK", "GLOBAL_BUTTON_LOCK") else ""
 
     @property
@@ -922,6 +959,8 @@ _KIND_TO_CLASS: dict[str, type[_CustomEntitySurface]] = {
     "climate_hmip": CustomDpIpThermostat,
     "lock": BaseCustomDpLock,
     "siren": BaseCustomDpSiren,
+    "siren_smoke": BaseCustomDpSiren,
+    "siren_sound": CustomDpSoundPlayer,
     "switch": CustomDpSwitch,
     "valve_irrigation": CustomDpIpIrrigationValve,
     "valve_modulating": CustomDpIpIrrigationValve,

@@ -43,6 +43,11 @@ class Channel:
         return self._summary.number
 
     @property
+    def name(self) -> str | None:
+        """Return the user-defined channel name, or ``None`` when unset."""
+        return self._summary.name
+
+    @property
     def paramset_key(self) -> str:
         """Return the canonical (input) paramset key of this channel."""
         return self._summary.paramset_key

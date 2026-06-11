@@ -57,13 +57,16 @@ from openccu_loom_client.compat.aiohomematic.central.state_paths import (
     parse_sysvar_state_path,
 )
 from openccu_loom_client.compat.aiohomematic.const import SystemInformation
+from openccu_loom_client.compat.aiohomematic.model.calculated import make_calculated_data_point
 from openccu_loom_client.compat.aiohomematic.model.custom import make_custom_data_point
 from openccu_loom_client.compat.aiohomematic.model.event_group import build_event_groups
 from openccu_loom_client.compat.aiohomematic.model.generic import make_generic_data_point
 from openccu_loom_client.compat.aiohomematic.model.hub import (
-    make_program_data_point,
+    make_program_data_points,
     make_sysvar_data_point,
+    resolve_hub_inclusion,
 )
+from openccu_loom_client.compat.aiohomematic.model.update import make_update_data_point
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -102,6 +105,20 @@ def _category_for_type(data_point_type: Any) -> DataPointCategory | None:
     if name is None:
         return None
     return DataPointCategory.__members__.get(name)
+
+
+# Usage verdicts that never spawn an HA entity. The daemon pipeline
+# computes the full aiohomematic visibility model (forced sensors,
+# un-ignore, HIDDEN_PARAMETERS, custom-DP absorption) and ships the
+# verdict on DataPointSummary.usage — the same gate the MQTT discovery
+# plane applies.
+_NON_CREATABLE_USAGES: Final = frozenset({"no_create", "ignored"})
+
+
+def _is_creatable(dp: Any) -> bool:
+    """Return whether the DP's usage verdict allows an HA entity."""
+    usage = getattr(getattr(dp, "summary", None), "usage", None)
+    return usage not in _NON_CREATABLE_USAGES
 
 
 class _DeviceCoordinator:
@@ -159,8 +176,16 @@ class _DeviceCoordinator:
 class _HubCoordinator:
     """``central.hub_coordinator`` surface (sysvars, programs, messages)."""
 
-    def __init__(self, client: LoomClient) -> None:
+    def __init__(
+        self,
+        client: LoomClient,
+        *,
+        sysvar_markers: tuple[str, ...] = (),
+        program_markers: tuple[str, ...] = (),
+    ) -> None:
         self._client = client
+        self._sysvar_markers = sysvar_markers
+        self._program_markers = program_markers
         # Cache hub data points by unique_id so register()/unregister()
         # bookkeeping survives repeated get_hub_data_points() scans.
         self._cache: dict[str, Any] = {}
@@ -182,15 +207,71 @@ class _HubCoordinator:
 
     # ---- entity-spawn surface ----
 
+    def _is_local(self, summary: Any) -> bool:
+        """
+        Return whether a sysvar/program belongs to this central.
+
+        The daemon's catalogue spans every configured central; spawning a
+        foreign central's variables here would leak entities (with the
+        wrong serial in their unique_id) into this HA entry.
+        """
+        central = getattr(summary, "central", None)
+        return not central or central == self._client.store.central_name
+
+    @staticmethod
+    def _is_internal(summary: Any) -> bool:
+        """
+        Return whether a sysvar is CCU-internal (``${…}`` names).
+
+        aiohomematic surfaces these through dedicated hub singletons
+        (alarm/service messages, presence), never as generic sysvar
+        entities.
+        """
+        return str(getattr(summary, "name", "")).startswith("${")
+
     def _all_hub_data_points(self) -> list[Any]:
         """Build (and cache) categorised hub data points from the store."""
         live: dict[str, Any] = {}
         for sysvar in self._client.store.sysvars:
-            sv_dp: Any = make_sysvar_data_point(summary=sysvar.summary, store=self._client.store)
+            if not self._is_local(sysvar.summary):
+                continue
+            include, enabled = resolve_hub_inclusion(
+                name=sysvar.summary.name,
+                description=getattr(sysvar.summary, "description", None),
+                is_internal=self._is_internal(sysvar.summary),
+                markers=self._sysvar_markers,
+                # aiohomematic includes internal sysvars by default
+                # (DEFAULT_INCLUDE_INTERNAL_SYSVARS) — but the ${…} ones
+                # are surfaced via dedicated hub singletons, so the
+                # generic layer keeps skipping them.
+                include_internal_default=False,
+            )
+            if not include:
+                continue
+            sv_dp: Any = make_sysvar_data_point(
+                summary=sysvar.summary, store=self._client.store, enabled_default=enabled
+            )
             live[sv_dp.unique_id] = sv_dp
         for program in self._client.store.programs:
-            pr_dp: Any = make_program_data_point(summary=program.summary, store=self._client.store)
-            live[pr_dp.unique_id] = pr_dp
+            if not self._is_local(program.summary):
+                continue
+            include, enabled = resolve_hub_inclusion(
+                name=program.summary.name,
+                description=getattr(program.summary, "description", None),
+                is_internal=bool(getattr(program.summary, "is_internal", False)),
+                markers=self._program_markers,
+                # DEFAULT_INCLUDE_INTERNAL_PROGRAMS is False — CCU-internal
+                # helper programs (prgEnergyCounter-…) never spawn.
+                include_internal_default=False,
+            )
+            if not include:
+                continue
+            for pr_dp in make_program_data_points(
+                summary=program.summary, store=self._client.store, enabled_default=enabled
+            ):
+                # Button and switch share the canonical key; HA scopes
+                # unique_ids per platform, the cache needs both.
+                live[f"{pr_dp.category}:{pr_dp.unique_id}"] = pr_dp
         # Reuse cached instances (preserving their registered flag) and
         # drop entries whose sysvar/program disappeared.
         for uid, dp in live.items():
@@ -245,6 +326,10 @@ class _QueryFacade:
 
     def __init__(self, client: LoomClient) -> None:
         self._client = client
+        # Event groups carry per-instance state (registered flag, last
+        # trigger); cache them by unique_id so repeated scans and the
+        # refresh bridge's trigger recording hit the same instances.
+        self._event_groups: dict[str, Any] = {}
 
     async def get_un_ignore_candidates(self) -> Any:
         return await self._client.visibility.get_unignore_candidates()
@@ -276,6 +361,8 @@ class _QueryFacade:
                 continue
             if registered is not None and getattr(dp, "is_registered", False) != registered:
                 continue
+            if exclude_no_create and not _is_creatable(dp):
+                continue
             out.append(dp)
         return tuple(out)
 
@@ -297,12 +384,31 @@ class _QueryFacade:
         **_kwargs: Any,
     ) -> tuple[Any, ...]:
         """Return device-trigger event groups built from the store's trigger DPs."""
-        return build_event_groups(
+        out = []
+        for built in build_event_groups(
             store=self._client.store,
             central_id=self._client.store.serial_suffix,
             event_type=event_type,
-            registered=registered,
-        )
+            registered=None,
+        ):
+            group = self._event_groups.setdefault(built.unique_id, built)
+            if registered is None or group.is_registered == registered:
+                out.append(group)
+        return tuple(out)
+
+    def find_event_group(
+        self, *, device_address: str, channel_no: int | None, event_type: Any
+    ) -> Any:
+        """Return the cached event group for one channel + trigger type, or ``None``."""
+        for group in self._event_groups.values():
+            channel = group.channel
+            if (
+                channel.device_address == device_address
+                and channel.number == channel_no
+                and group.device_trigger_event_type == event_type
+            ):
+                return group
+        return None
 
     def get_state_paths(
         self, *, rpc_callback_supported: bool | None = None, **_kwargs: Any
@@ -580,7 +686,15 @@ class _Configuration:
 class LoomCentralAdapter:
     """Presents the ``aiohomematic.CentralUnit`` surface over ``LoomClient``."""
 
-    def __init__(self, *, client: LoomClient, name: str, serial: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        client: LoomClient,
+        name: str,
+        serial: str | None = None,
+        sysvar_markers: tuple[str, ...] = (),
+        program_markers: tuple[str, ...] = (),
+    ) -> None:
         """Wire the coordinator surface and data-point factories onto ``client``."""
         self._client = client
         self._name = name
@@ -595,6 +709,7 @@ class LoomCentralAdapter:
         # HA-side isinstance dispatch works on the live objects. Must be
         # set before bootstrap() runs.
         client.store.set_data_point_factory(make_generic_data_point)
+        client.store.set_calculated_data_point_factory(make_calculated_data_point)
         client.store.set_custom_data_point_factory(make_custom_data_point)
         # HA links every device to this central via Device.central_info.name,
         # which must equal the adapter name (the integration's instance name).
@@ -607,7 +722,9 @@ class LoomCentralAdapter:
         self._looper: Final = Looper()
         self._ha_bus: Final = AioEventBus(task_scheduler=self._looper)
         self.device_coordinator: Final = _DeviceCoordinator(client)
-        self.hub_coordinator: Final = _HubCoordinator(client)
+        self.hub_coordinator: Final = _HubCoordinator(
+            client, sysvar_markers=sysvar_markers, program_markers=program_markers
+        )
         self.query_facade: Final = _QueryFacade(client)
         self.client_coordinator: Final = _ClientCoordinator(client)
         self.cache_coordinator: Final = _CacheCoordinator(client)
@@ -681,6 +798,7 @@ class LoomCentralAdapter:
         await self.client_coordinator.refresh()
         self._state = CentralState.Starting
         await self._client.bootstrap()
+        await self._bootstrap_hub_catalogue()
         await self._bootstrap_custom_data_points()
         await self._client.start_events()
         # Fan the daemon's typed value events into the uniform
@@ -693,6 +811,7 @@ class LoomCentralAdapter:
             store=self._client.store,
             ha_bus=self._ha_bus,
             central_name=self._name,
+            event_group_resolver=self.query_facade.find_event_group,
         )
         # Announce every data point (generic + custom) in one batch *after*
         # the custom DPs are attached, so HA's platforms spawn entities for
@@ -704,9 +823,30 @@ class LoomCentralAdapter:
     async def _emit_data_points_created(self) -> None:
         """Publish a real ``DataPointsCreatedEvent`` grouped by aiohomematic category."""
         grouped: dict[AioDataPointCategory, list[Any]] = {}
-        for dp in (*self._client.store.data_points, *self._client.store.custom_data_points):
+        # Hub data points (sysvars, programs) ride along: HA's platforms
+        # may finish their initial get_new_hub_data_points() scan before
+        # the snapshot is loaded, and no later event would re-announce
+        # them — without this the hub layer never spawns.
+        hub_dps = self.hub_coordinator.get_hub_data_points(registered=False)
+        # One firmware-update data point per updatable device (uid
+        # ``loom_<address>_update``), mirroring aiohomematic's DpUpdate.
+        update_dps = [
+            make_update_data_point(device=device, store=self._client.store)
+            for device in self._client.store.devices
+            if getattr(device.summary, "updatable", True)
+        ]
+        event_groups = self.query_facade.get_event_groups(registered=False)
+        for dp in (
+            *self._client.store.data_points,
+            *self._client.store.custom_data_points,
+            *hub_dps,
+            *update_dps,
+            *event_groups,
+        ):
             loom_category = getattr(dp, "category", None)
             if loom_category is None:
+                continue
+            if not _is_creatable(dp):
                 continue
             # Loom and aiohomematic share identical category *values*; map by
             # value (the loom StrEnum's ``str()`` yields its repr, not the value).
@@ -719,6 +859,23 @@ class LoomCentralAdapter:
                     new_data_points={category: tuple(dps) for category, dps in grouped.items()},
                 )
             )
+
+    async def _bootstrap_hub_catalogue(self) -> None:
+        """
+        Merge the complete sysvar/program catalogue into the store.
+
+        The snapshot's hub block only covers the daemon's snapshot index
+        (first central in multi-central deployments); the dedicated
+        endpoints return everything. Failures are non-fatal — the hub
+        layer then degrades to whatever the snapshot carried.
+        """
+        try:
+            sysvars = await self._client.hub.list_sysvars()
+            programs = await self._client.hub.list_programs()
+        except Exception:  # noqa: BLE001 — hub endpoints are optional
+            _LOGGER.debug("hub catalogue refresh failed during bootstrap", exc_info=True)
+            return
+        self._client.store.attach_hub_catalogue(sysvars=sysvars, programs=programs)
 
     async def _bootstrap_custom_data_points(self) -> None:
         """
@@ -734,6 +891,16 @@ class LoomCentralAdapter:
                 self._client.store.attach_custom_data_points(
                     device_address=device.address, cdps=cdps
                 )
+            for channel in device.channels:
+                calculated = await self._client.devices.list_calculated_data_points(
+                    address=device.address, channel=channel.number
+                )
+                if calculated:
+                    self._client.store.attach_channel_calculated_data_points(
+                        device_address=device.address,
+                        channel_number=channel.number,
+                        calculated=calculated,
+                    )
 
     async def stop(self) -> None:
         """Cancel the refresh bridge, close the client, and mark the central stopped."""
@@ -774,7 +941,14 @@ class LoomCentralAdapter:
         except Exception:  # noqa: BLE001 — system/ccu endpoint is optional
             _LOGGER.debug("system/ccu unavailable during system-information refresh")
             ccus = []
-        daemon_serial = ccus[0].serial if ccus and getattr(ccus[0], "serial", None) else None
+        # The daemon manages multiple centrals; pick the entry matching this
+        # central's name (falling back to the first) — taking ccus[0] blindly
+        # stamps the WRONG serial in a multi-central deployment and corrupts
+        # every hub / internal / virtual-remote routing key.
+        ccu_entry = next((c for c in ccus if getattr(c, "name", None) == self._name), None)
+        if ccu_entry is None and ccus:
+            ccu_entry = ccus[0]
+        daemon_serial = getattr(ccu_entry, "serial", None) if ccu_entry is not None else None
         # An injected serial (HA's entry.unique_id) wins over the daemon's,
         # so the live keys match the HA registry migration exactly.
         serial = self._serial or daemon_serial

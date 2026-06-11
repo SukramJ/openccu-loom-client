@@ -289,7 +289,7 @@ class TestHubDataPointModel:
     async def test_sysvar_and_program_categorised(self) -> None:
         from openccu_loom_client.compat.aiohomematic.model.hub import (
             ProgramDpButton,
-            SysvarDpSwitch,
+            SysvarDpBinarySensor,
         )
 
         central = await _make_config().create_central()
@@ -310,7 +310,7 @@ class TestHubDataPointModel:
                     "sysvars": [
                         {
                             "name": "Alarm",
-                            "value_type": "BOOL",
+                            "value_type": "LOGIC",
                             "value": True,
                             "observed": True,
                         }
@@ -323,13 +323,15 @@ class TestHubDataPointModel:
         # sets it from /system/ccu at start(), but this test drives the
         # store directly, so set it explicitly.
         central._client.store.set_serial("3014F711A0001234")  # → 11a0001234
-        switches = central.hub_coordinator.get_hub_data_points(
-            category=SysvarDpSwitch.default_category()
+        # aiohomematic default mapping: LOGIC/ALARM read as binary
+        # sensors (writable variants need the extended sysvar marker).
+        binaries = central.hub_coordinator.get_hub_data_points(
+            category=SysvarDpBinarySensor.default_category()
         )
-        assert len(switches) == 1
-        assert isinstance(switches[0], SysvarDpSwitch)
+        assert len(binaries) == 1
+        assert isinstance(binaries[0], SysvarDpBinarySensor)
         # canonical sysvar key: loom_<serial>_sysvar_<hub_slug(name)>.
-        assert switches[0].unique_id == "loom_11a0001234_sysvar_alarm"
+        assert binaries[0].unique_id == "loom_11a0001234_sysvar_alarm"
 
         buttons = central.hub_coordinator.get_hub_data_points(
             category=ProgramDpButton.default_category(), registered=False

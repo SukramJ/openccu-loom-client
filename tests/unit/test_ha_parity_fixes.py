@@ -160,8 +160,39 @@ class TestClimateConfigBlock:
         assert cdp.target_temperature_step == 0.5
         assert cdp.modes == ("auto", "heat", "off")
         assert cdp.profiles == ("boost", "week_program_1")
+        # HA reads .value off the members (climate.py preset_modes), so
+        # the tuples must carry the aiohomematic enums, not bare strings.
+        assert [m.value for m in cdp.modes] == ["auto", "heat", "off"]
+        assert [p.value for p in cdp.profiles] == ["boost", "week_program_1"]
+
+    def test_capability_aliases(self) -> None:
+        cdp = _make_cdp(
+            _cdp_summary(
+                name="LEVEL",
+                category="light",
+                kind="light",
+                capabilities={"dimmable": True, "acoustic": True, "profile": True},
+            )
+        )
+        # HA-side names map onto the daemon's flag names.
+        assert cdp.capabilities.brightness is True
+        assert cdp.capabilities.tones is True
+        assert cdp.capabilities.profiles is True
+        assert cdp.capabilities.color is False
         # HA checks capabilities.profiles (plural) for PRESET_MODE.
         assert cdp.capabilities.profiles is True
+
+    def test_unknown_tokens_skipped(self) -> None:
+        cdp = _make_cdp(
+            _cdp_summary(
+                config={
+                    "hvac_modes": ["auto", "fancy_new_mode"],
+                    "preset_modes": ["boost", "exotic"],
+                }
+            )
+        )
+        assert [m.value for m in cdp.modes] == ["auto"]
+        assert [p.value for p in cdp.profiles] == ["boost"]
 
     def test_defaults_without_config(self) -> None:
         cdp = _make_cdp(_cdp_summary())
@@ -231,3 +262,276 @@ class TestGenericTranslationKey:
     def test_lowercased_parameter(self) -> None:
         dp = _make_binary_sensor(value=0, value_list=["CLOSED", "OPEN"])
         assert dp.translation_key == "state"
+
+
+class TestChannelGroupWireNames:
+    """Channel-group CDPs arrive with unique PARAM@ch wire names."""
+
+    def test_group_members_keyed_separately(self) -> None:
+        store = LoomStore()
+        store.attach_custom_data_points(
+            device_address="VCU1",
+            cdps=[
+                _cdp_summary(name="LEVEL@4", category="light", kind="light", channel_no=4),
+                _cdp_summary(name="LEVEL@5", category="light", kind="light", channel_no=5),
+                _cdp_summary(name="LEVEL@6", category="light", kind="light", channel_no=6),
+            ],
+        )
+        cdps = store.custom_data_points_of(address="VCU1")
+        assert len(cdps) == 3
+        assert sorted(c.summary.channel_no for c in cdps) == [4, 5, 6]
+
+    def test_button_lock_postfix_strips_channel_suffix(self) -> None:
+        cdp = _make_cdp(
+            _cdp_summary(name="BUTTON_LOCK@0", category="lock", kind="lock", channel_no=0)
+        )
+        assert cdp.data_point_name_postfix == "BUTTON_LOCK"
+
+
+class TestCustomTranslatedName:
+    """Custom DPs derive their display name from the CCU channel name."""
+
+    def _store_with_channels(self) -> LoomStore:
+        from openccu_loom_types.rest import DeviceDetail, Snapshot
+
+        store = LoomStore()
+        store.set_custom_data_point_factory(make_custom_data_point)
+        store.load_snapshot(
+            Snapshot.model_validate(
+                {
+                    "generated_at": "2026-06-11T08:00:00Z",
+                    "devices": [
+                        {
+                            "address": "VCU1",
+                            "interface": "home:HmIP-RF",
+                            "model": "HmIP-DRD3",
+                            "name": "Küchenstrahler",
+                            "available": True,
+                            "channels_count": 7,
+                        }
+                    ],
+                }
+            )
+        )
+        store.attach_device_detail(
+            DeviceDetail.model_validate(
+                {
+                    "address": "VCU1",
+                    "interface": "home:HmIP-RF",
+                    "model": "HmIP-DRD3",
+                    "name": "Küchenstrahler",
+                    "available": True,
+                    "channels_count": 7,
+                    "channels": [
+                        {
+                            "address": "VCU1:4",
+                            "number": 4,
+                            "name": "Küchenstrahler",
+                            "paramset_key": "VALUES",
+                            "data_points_count": 3,
+                        },
+                        {
+                            "address": "VCU1:5",
+                            "number": 5,
+                            "name": "Küchenstrahler:vch5",
+                            "paramset_key": "VALUES",
+                            "data_points_count": 3,
+                        },
+                        {
+                            "address": "VCU1:6",
+                            "number": 6,
+                            "name": "Küchenstrahler:vch6",
+                            "paramset_key": "VALUES",
+                            "data_points_count": 3,
+                        },
+                    ],
+                }
+            )
+        )
+        return store
+
+    def test_primary_channel_collapses_to_none(self) -> None:
+        store = self._store_with_channels()
+        store.attach_custom_data_points(
+            device_address="VCU1",
+            cdps=[_cdp_summary(name="LEVEL@4", category="light", kind="light", channel_no=4)],
+        )
+        cdp = store.get_custom_data_point(address="VCU1", name="LEVEL@4")
+        assert cdp.translated_name is None
+
+    def test_secondary_channels_named_vch(self) -> None:
+        store = self._store_with_channels()
+        store.attach_custom_data_points(
+            device_address="VCU1",
+            cdps=[
+                _cdp_summary(name="LEVEL@5", category="light", kind="light", channel_no=5),
+                _cdp_summary(name="LEVEL@6", category="light", kind="light", channel_no=6),
+            ],
+        )
+        assert store.get_custom_data_point(address="VCU1", name="LEVEL@5").translated_name == "vch5"
+        assert store.get_custom_data_point(address="VCU1", name="LEVEL@6").translated_name == "vch6"
+
+
+class TestUpdateDataPoint:
+    """Per-device firmware-update data points (aiohomematic DpUpdate twin)."""
+
+    def _device(self, store: LoomStore, firmware: dict[str, Any] | None = None) -> Any:
+        from openccu_loom_types.rest import DeviceDetail, Snapshot
+
+        store.load_snapshot(
+            Snapshot.model_validate(
+                {
+                    "generated_at": "2026-06-11T08:00:00Z",
+                    "devices": [
+                        {
+                            "address": "VCU9",
+                            "interface": "HmIP-RF",
+                            "model": "HmIP-PSM",
+                            "name": "Steckdose",
+                            "available": True,
+                            "channels_count": 1,
+                            "updatable": True,
+                        }
+                    ],
+                }
+            )
+        )
+        detail = {
+            "address": "VCU9",
+            "interface": "HmIP-RF",
+            "model": "HmIP-PSM",
+            "name": "Steckdose",
+            "available": True,
+            "channels_count": 1,
+            "channels": [],
+        }
+        if firmware is not None:
+            detail["firmware"] = firmware
+        store.attach_device_detail(DeviceDetail.model_validate(detail))
+        return store.get_device(address="VCU9")
+
+    def test_unique_id_and_versions(self) -> None:
+        from openccu_loom_client.compat.aiohomematic.model.update import make_update_data_point
+
+        store = LoomStore()
+        store.set_serial("3014F711A0001234")
+        device = self._device(
+            store,
+            firmware={"Current": "1.2.3", "Available": "1.3.0", "UpdateState": "READY_FOR_UPDATE"},
+        )
+        dp = make_update_data_point(device=device, store=store)
+        # Device addresses carry no central prefix (ccu reference:
+        # ``<address>_update``); only the loom namespace is added.
+        assert dp.unique_id == "loom_vcu9_update"
+        assert dp.firmware == "1.2.3"
+        # HmIP advertises the available version only in a ready state.
+        assert dp.latest_firmware == "1.3.0"
+        assert dp.in_progress is False
+        assert dp.category.value == "update"
+        assert dp.full_name == "Steckdose Update"
+
+    def test_no_update_available_falls_back_to_installed(self) -> None:
+        from openccu_loom_client.compat.aiohomematic.model.update import make_update_data_point
+
+        store = LoomStore()
+        store.set_serial("3014F711A0001234")
+        device = self._device(store, firmware={"Current": "1.2.3", "UpdateState": "UP_TO_DATE"})
+        dp = make_update_data_point(device=device, store=store)
+        assert dp.latest_firmware == "1.2.3"
+
+
+class TestCalculatedDataPoints:
+    """Daemon-calculated DPs spawn as sensors with the calculated key prefix."""
+
+    def _store(self) -> LoomStore:
+        from openccu_loom_client.compat.aiohomematic.model.calculated import (
+            make_calculated_data_point,
+        )
+
+        store = LoomStore()
+        store.set_serial("3014F711A0001234")
+        store.set_calculated_data_point_factory(make_calculated_data_point)
+        return store
+
+    def test_binary_calculated(self) -> None:
+        from openccu_loom_types.rest import CalculatedDPSummary
+
+        from openccu_loom_client.compat.aiohomematic.model.calculated import (
+            CalculatedDpBinarySensor,
+        )
+
+        store = self._store()
+        store.attach_channel_calculated_data_points(
+            device_address="VCU7",
+            channel_number=1,
+            calculated=[
+                CalculatedDPSummary.model_validate(
+                    {
+                        "name": "WINDOW_OPEN",
+                        "category": "binary_sensor",
+                        "value": False,
+                        "observed": True,
+                    }
+                )
+            ],
+        )
+        dp = store.get_data_point(address="VCU7", channel=1, parameter="WINDOW_OPEN")
+        assert isinstance(dp, CalculatedDpBinarySensor)
+        # ccu twin: calculated_<address>_<channel>_<parameter>; loom adds its namespace.
+        assert dp.unique_id == "loom_calculated_vcu7_1_window_open"
+        assert dp.value is False
+        assert dp.category.value == "binary_sensor"
+
+    def test_sensor_calculated_unobserved_reads_none(self) -> None:
+        from openccu_loom_types.rest import CalculatedDPSummary
+
+        from openccu_loom_client.compat.aiohomematic.model.calculated import CalculatedDpSensor
+
+        store = self._store()
+        store.attach_channel_calculated_data_points(
+            device_address="VCU7",
+            channel_number=1,
+            calculated=[
+                CalculatedDPSummary.model_validate(
+                    {"name": "DEW_POINT", "category": "sensor", "value": 0, "observed": False}
+                )
+            ],
+        )
+        dp = store.get_data_point(address="VCU7", channel=1, parameter="DEW_POINT")
+        assert isinstance(dp, CalculatedDpSensor)
+        assert dp.value is None  # unobserved reads unknown, not the wire default
+
+    def test_value_changed_routes_to_calculated(self) -> None:
+        from openccu_loom_types.rest import CalculatedDPSummary
+        from openccu_loom_types.ws import DataPointValueChangedPayload
+
+        store = self._store()
+        store.attach_channel_calculated_data_points(
+            device_address="VCU7",
+            channel_number=1,
+            calculated=[
+                CalculatedDPSummary.model_validate(
+                    {
+                        "name": "WINDOW_OPEN",
+                        "category": "binary_sensor",
+                        "value": False,
+                        "observed": True,
+                    }
+                )
+            ],
+        )
+        store.apply_value_changed(
+            DataPointValueChangedPayload.model_validate(
+                {
+                    "central": "home",
+                    "device_address": "VCU7",
+                    "channel": 1,
+                    "parameter": "WINDOW_OPEN",
+                    "paramset_key": "VALUES",
+                    "value": True,
+                    "modified_at": "2026-06-11T10:00:00Z",
+                }
+            )
+        )
+        dp = store.get_data_point(address="VCU7", channel=1, parameter="WINDOW_OPEN")
+        assert dp.value is True

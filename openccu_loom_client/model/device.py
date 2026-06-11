@@ -125,6 +125,16 @@ class Device:
         return f"{self.address}@{self.interface_id}"
 
     @property
+    def available_firmware(self) -> str | None:
+        """Return the firmware version available for install, or ``None``."""
+        return self._firmware.Available if self._firmware is not None else None
+
+    @property
+    def firmware_update_state(self) -> str | None:
+        """Return the CCU's firmware-update state token, or ``None``."""
+        return self._firmware.UpdateState if self._firmware is not None else None
+
+    @property
     def central_info(self) -> SimpleNamespace:
         """Return the owning central, exposing its HA-facing ``name`` (the via-device)."""
         return SimpleNamespace(name=self._store.central_name)
