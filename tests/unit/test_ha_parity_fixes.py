@@ -417,7 +417,7 @@ class TestUpdateDataPoint:
         store.set_serial("3014F711A0001234")
         device = self._device(
             store,
-            firmware={"Current": "1.2.3", "Available": "1.3.0", "UpdateState": "UPDATE_AVAILABLE"},
+            firmware={"Current": "1.2.3", "Available": "1.3.0", "UpdateState": "READY_FOR_UPDATE"},
         )
         dp = make_update_data_point(device=device, store=store)
         # Device addresses carry no central prefix (ccu reference:
