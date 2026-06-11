@@ -247,3 +247,111 @@ class TestGenericTranslationKey:
     def test_lowercased_parameter(self) -> None:
         dp = _make_binary_sensor(value=0, value_list=["CLOSED", "OPEN"])
         assert dp.translation_key == "state"
+
+
+class TestChannelGroupWireNames:
+    """Channel-group CDPs arrive with unique PARAM@ch wire names."""
+
+    def test_group_members_keyed_separately(self) -> None:
+        store = LoomStore()
+        store.attach_custom_data_points(
+            device_address="VCU1",
+            cdps=[
+                _cdp_summary(name="LEVEL@4", category="light", kind="light", channel_no=4),
+                _cdp_summary(name="LEVEL@5", category="light", kind="light", channel_no=5),
+                _cdp_summary(name="LEVEL@6", category="light", kind="light", channel_no=6),
+            ],
+        )
+        cdps = store.custom_data_points_of(address="VCU1")
+        assert len(cdps) == 3
+        assert sorted(c.summary.channel_no for c in cdps) == [4, 5, 6]
+
+    def test_button_lock_postfix_strips_channel_suffix(self) -> None:
+        cdp = _make_cdp(
+            _cdp_summary(name="BUTTON_LOCK@0", category="lock", kind="lock", channel_no=0)
+        )
+        assert cdp.data_point_name_postfix == "BUTTON_LOCK"
+
+
+class TestCustomTranslatedName:
+    """Custom DPs derive their display name from the CCU channel name."""
+
+    def _store_with_channels(self) -> LoomStore:
+        from openccu_loom_types.rest import DeviceDetail, Snapshot
+
+        store = LoomStore()
+        store.set_custom_data_point_factory(make_custom_data_point)
+        store.load_snapshot(
+            Snapshot.model_validate(
+                {
+                    "generated_at": "2026-06-11T08:00:00Z",
+                    "devices": [
+                        {
+                            "address": "VCU1",
+                            "interface": "home:HmIP-RF",
+                            "model": "HmIP-DRD3",
+                            "name": "Küchenstrahler",
+                            "available": True,
+                            "channels_count": 7,
+                        }
+                    ],
+                }
+            )
+        )
+        store.attach_device_detail(
+            DeviceDetail.model_validate(
+                {
+                    "address": "VCU1",
+                    "interface": "home:HmIP-RF",
+                    "model": "HmIP-DRD3",
+                    "name": "Küchenstrahler",
+                    "available": True,
+                    "channels_count": 7,
+                    "channels": [
+                        {
+                            "address": "VCU1:4",
+                            "number": 4,
+                            "name": "Küchenstrahler",
+                            "paramset_key": "VALUES",
+                            "data_points_count": 3,
+                        },
+                        {
+                            "address": "VCU1:5",
+                            "number": 5,
+                            "name": "Küchenstrahler:vch5",
+                            "paramset_key": "VALUES",
+                            "data_points_count": 3,
+                        },
+                        {
+                            "address": "VCU1:6",
+                            "number": 6,
+                            "name": "Küchenstrahler:vch6",
+                            "paramset_key": "VALUES",
+                            "data_points_count": 3,
+                        },
+                    ],
+                }
+            )
+        )
+        return store
+
+    def test_primary_channel_collapses_to_none(self) -> None:
+        store = self._store_with_channels()
+        store.attach_custom_data_points(
+            device_address="VCU1",
+            cdps=[_cdp_summary(name="LEVEL@4", category="light", kind="light", channel_no=4)],
+        )
+        cdp = store.get_custom_data_point(address="VCU1", name="LEVEL@4")
+        assert cdp.translated_name is None
+
+    def test_secondary_channels_named_vch(self) -> None:
+        store = self._store_with_channels()
+        store.attach_custom_data_points(
+            device_address="VCU1",
+            cdps=[
+                _cdp_summary(name="LEVEL@5", category="light", kind="light", channel_no=5),
+                _cdp_summary(name="LEVEL@6", category="light", kind="light", channel_no=6),
+            ],
+        )
+        assert store.get_custom_data_point(address="VCU1", name="LEVEL@5").translated_name == "vch5"
+        assert store.get_custom_data_point(address="VCU1", name="LEVEL@6").translated_name == "vch6"

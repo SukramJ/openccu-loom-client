@@ -179,6 +179,29 @@ class _CustomEntitySurface(_CustomProtocolSurface, CustomDataPoint):
         return config.get(key)
 
     @property
+    def translated_name(self) -> str | None:
+        """
+        Return the channel-derived display name, aiohomematic-style.
+
+        aiohomematic names a custom DP after its CCU channel: the channel
+        name minus the device-name prefix ("Küchenstrahler:vch5" →
+        "vch5", a user-renamed channel keeps its full name). The primary
+        channel usually carries the bare device name, which strips to
+        nothing → ``None`` and HA falls back to the device name alone —
+        exactly the reference behaviour (primary ``None``, secondaries
+        "vch5"/"vch6").
+        """
+        channel = self._store.get_channel(
+            address=self._device_address, number=self._summary.channel_no
+        )
+        raw = (channel.summary.name if channel is not None else None) or ""
+        device = self.device
+        device_name = (device.name if device is not None else "") or ""
+        if device_name and raw.startswith(device_name):
+            raw = raw[len(device_name) :].lstrip(":").strip()
+        return raw or None
+
+    @property
     def is_registered(self) -> bool:
         """Return whether the entity has been registered with HA."""
         return getattr(self, "_registered", False)
@@ -706,7 +729,7 @@ class BaseCustomDpLock(_CustomEntitySurface):
         (entity_category=config, translation_key=button_lock) — exactly
         like aiohomematic's ``CustomDpButtonLock``.
         """
-        name = self._summary.name
+        name = self._summary.name.split("@", 1)[0]
         return name if name in ("BUTTON_LOCK", "GLOBAL_BUTTON_LOCK") else ""
 
     @property
