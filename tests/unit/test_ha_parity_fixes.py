@@ -438,3 +438,100 @@ class TestUpdateDataPoint:
         device = self._device(store, firmware={"Current": "1.2.3", "UpdateState": "UP_TO_DATE"})
         dp = make_update_data_point(device=device, store=store)
         assert dp.latest_firmware == "1.2.3"
+
+
+class TestCalculatedDataPoints:
+    """Daemon-calculated DPs spawn as sensors with the calculated key prefix."""
+
+    def _store(self) -> LoomStore:
+        from openccu_loom_client.compat.aiohomematic.model.calculated import (
+            make_calculated_data_point,
+        )
+
+        store = LoomStore()
+        store.set_serial("3014F711A0001234")
+        store.set_calculated_data_point_factory(make_calculated_data_point)
+        return store
+
+    def test_binary_calculated(self) -> None:
+        from openccu_loom_types.rest import CalculatedDPSummary
+
+        from openccu_loom_client.compat.aiohomematic.model.calculated import (
+            CalculatedDpBinarySensor,
+        )
+
+        store = self._store()
+        store.attach_channel_calculated_data_points(
+            device_address="VCU7",
+            channel_number=1,
+            calculated=[
+                CalculatedDPSummary.model_validate(
+                    {
+                        "name": "WINDOW_OPEN",
+                        "category": "binary_sensor",
+                        "value": False,
+                        "observed": True,
+                    }
+                )
+            ],
+        )
+        dp = store.get_data_point(address="VCU7", channel=1, parameter="WINDOW_OPEN")
+        assert isinstance(dp, CalculatedDpBinarySensor)
+        # ccu twin: calculated_<address>_<channel>_<parameter>; loom adds its namespace.
+        assert dp.unique_id == "loom_calculated_vcu7_1_window_open"
+        assert dp.value is False
+        assert dp.category.value == "binary_sensor"
+
+    def test_sensor_calculated_unobserved_reads_none(self) -> None:
+        from openccu_loom_types.rest import CalculatedDPSummary
+
+        from openccu_loom_client.compat.aiohomematic.model.calculated import CalculatedDpSensor
+
+        store = self._store()
+        store.attach_channel_calculated_data_points(
+            device_address="VCU7",
+            channel_number=1,
+            calculated=[
+                CalculatedDPSummary.model_validate(
+                    {"name": "DEW_POINT", "category": "sensor", "value": 0, "observed": False}
+                )
+            ],
+        )
+        dp = store.get_data_point(address="VCU7", channel=1, parameter="DEW_POINT")
+        assert isinstance(dp, CalculatedDpSensor)
+        assert dp.value is None  # unobserved reads unknown, not the wire default
+
+    def test_value_changed_routes_to_calculated(self) -> None:
+        from openccu_loom_types.rest import CalculatedDPSummary
+        from openccu_loom_types.ws import DataPointValueChangedPayload
+
+        store = self._store()
+        store.attach_channel_calculated_data_points(
+            device_address="VCU7",
+            channel_number=1,
+            calculated=[
+                CalculatedDPSummary.model_validate(
+                    {
+                        "name": "WINDOW_OPEN",
+                        "category": "binary_sensor",
+                        "value": False,
+                        "observed": True,
+                    }
+                )
+            ],
+        )
+        store.apply_value_changed(
+            DataPointValueChangedPayload.model_validate(
+                {
+                    "central": "home",
+                    "device_address": "VCU7",
+                    "channel": 1,
+                    "parameter": "WINDOW_OPEN",
+                    "paramset_key": "VALUES",
+                    "value": True,
+                    "modified_at": "2026-06-11T10:00:00Z",
+                }
+            )
+        )
+        dp = store.get_data_point(address="VCU7", channel=1, parameter="WINDOW_OPEN")
+        assert dp.value is True

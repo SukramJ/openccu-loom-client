@@ -33,6 +33,7 @@ import logging
 from typing import TYPE_CHECKING, Any, Final
 
 from openccu_loom_types.rest import (
+    CalculatedDPSummary,
     ChannelSummary,
     CustomDPSummary,
     DataPointSummary,
@@ -78,6 +79,7 @@ class LoomStore:
         # central via ``Device.central_info.name``, so it must match the
         # adapter name — which may differ from the daemon ``central_id``.
         self._central_name: str = ""
+        self._calculated_factory: Callable[..., DataPoint] | None = None
         # The CCU serial suffix (last 10 chars, lower-cased). This is the
         # central-id slot of every canonical HA routing key for hub /
         # internal / virtual-remote addresses (see
@@ -659,6 +661,54 @@ class LoomStore:
         else:
             device._update_summary(summary)
         return device
+
+    def attach_channel_calculated_data_points(
+        self,
+        *,
+        device_address: str,
+        channel_number: int,
+        calculated: list[CalculatedDPSummary],
+    ) -> None:
+        """
+        Register daemon-calculated DPs for one channel.
+
+        They live in the same ``(address, channel, parameter)`` map as the
+        generic data points, so ``apply_value_changed`` routes the daemon's
+        ``datapoint.value_changed`` pushes to them without special-casing.
+        """
+        if self._calculated_factory is None:
+            return
+        for calc in calculated:
+            key = (device_address, channel_number, calc.name)
+            self._data_points[key] = self._calculated_factory(
+                summary=calc,
+                device_address=device_address,
+                channel_number=channel_number,
+                store=self,
+            )
+
+    def set_calculated_data_point_factory(self, factory: Callable[..., DataPoint] | None) -> None:
+        """Install the categorised calculated-DP factory (compat layer)."""
+        self._calculated_factory = factory
+
+    async def refresh_calculated_data_point(self, *, address: str, channel: int, name: str) -> None:
+        """Re-read one calculated DP from the daemon and apply its value."""
+        if self._transport is None:
+            return
+        payload = await self._transport.request(
+            "GET", f"/devices/{address}/channels/{channel}/calc-dps/{name}"
+        )
+        dp = self._data_points.get((address, channel, name))
+        if dp is not None and isinstance(payload, dict):
+            calc = CalculatedDPSummary.model_validate(payload)
+            new_summary = dp.summary.model_copy(
+                update={
+                    "value": calc.value,
+                    "observed": calc.observed,
+                    "modified_at": calc.modified_at,
+                }
+            )
+            dp._replace_summary(new_summary)
 
     async def refresh_device(self, *, address: str) -> None:
         """

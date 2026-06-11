@@ -57,6 +57,7 @@ from openccu_loom_client.compat.aiohomematic.central.state_paths import (
     parse_sysvar_state_path,
 )
 from openccu_loom_client.compat.aiohomematic.const import SystemInformation
+from openccu_loom_client.compat.aiohomematic.model.calculated import make_calculated_data_point
 from openccu_loom_client.compat.aiohomematic.model.custom import make_custom_data_point
 from openccu_loom_client.compat.aiohomematic.model.event_group import build_event_groups
 from openccu_loom_client.compat.aiohomematic.model.generic import make_generic_data_point
@@ -645,6 +646,7 @@ class LoomCentralAdapter:
         # HA-side isinstance dispatch works on the live objects. Must be
         # set before bootstrap() runs.
         client.store.set_data_point_factory(make_generic_data_point)
+        client.store.set_calculated_data_point_factory(make_calculated_data_point)
         client.store.set_custom_data_point_factory(make_custom_data_point)
         # HA links every device to this central via Device.central_info.name,
         # which must equal the adapter name (the integration's instance name).
@@ -822,6 +824,16 @@ class LoomCentralAdapter:
                 self._client.store.attach_custom_data_points(
                     device_address=device.address, cdps=cdps
                 )
+            for channel in device.channels:
+                calculated = await self._client.devices.list_calculated_data_points(
+                    address=device.address, channel=channel.number
+                )
+                if calculated:
+                    self._client.store.attach_channel_calculated_data_points(
+                        device_address=device.address,
+                        channel_number=channel.number,
+                        calculated=calculated,
+                    )
 
     async def stop(self) -> None:
         """Cancel the refresh bridge, close the client, and mark the central stopped."""
