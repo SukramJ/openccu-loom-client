@@ -1,5 +1,6 @@
 # Unreleased
 
+- Chore: **exact types pin** — `openccu-loom-types` is now pinned `==` (deterministic resolution; every shipped client/types combination is a tested one). Bump the pin together with each types release.
 - Feat: **schema-digest handshake** — `connect()` compares the daemon's `schema_digest` (`GET /api/v1/info`, daemon ADR 0028) against the value stamped into the installed `openccu-loom-types` package and logs a warning when the types were generated from a different daemon build; skipped silently when either side predates the digest.
 
 # Version 2026.6.3 (2026-06-11)
