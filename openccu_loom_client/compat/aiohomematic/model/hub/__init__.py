@@ -202,12 +202,14 @@ class HmUpdate:
 
 # ---- factories ----
 
+# CCU SysvarType → class, mirroring aiohomematic's non-extended default
+# (model/hub/__init__.py): ALARM/LOGIC → binary sensor; everything else
+# (FLOAT/INTEGER/STRING/LIST) → read-only sensor. The writable variants
+# (switch/number/select/text) require the "extended" sysvar marker from
+# the CCU variable description, which the daemon does not surface yet.
 _SYSVAR_BY_TYPE: dict[str, type[Sysvar]] = {
-    "BOOL": SysvarDpSwitch,
-    "ENUM": SysvarDpSelect,
-    "FLOAT": SysvarDpNumber,
-    "INTEGER": SysvarDpNumber,
-    "STRING": SysvarDpText,
+    "ALARM": SysvarDpBinarySensor,
+    "LOGIC": SysvarDpBinarySensor,
 }
 
 
@@ -215,11 +217,11 @@ def resolve_sysvar_class(*, value_type: str | None, has_value_list: bool) -> typ
     """
     Pick the ``SysvarDp*`` class from the sysvar's value type.
 
-    BOOL sysvars map to a writable switch (HA users toggle them); other
-    types map to number/select/text, defaulting to a read-only sensor.
+    Mirrors aiohomematic's default mapping: ALARM/LOGIC read as binary
+    sensors, every other type (including LIST — ``has_value_list``) as a
+    read-only sensor until extended-marker support lands.
     """
-    if has_value_list:
-        return SysvarDpSelect
+    del has_value_list  # LIST without the extended marker is a sensor too
     return _SYSVAR_BY_TYPE.get((value_type or "").upper(), SysvarDpSensor)
 
 

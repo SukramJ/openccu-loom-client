@@ -660,6 +660,26 @@ class LoomStore:
             device._update_summary(summary)
         return device
 
+    def attach_hub_catalogue(
+        self,
+        *,
+        sysvars: list[SysvarSummary] | None = None,
+        programs: list[ProgramSummary] | None = None,
+    ) -> None:
+        """
+        Merge the full hub catalogue into the store.
+
+        The bootstrap snapshot only carries the hub data the daemon's
+        snapshot index holds (in multi-central deployments that is the
+        first central's set); ``GET /sysvars`` / ``GET /programs``
+        return the complete daemon-wide catalogue — callers fetch those
+        and merge them here.
+        """
+        for sysvar in sysvars or ():
+            self._upsert_sysvar(sysvar)
+        for program in programs or ():
+            self._upsert_program(program)
+
     def _upsert_program(self, summary: ProgramSummary) -> None:
         existing = self._programs.get(summary.id)
         if existing is None:

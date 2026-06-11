@@ -182,13 +182,39 @@ class _HubCoordinator:
 
     # ---- entity-spawn surface ----
 
+    def _is_local(self, summary: Any) -> bool:
+        """
+        Return whether a sysvar/program belongs to this central.
+
+        The daemon's catalogue spans every configured central; spawning a
+        foreign central's variables here would leak entities (with the
+        wrong serial in their unique_id) into this HA entry.
+        """
+        central = getattr(summary, "central", None)
+        return not central or central == self._client.store.central_name
+
+    @staticmethod
+    def _is_internal(summary: Any) -> bool:
+        """
+        Return whether a sysvar is CCU-internal (``${…}`` names).
+
+        aiohomematic surfaces these through dedicated hub singletons
+        (alarm/service messages, presence), never as generic sysvar
+        entities.
+        """
+        return str(getattr(summary, "name", "")).startswith("${")
+
     def _all_hub_data_points(self) -> list[Any]:
         """Build (and cache) categorised hub data points from the store."""
         live: dict[str, Any] = {}
         for sysvar in self._client.store.sysvars:
+            if not self._is_local(sysvar.summary) or self._is_internal(sysvar.summary):
+                continue
             sv_dp: Any = make_sysvar_data_point(summary=sysvar.summary, store=self._client.store)
             live[sv_dp.unique_id] = sv_dp
         for program in self._client.store.programs:
+            if not self._is_local(program.summary):
+                continue
             pr_dp: Any = make_program_data_point(summary=program.summary, store=self._client.store)
             live[pr_dp.unique_id] = pr_dp
         # Reuse cached instances (preserving their registered flag) and
@@ -681,6 +707,7 @@ class LoomCentralAdapter:
         await self.client_coordinator.refresh()
         self._state = CentralState.Starting
         await self._client.bootstrap()
+        await self._bootstrap_hub_catalogue()
         await self._bootstrap_custom_data_points()
         await self._client.start_events()
         # Fan the daemon's typed value events into the uniform
@@ -704,7 +731,16 @@ class LoomCentralAdapter:
     async def _emit_data_points_created(self) -> None:
         """Publish a real ``DataPointsCreatedEvent`` grouped by aiohomematic category."""
         grouped: dict[AioDataPointCategory, list[Any]] = {}
-        for dp in (*self._client.store.data_points, *self._client.store.custom_data_points):
+        # Hub data points (sysvars, programs) ride along: HA's platforms
+        # may finish their initial get_new_hub_data_points() scan before
+        # the snapshot is loaded, and no later event would re-announce
+        # them — without this the hub layer never spawns.
+        hub_dps = self.hub_coordinator.get_hub_data_points(registered=False)
+        for dp in (
+            *self._client.store.data_points,
+            *self._client.store.custom_data_points,
+            *hub_dps,
+        ):
             loom_category = getattr(dp, "category", None)
             if loom_category is None:
                 continue
@@ -719,6 +755,23 @@ class LoomCentralAdapter:
                     new_data_points={category: tuple(dps) for category, dps in grouped.items()},
                 )
             )
+
+    async def _bootstrap_hub_catalogue(self) -> None:
+        """
+        Merge the complete sysvar/program catalogue into the store.
+
+        The snapshot's hub block only covers the daemon's snapshot index
+        (first central in multi-central deployments); the dedicated
+        endpoints return everything. Failures are non-fatal — the hub
+        layer then degrades to whatever the snapshot carried.
+        """
+        try:
+            sysvars = await self._client.hub.list_sysvars()
+            programs = await self._client.hub.list_programs()
+        except Exception:  # noqa: BLE001 — hub endpoints are optional
+            _LOGGER.debug("hub catalogue refresh failed during bootstrap", exc_info=True)
+            return
+        self._client.store.attach_hub_catalogue(sysvars=sysvars, programs=programs)
 
     async def _bootstrap_custom_data_points(self) -> None:
         """
@@ -774,7 +827,14 @@ class LoomCentralAdapter:
         except Exception:  # noqa: BLE001 — system/ccu endpoint is optional
             _LOGGER.debug("system/ccu unavailable during system-information refresh")
             ccus = []
-        daemon_serial = ccus[0].serial if ccus and getattr(ccus[0], "serial", None) else None
+        # The daemon manages multiple centrals; pick the entry matching this
+        # central's name (falling back to the first) — taking ccus[0] blindly
+        # stamps the WRONG serial in a multi-central deployment and corrupts
+        # every hub / internal / virtual-remote routing key.
+        ccu_entry = next((c for c in ccus if getattr(c, "name", None) == self._name), None)
+        if ccu_entry is None and ccus:
+            ccu_entry = ccus[0]
+        daemon_serial = getattr(ccu_entry, "serial", None) if ccu_entry is not None else None
         # An injected serial (HA's entry.unique_id) wins over the daemon's,
         # so the live keys match the HA registry migration exactly.
         serial = self._serial or daemon_serial
