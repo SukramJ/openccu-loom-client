@@ -160,8 +160,24 @@ class TestClimateConfigBlock:
         assert cdp.target_temperature_step == 0.5
         assert cdp.modes == ("auto", "heat", "off")
         assert cdp.profiles == ("boost", "week_program_1")
+        # HA reads .value off the members (climate.py preset_modes), so
+        # the tuples must carry the aiohomematic enums, not bare strings.
+        assert [m.value for m in cdp.modes] == ["auto", "heat", "off"]
+        assert [p.value for p in cdp.profiles] == ["boost", "week_program_1"]
         # HA checks capabilities.profiles (plural) for PRESET_MODE.
         assert cdp.capabilities.profiles is True
+
+    def test_unknown_tokens_skipped(self) -> None:
+        cdp = _make_cdp(
+            _cdp_summary(
+                config={
+                    "hvac_modes": ["auto", "fancy_new_mode"],
+                    "preset_modes": ["boost", "exotic"],
+                }
+            )
+        )
+        assert [m.value for m in cdp.modes] == ["auto"]
+        assert [p.value for p in cdp.profiles] == ["boost"]
 
     def test_defaults_without_config(self) -> None:
         cdp = _make_cdp(_cdp_summary())

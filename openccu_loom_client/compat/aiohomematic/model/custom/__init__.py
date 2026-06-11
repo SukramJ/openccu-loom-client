@@ -30,8 +30,9 @@ State-key reference (daemon ``internal/payload/state.go`` +
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, Final
 
+from aiohomematic.model.custom import ClimateMode, ClimateProfile
 from openccu_loom_types.enums import DataPointCategory
 
 from openccu_loom_client.canonical import canonical_unique_id
@@ -40,6 +41,11 @@ from openccu_loom_client.model import CustomDataPoint
 
 if TYPE_CHECKING:
     from openccu_loom_client.store import LoomStore
+
+# Valid wire tokens for the aiohomematic climate enums; unknown daemon
+# tokens are skipped instead of raising on enum construction.
+_CLIMATE_MODE_VALUES: Final = {m.value for m in ClimateMode}
+_CLIMATE_PROFILE_VALUES: Final = {p.value for p in ClimateProfile}
 
 
 def custom_unique_id(*, serial_suffix: str, device_address: str, channel_no: int) -> str:
@@ -593,21 +599,23 @@ class BaseCustomDpClimate(_CustomEntitySurface):
         )
 
     # ``mode``/``activity``/``profile`` are returned as the daemon's
-    # lower-case string tokens; consumers comparing against
-    # aiohomematic's Climate* enums should compare by ``.value``.
+    # lower-case string tokens (StrEnum hash-equality keeps dict lookups
+    # against aiohomematic's Climate* enums working); ``modes``/``profiles``
+    # return the real aiohomematic enums because HA reads ``.value`` off
+    # their members.
     @property
     def mode(self) -> str:
         """Return the HVAC mode; alias of :attr:`hvac_mode`."""
         return self.hvac_mode
 
     @property
-    def modes(self) -> tuple[str, ...]:
-        """Return the available HVAC modes (config ``hvac_modes``)."""
+    def modes(self) -> tuple[ClimateMode, ...]:
+        """Return the available HVAC modes (config ``hvac_modes``) as enums."""
         raw = self._config_value("hvac_modes") or self._state.get("hvac_modes") or ()
-        modes = tuple(str(m) for m in raw)
+        modes = tuple(ClimateMode(str(m)) for m in raw if str(m) in _CLIMATE_MODE_VALUES)
         # aiohomematic guarantees at least HEAT so HA renders a usable
         # climate card even when the device reports nothing.
-        return modes or ("heat",)
+        return modes or (ClimateMode.HEAT,)
 
     @property
     def activity(self) -> str | None:
@@ -633,10 +641,10 @@ class BaseCustomDpClimate(_CustomEntitySurface):
         return self.preset_mode
 
     @property
-    def profiles(self) -> tuple[str, ...]:
-        """Return the available profiles (config ``preset_modes``)."""
+    def profiles(self) -> tuple[ClimateProfile, ...]:
+        """Return the available profiles (config ``preset_modes``) as enums."""
         raw = self._config_value("preset_modes") or self._state.get("available_profiles") or ()
-        return tuple(str(p) for p in raw)
+        return tuple(ClimateProfile(str(p)) for p in raw if str(p) in _CLIMATE_PROFILE_VALUES)
 
     async def set_temperature(self, temperature: float) -> None:
         """Set the target temperature."""
