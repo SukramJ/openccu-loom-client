@@ -235,16 +235,31 @@ class _HubCoordinator:
             return True
         return str(getattr(summary, "name", "")).startswith("${")
 
+    @staticmethod
+    def _is_excluded_sysvar(summary: Any) -> bool:
+        """
+        Return whether a sysvar never spawns a generic entity.
+
+        Mirrors the reference stack's three hard exclusions: ``${…}``
+        template variables and the fixed CCU IDs 40/41 (alarm/service
+        messages) back dedicated hub singletons; names carrying the
+        ``OldVal``/``pcCCUID`` tokens (hub.py ``_EXCLUDED``) are CCU
+        calculation scratch values.
+        """
+        name = str(getattr(summary, "name", ""))
+        if name.startswith("${"):
+            return True
+        if any(token in name for token in ("OldVal", "pcCCUID")):
+            return True
+        return getattr(summary, "vid", None) in (40, 41)
+
     def _all_hub_data_points(self) -> list[Any]:
         """Build (and cache) categorised hub data points from the store."""
         live: dict[str, Any] = {}
         for sysvar in self._client.store.sysvars:
             if not self._is_local(sysvar.summary):
                 continue
-            # ${…} system variables (sysVarAlarmMessages, …) back dedicated
-            # hub singletons in aiohomematic and never spawn as generic
-            # sysvar entities — regardless of the include-internal default.
-            if str(sysvar.summary.name).startswith("${"):
+            if self._is_excluded_sysvar(sysvar.summary):
                 continue
             include, enabled = resolve_hub_inclusion(
                 name=sysvar.summary.name,
