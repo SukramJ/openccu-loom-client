@@ -370,3 +370,71 @@ class TestCustomTranslatedName:
         )
         assert store.get_custom_data_point(address="VCU1", name="LEVEL@5").translated_name == "vch5"
         assert store.get_custom_data_point(address="VCU1", name="LEVEL@6").translated_name == "vch6"
+
+
+class TestUpdateDataPoint:
+    """Per-device firmware-update data points (aiohomematic DpUpdate twin)."""
+
+    def _device(self, store: LoomStore, firmware: dict[str, Any] | None = None) -> Any:
+        from openccu_loom_types.rest import DeviceDetail, Snapshot
+
+        store.load_snapshot(
+            Snapshot.model_validate(
+                {
+                    "generated_at": "2026-06-11T08:00:00Z",
+                    "devices": [
+                        {
+                            "address": "VCU9",
+                            "interface": "HmIP-RF",
+                            "model": "HmIP-PSM",
+                            "name": "Steckdose",
+                            "available": True,
+                            "channels_count": 1,
+                            "updatable": True,
+                        }
+                    ],
+                }
+            )
+        )
+        detail = {
+            "address": "VCU9",
+            "interface": "HmIP-RF",
+            "model": "HmIP-PSM",
+            "name": "Steckdose",
+            "available": True,
+            "channels_count": 1,
+            "channels": [],
+        }
+        if firmware is not None:
+            detail["firmware"] = firmware
+        store.attach_device_detail(DeviceDetail.model_validate(detail))
+        return store.get_device(address="VCU9")
+
+    def test_unique_id_and_versions(self) -> None:
+        from openccu_loom_client.compat.aiohomematic.model.update import make_update_data_point
+
+        store = LoomStore()
+        store.set_serial("3014F711A0001234")
+        device = self._device(
+            store,
+            firmware={"Current": "1.2.3", "Available": "1.3.0", "UpdateState": "UPDATE_AVAILABLE"},
+        )
+        dp = make_update_data_point(device=device, store=store)
+        # Device addresses carry no central prefix (ccu reference:
+        # ``<address>_update``); only the loom namespace is added.
+        assert dp.unique_id == "loom_vcu9_update"
+        assert dp.firmware == "1.2.3"
+        # HmIP advertises the available version only in a ready state.
+        assert dp.latest_firmware == "1.3.0"
+        assert dp.in_progress is False
+        assert dp.category.value == "update"
+        assert dp.full_name == "Steckdose Update"
+
+    def test_no_update_available_falls_back_to_installed(self) -> None:
+        from openccu_loom_client.compat.aiohomematic.model.update import make_update_data_point
+
+        store = LoomStore()
+        store.set_serial("3014F711A0001234")
+        device = self._device(store, firmware={"Current": "1.2.3", "UpdateState": "UP_TO_DATE"})
+        dp = make_update_data_point(device=device, store=store)
+        assert dp.latest_firmware == "1.2.3"

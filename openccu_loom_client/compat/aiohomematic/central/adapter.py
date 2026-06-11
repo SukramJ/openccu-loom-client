@@ -64,6 +64,7 @@ from openccu_loom_client.compat.aiohomematic.model.hub import (
     make_program_data_point,
     make_sysvar_data_point,
 )
+from openccu_loom_client.compat.aiohomematic.model.update import make_update_data_point
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -736,10 +737,18 @@ class LoomCentralAdapter:
         # the snapshot is loaded, and no later event would re-announce
         # them — without this the hub layer never spawns.
         hub_dps = self.hub_coordinator.get_hub_data_points(registered=False)
+        # One firmware-update data point per updatable device (uid
+        # ``loom_<address>_update``), mirroring aiohomematic's DpUpdate.
+        update_dps = [
+            make_update_data_point(device=device, store=self._client.store)
+            for device in self._client.store.devices
+            if getattr(device.summary, "updatable", True)
+        ]
         for dp in (
             *self._client.store.data_points,
             *self._client.store.custom_data_points,
             *hub_dps,
+            *update_dps,
         ):
             loom_category = getattr(dp, "category", None)
             if loom_category is None:

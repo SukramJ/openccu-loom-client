@@ -660,6 +660,34 @@ class LoomStore:
             device._update_summary(summary)
         return device
 
+    async def refresh_device(self, *, address: str) -> None:
+        """
+        Re-fetch one device's detail (incl. firmware record) into the store.
+
+        Backs the compat ``DpUpdate.refresh_firmware_data``. No-op
+        without a transport.
+        """
+        if self._transport is None:
+            return
+        payload = await self._transport.request("GET", f"/devices/{address}")
+        self.attach_device_detail(DeviceDetail.model_validate(payload))
+
+    async def update_device_firmware(self, *, address: str) -> None:
+        """
+        Trigger the device's OTA firmware update on the daemon.
+
+        Wire: ``POST /devices/{addr}/firmware/update``. Never retried —
+        a duplicated trigger could double-flash the device.
+        """
+        if self._transport is None:
+            msg = "LoomStore has no transport bound — set one via set_transport()"
+            raise RuntimeError(msg)
+        await self._transport.request(
+            "POST",
+            f"/devices/{address}/firmware/update",
+            allow_retry=False,
+        )
+
     def attach_hub_catalogue(
         self,
         *,
