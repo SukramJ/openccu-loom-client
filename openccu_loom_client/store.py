@@ -294,6 +294,15 @@ class LoomStore:
             key=lambda c: c.name,
         )
 
+    def get_custom_data_point_by_channel(
+        self, *, address: str, channel_no: int
+    ) -> CustomDataPoint | None:
+        """Return the CDP whose primary channel is ``channel_no``, or ``None``."""
+        for (cdp_address, _name), cdp in self._cdps.items():
+            if cdp_address == address and cdp.summary.channel_no == channel_no:
+                return cdp
+        return None
+
     # ---- programs ----
 
     @property

@@ -170,11 +170,13 @@ class TestClimateConfigBlock:
         assert cdp.max_temp == 23.0
         assert cdp.target_temperature_step == 0.5
         assert cdp.modes == ("auto", "heat", "off")
-        assert cdp.profiles == ("boost", "week_program_1")
+        # 'none' is inserted after the control-mode block, exactly where
+        # aiohomematic's HmIP profiles list places it.
+        assert cdp.profiles == ("boost", "none", "week_program_1")
         # HA reads .value off the members (climate.py preset_modes), so
         # the tuples must carry the aiohomematic enums, not bare strings.
         assert [m.value for m in cdp.modes] == ["auto", "heat", "off"]
-        assert [p.value for p in cdp.profiles] == ["boost", "week_program_1"]
+        assert [p.value for p in cdp.profiles] == ["boost", "none", "week_program_1"]
 
     def test_capability_aliases(self) -> None:
         cdp = _make_cdp(
@@ -203,7 +205,7 @@ class TestClimateConfigBlock:
             )
         )
         assert [m.value for m in cdp.modes] == ["auto"]
-        assert [p.value for p in cdp.profiles] == ["boost"]
+        assert [p.value for p in cdp.profiles] == ["boost", "none"]
 
     def test_defaults_without_config(self) -> None:
         cdp = _make_cdp(_cdp_summary())

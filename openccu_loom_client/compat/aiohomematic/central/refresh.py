@@ -132,6 +132,24 @@ def _wire_value_events(*, group: SubscriptionGroup, store: LoomStore, ha_bus: Ai
             ),
             value=getattr(event.payload, "value", None),
         )
+        # aiohomematic re-renders a channel's custom data point on every
+        # member field-DP event (a climate card updates when
+        # ACTUAL_TEMPERATURE changes even though the CDP state dict does
+        # not carry the temperature). Ping the channel's CDP too.
+        if (
+            store.get_custom_data_point_by_channel(
+                address=event.payload.device_address, channel_no=event.payload.channel
+            )
+            is not None
+        ):
+            await _emit(
+                ts=event.ts,
+                event_key=custom_unique_id(
+                    serial_suffix=store.serial_suffix,
+                    device_address=event.payload.device_address,
+                    channel_no=event.payload.channel,
+                ),
+            )
 
     async def on_custom(event: CustomDataPointStateChangedEvent) -> None:
         await _emit(
