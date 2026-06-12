@@ -510,3 +510,43 @@ class TestCheckConfig:
         assert await check_config(central_name="home", host="loom.test") == []
         failures = await check_config(central_name="", host="")
         assert len(failures) == 2
+
+
+class TestUnIgnoreCandidates:
+    """
+    HA's options flow calls get_un_ignore_candidates *synchronously*.
+
+    aiohomematic computes the list from local caches with an
+    ``include_master`` switch; the loom facade must match that
+    signature and serve a prefetched cache — an async coroutine (the
+    old shape) made HA's advanced-settings options step (where
+    ``sub_devices_enabled`` lives) crash for the loom backend.
+    """
+
+    async def test_sync_signature_with_include_master(self) -> None:
+        central = await _make_config().create_central()
+        # Before any prefetch the facade degrades to an empty list.
+        assert central.query_facade.get_un_ignore_candidates(include_master=True) == []
+
+    async def test_prefetch_fills_cache(self, connected) -> None:
+        central, mock = connected
+        mock.get(
+            f"{_BASE}/visibility/unignore/candidates",
+            payload={"candidates": ["RSSI_PEER", "FROST_PROTECTION"], "include_master": True},
+        )
+        await central.query_facade.prefetch_un_ignore_candidates()
+        assert central.query_facade.get_un_ignore_candidates(include_master=True) == [
+            "RSSI_PEER",
+            "FROST_PROTECTION",
+        ]
+        # Sync call without kwargs matches aiohomematic's default shape too.
+        assert central.query_facade.get_un_ignore_candidates() == [
+            "RSSI_PEER",
+            "FROST_PROTECTION",
+        ]
+
+    async def test_prefetch_failure_is_non_fatal(self, connected) -> None:
+        central, mock = connected
+        mock.get(f"{_BASE}/visibility/unignore/candidates", status=500)
+        await central.query_facade.prefetch_un_ignore_candidates()
+        assert central.query_facade.get_un_ignore_candidates() == []

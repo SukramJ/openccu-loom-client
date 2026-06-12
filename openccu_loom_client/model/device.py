@@ -158,8 +158,23 @@ class Device:
 
     @property
     def has_sub_devices(self) -> bool:
-        """Return whether the device exposes sub-devices (not modelled for the loom backend)."""
-        return False
+        """
+        Return whether the device splits into multiple sub-devices.
+
+        Mirrors aiohomematic's ``Device.has_sub_devices``: ``False``
+        with at most one channel group; otherwise ``True`` when at
+        least two groups carry more than one member channel. Group
+        membership comes from the daemon's per-channel ``group_no``
+        (the same profile-derived grouping aiohomematic builds from
+        ``DeviceProfileRegistry``).
+        """
+        group_sizes: dict[int, int] = {}
+        for channel in self.channels:
+            if (group_no := channel.group_no) is not None:
+                group_sizes[group_no] = group_sizes.get(group_no, 0) + 1
+        if len(group_sizes) <= 1:
+            return False
+        return sum(1 for size in group_sizes.values() if size > 1) > 1
 
     @property
     def model_description(self) -> str:

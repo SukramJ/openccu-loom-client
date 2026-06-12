@@ -636,9 +636,35 @@ class _QueryFacade:
         # trigger); cache them by unique_id so repeated scans and the
         # refresh bridge's trigger recording hit the same instances.
         self._event_groups: dict[str, Any] = {}
+        # un-ignore candidates, prefetched once during start(). HA's
+        # options flow calls get_un_ignore_candidates *synchronously*
+        # (aiohomematic computes the list from local caches), so the
+        # loom facade must serve it without a round-trip.
+        self._un_ignore_candidates: list[str] = []
 
-    async def get_un_ignore_candidates(self) -> Any:
-        return await self._client.visibility.get_unignore_candidates()
+    def get_un_ignore_candidates(self, *, include_master: bool = False) -> list[str]:
+        """
+        Return the cached un-ignore candidates (aiohomematic-shaped, sync).
+
+        aiohomematic's signature is synchronous with an
+        ``include_master`` switch; the loom daemon's candidate endpoint
+        already includes MASTER parameters, so the flag only exists for
+        signature parity. The cache is filled by
+        :meth:`prefetch_un_ignore_candidates` during central start and
+        degrades to an empty list before that (HA then hides the
+        un-ignore selector).
+        """
+        del include_master  # daemon candidates already span both paramsets
+        return list(self._un_ignore_candidates)
+
+    async def prefetch_un_ignore_candidates(self) -> None:
+        """Fetch and cache the un-ignore candidate list (best-effort)."""
+        try:
+            result = await self._client.visibility.get_unignore_candidates()
+        except Exception:  # noqa: BLE001 — candidates are a UI nicety, never fatal
+            _LOGGER.debug("un-ignore candidate prefetch failed", exc_info=True)
+            return
+        self._un_ignore_candidates = list(getattr(result, "candidates", None) or [])
 
     def get_data_points(
         self,
@@ -1132,6 +1158,7 @@ class LoomCentralAdapter:
         await self._bootstrap_custom_data_points()
         await self._bootstrap_schedules()
         await self._bootstrap_combined_data_points()
+        await self.query_facade.prefetch_un_ignore_candidates()
         await self._client.start_events()
         # Fan the daemon's typed value events into the uniform
         # DataPointStateChangedEvent the HA entities subscribe to.
