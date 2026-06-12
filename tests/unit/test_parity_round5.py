@@ -911,3 +911,33 @@ class TestSystemInformationCcuType:
 
         info = SystemInformation(serial="ABC", version="3.87")
         assert info.ccu_type == CCUType.OPENCCU
+
+
+class TestCalculatedTranslatedName:
+    """daemon api 1.5.0: calc DPs carry the locale-aware label."""
+
+    def test_synthesized_summary_carries_translated_name(self) -> None:
+        from openccu_loom_types.rest import CalculatedDPSummary
+
+        from openccu_loom_client.compat.aiohomematic.model.calculated import synthesize_summary
+
+        calc = CalculatedDPSummary.model_validate(
+            {
+                "name": "DEW_POINT",
+                "category": "sensor",
+                "value": 12.5,
+                "observed": True,
+                "translated_name": "Taupunkt",
+            }
+        )
+        assert synthesize_summary(calc).translated_name == "Taupunkt"
+
+    def test_combined_summary_carries_translated_name(self) -> None:
+        from types import SimpleNamespace
+
+        from openccu_loom_client.compat.aiohomematic.model.combined import _synthesize_summary
+
+        value_dp = SimpleNamespace(min=0, max=600)
+        summary = _synthesize_summary(value_dp=value_dp, translated_name="Zeitdauer")
+        assert summary.translated_name == "Zeitdauer"
+        assert summary.parameter == "DURATION"

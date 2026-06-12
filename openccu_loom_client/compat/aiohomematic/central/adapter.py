@@ -1039,6 +1039,10 @@ class LoomCentralAdapter:
         # profiles, schedule switches, combined numbers); shared with
         # the query facade so the platforms see them.
         self._extra_data_points: Final[list[Any]] = []
+        # locale-aware labels of suppressed calculated DPs, keyed by
+        # (device_address, channel_no) — consumed by the combined-DP
+        # bootstrap to name the replacement number like the reference.
+        self._suppressed_calc_labels: Final[dict[tuple[str, int], str]] = {}
         self._hub_refresh_task: asyncio.Task[None] | None = None
         self.device_coordinator: Final = _DeviceCoordinator(client)
         self.hub_coordinator: Final = _HubCoordinator(
@@ -1239,7 +1243,15 @@ class LoomCentralAdapter:
                     address=device.address, channel=channel.number
                 )
                 # The combined duration number replaces the daemon's
-                # calculated DURATION sensor (the ccu twin has none).
+                # calculated DURATION sensor (the ccu twin has none) —
+                # but its locale-aware label names the combined number.
+                for calc in calculated:
+                    if calc.name in _SUPPRESSED_CALCULATED_NAMES and getattr(
+                        calc, "translated_name", None
+                    ):
+                        self._suppressed_calc_labels[(device.address, channel.number)] = str(
+                            calc.translated_name
+                        )
                 calculated = [
                     calc for calc in calculated if calc.name not in _SUPPRESSED_CALCULATED_NAMES
                 ]
@@ -1355,7 +1367,14 @@ class LoomCentralAdapter:
                     store=store, address=device.address, channel_no=channel_no
                 ):
                     self._extra_data_points.append(
-                        CombinedDurationDp(store=store, device=device, channel_no=channel_no)
+                        CombinedDurationDp(
+                            store=store,
+                            device=device,
+                            channel_no=channel_no,
+                            translated_name=self._suppressed_calc_labels.get(
+                                (device.address, channel_no)
+                            ),
+                        )
                     )
 
     async def stop(self) -> None:

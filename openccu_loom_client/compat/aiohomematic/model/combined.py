@@ -45,7 +45,9 @@ _FACTOR_BY_UNIT: Final[dict[Any, int]] = {
 }
 
 
-def _synthesize_summary(*, value_dp: DataPoint) -> DataPointSummary:
+def _synthesize_summary(
+    *, value_dp: DataPoint, translated_name: str | None = None
+) -> DataPointSummary:
     """Project the DURATION pair onto one seconds-typed summary."""
     return DataPointSummary.model_validate(
         {
@@ -56,6 +58,10 @@ def _synthesize_summary(*, value_dp: DataPoint) -> DataPointSummary:
             "max": value_dp.max,
             "observed": True,
             "operations": {"read": True, "write": True, "event": False},
+            # the daemon's calc-dps surface carries the locale-aware
+            # label for the suppressed DURATION entry; reusing it here
+            # names the combined number like the reference ("Zeitdauer").
+            "translated_name": translated_name,
         }
     )
 
@@ -63,7 +69,14 @@ def _synthesize_summary(*, value_dp: DataPoint) -> DataPointSummary:
 class CombinedDurationDp(BaseDpNumber):
     """Seconds-typed number combining ``DURATION_VALUE`` + ``DURATION_UNIT``."""
 
-    def __init__(self, *, store: LoomStore, device: Device, channel_no: int) -> None:
+    def __init__(
+        self,
+        *,
+        store: LoomStore,
+        device: Device,
+        channel_no: int,
+        translated_name: str | None = None,
+    ) -> None:
         """Bind the combined data point to its channel's DURATION pair."""
         value_dp = store.get_data_point(
             address=device.address, channel=channel_no, parameter=PARAMETER_DURATION_VALUE
@@ -72,7 +85,7 @@ class CombinedDurationDp(BaseDpNumber):
             msg = f"{device.address}:{channel_no} has no {PARAMETER_DURATION_VALUE} data point"
             raise ValueError(msg)
         super().__init__(
-            summary=_synthesize_summary(value_dp=value_dp),
+            summary=_synthesize_summary(value_dp=value_dp, translated_name=translated_name),
             device_address=device.address,
             channel_number=channel_no,
             store=store,
