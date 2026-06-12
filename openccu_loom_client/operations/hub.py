@@ -10,6 +10,8 @@ from typing import Any
 from openccu_loom_types.rest import (
     AlarmMessage,
     Function,
+    InstallModeInterfaceEntry,
+    InstallModeInterfaceRequest,
     InstallModeState,
     ProgramSummary,
     Room,
@@ -217,15 +219,16 @@ class HubOperations(_OperationsBase):
         payload = await self._transport.request("GET", "/functions")
         return [Function.model_validate(f) for f in (payload or [])]
 
-    async def list_inbox(self) -> dict[str, Any]:
+    async def list_inbox(self) -> list[dict[str, Any]]:
         """
         List pending pairing candidates not yet accepted.
 
-        Wire: ``GET /inbox``. Promote a candidate with
-        :meth:`DevicesOperations.accept_device`.
+        Wire: ``GET /inbox`` — one entry per inbox device, across all
+        centrals (each entry carries its ``central``). Promote a
+        candidate with :meth:`DevicesOperations.accept_device`.
         """
         payload = await self._transport.request("GET", "/inbox")
-        return dict(payload or {})
+        return [dict(e) for e in (payload or [])]
 
     # ---- install mode ----
 
@@ -240,5 +243,33 @@ class HubOperations(_OperationsBase):
             "POST",
             "/install-mode",
             json_body={"active": active, "seconds": seconds},
+            allow_retry=False,
+        )
+
+    async def list_install_mode_interfaces(self) -> list[InstallModeInterfaceEntry]:
+        """
+        Return the per-interface install-mode state.
+
+        Wire: ``GET /install-mode/interfaces`` — one entry per CCU
+        interface, across all centrals.
+        """
+        payload = await self._transport.request("GET", "/install-mode/interfaces")
+        return [InstallModeInterfaceEntry.model_validate(e) for e in (payload or [])]
+
+    async def set_install_mode_interface(
+        self, *, interface: str, active: bool, seconds: int = 60
+    ) -> None:
+        """
+        Toggle install mode for one interface.
+
+        Wire: ``POST /install-mode/interfaces`` with an
+        :class:`InstallModeInterfaceRequest`. Not retried — a retry
+        could re-arm pairing after the user cancelled it.
+        """
+        body = InstallModeInterfaceRequest(interface=interface, active=active, seconds=seconds)
+        await self._transport.request(
+            "POST",
+            "/install-mode/interfaces",
+            json_body=body.model_dump(mode="json", exclude_none=True),
             allow_retry=False,
         )
