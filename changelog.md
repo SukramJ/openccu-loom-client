@@ -1,3 +1,9 @@
+# Version 2026.6.11 (2026-06-12)
+
+- Feat: **HA sub-device support** — the domain model exposes the channel-group surface the HA integration's `sub_devices_enabled` option consumes: `Channel.group_no` / `is_group_master` / `is_in_multi_group` / `room` (daemon api 1.6.0 fields), `Channel.group_master` (aiohomematic-shaped view: `name` with `ChannelNameData` strip semantics, `room`, `group_no`) and a real `Device.has_sub_devices` (≥ 2 multi-member channel groups, aiohomematic counting). Daemons older than api 1.6.0 degrade gracefully (no groups → no split).
+- Fix: `query_facade.get_un_ignore_candidates` is now **synchronous** with the `include_master` keyword (aiohomematic signature) and serves a cache prefetched during central start — the old async shape crashed HA's advanced-settings options step (where `sub_devices_enabled` lives) for the loom backend.
+- Chore: require openccu-loom-types 0.1.18.
+
 # Version 2026.6.10 (2026-06-12)
 
 - Feat: calculated/combined data points consume the daemon's locale-aware `translated_name` (api 1.5.0) — resolves the last 10+2 friendly-name diffs vs the reference twin ("Taupunkt", "Zeitdauer"); the suppressed calculated `DURATION` entry donates its label to the combined number.
