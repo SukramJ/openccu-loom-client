@@ -82,6 +82,24 @@ class SchedulesOperations(_OperationsBase):
             allow_retry=False,
         )
 
+    async def set_channel_lock(
+        self, *, address: str, channel: int, key: str, enabled: bool
+    ) -> None:
+        """
+        Enable/disable one target channel's week-program participation.
+
+        Wire: ``PUT /devices/{addr}/channels/{n}/week_profile/channel-locks/{key}``
+        with ``{"enabled": bool}``. ``key`` is the schedule channel key
+        (e.g. ``"1_1"``) from ``WeekProfileResponse.schedule_enabled``.
+        Idempotent — re-applying the same flag is a no-op on the CCU.
+        """
+        await self._transport.request(
+            "PUT",
+            f"/devices/{address}/channels/{channel}/week_profile/channel-locks/{key}",
+            json_body={"enabled": enabled},
+            allow_retry=True,
+        )
+
     # ---- device-scoped (auto-resolves the schedule channel) ----
 
     async def get_device_schedule(self, *, address: str) -> Schedule:

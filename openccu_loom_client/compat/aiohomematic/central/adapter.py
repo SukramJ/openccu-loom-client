@@ -15,25 +15,27 @@ sites it uses for the direct-CCU aiohomematic backend.
 
 Scope of this adapter:
 
-* **Implemented** — lifecycle (``start``/``stop``), identity
+* lifecycle (``start``/``stop``), identity
   (``name``/``model``/``version``/``url``/``state``/``available``/
   ``system_information``/``health``), the event bus, and the *action*
   coordinators (device lookup/removal, sysvar/program fetch + write,
   links, service/alarm messages + ack, inbox accept, rename, paramset
   read, backup, values-cache clear, un-ignore candidates).
 
-* **Stubbed (``NotImplementedError`` with a TODO)** — the
-  entity-spawn surface that depends on aiohomematic's *categorized
-  data-point model* (``query_facade.get_data_points`` filtered by
-  ``data_point_type``/``category`` with ``unique_id`` + ``registered``
-  bookkeeping, ``hub_coordinator.get_hub_data_points`` and the
-  ``*_dp`` collections, ``get_event_groups``, ``get_state_paths``).
-  Porting that model onto the :class:`LoomStore` is a separate, larger
-  workstream — these raise loudly rather than return wrong shapes.
+* the entity-spawn surface on aiohomematic's categorized data-point
+  model: ``query_facade.get_data_points`` (generic + custom + the
+  adapter-built week-profile / schedule-switch / combined-duration
+  data points), ``hub_coordinator.get_hub_data_points`` (sysvars,
+  programs and the hub singletons: alarm/service messages, inbox,
+  metrics, connectivity, system update, install mode),
+  ``get_event_groups`` and ``get_state_paths``. The hub singletons are
+  polled every 30 s via ``fetch_hub_singleton_data``.
 """
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 from datetime import UTC, datetime
 import logging
 from typing import TYPE_CHECKING, Any, Final
@@ -41,6 +43,7 @@ from typing import TYPE_CHECKING, Any, Final
 from aiohomematic.async_support import Looper
 from aiohomematic.central.events import (
     DataPointsCreatedEvent as AioDataPointsCreatedEvent,
+    DataPointStateChangedEvent as AioDataPointStateChangedEvent,
     EventBus as AioEventBus,
 )
 from aiohomematic.const import DataPointCategory as AioDataPointCategory
@@ -58,6 +61,10 @@ from openccu_loom_client.compat.aiohomematic.central.state_paths import (
 )
 from openccu_loom_client.compat.aiohomematic.const import SystemInformation
 from openccu_loom_client.compat.aiohomematic.model.calculated import make_calculated_data_point
+from openccu_loom_client.compat.aiohomematic.model.combined import (
+    CombinedDurationDp,
+    channel_has_duration_pair,
+)
 from openccu_loom_client.compat.aiohomematic.model.custom import make_custom_data_point
 from openccu_loom_client.compat.aiohomematic.model.event_group import build_event_groups
 from openccu_loom_client.compat.aiohomematic.model.generic import make_generic_data_point
@@ -66,7 +73,27 @@ from openccu_loom_client.compat.aiohomematic.model.hub import (
     make_sysvar_data_point,
     resolve_hub_inclusion,
 )
+from openccu_loom_client.compat.aiohomematic.model.hub.singletons import (
+    INSTALL_MODE_TOKEN_BY_INTERFACE,
+    AlarmMessagesSensor,
+    ConnectionLatencySensor,
+    ConnectivityDpType,
+    InboxSensor,
+    InstallModeDpButton,
+    InstallModeDpSensor,
+    InstallModeDpType,
+    InterfaceConnectivityDp,
+    LastEventAgeSensor,
+    MetricsDpType,
+    ServiceMessagesSensor,
+    SystemHealthSensor,
+    SystemUpdateDp,
+)
 from openccu_loom_client.compat.aiohomematic.model.update import make_update_data_point
+from openccu_loom_client.compat.aiohomematic.model.week_profile import (
+    ScheduleChannelSwitch,
+    WeekProfileDp,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -77,17 +104,18 @@ if TYPE_CHECKING:
 
 _LOGGER: Final = logging.getLogger(__name__)
 
-# Marker used in every stub so the punch-list is greppable and the HA
-# log explains *why* a call failed rather than dying on an AttributeError.
-_MODEL_PORT_TODO: Final = (
-    "requires the categorized data-point model port onto LoomStore "
-    "(unique_id / category / data_point_type / registered bookkeeping) — "
-    "tracked as the data-point-model workstream"
-)
+# Cadence of the hub-singleton poll (messages, inbox, metrics, system
+# update, install mode, connectivity) — matches aiohomematic's hub
+# data-fetch interval.
+_HUB_REFRESH_INTERVAL: Final = 30
 
+# Channel types owning a device's weekly program end in this suffix.
+_WEEK_PROFILE_CHANNEL_SUFFIX: Final = "WEEK_PROFILE"
 
-def _not_implemented(what: str, reason: str) -> NotImplementedError:
-    return NotImplementedError(f"LoomCentralAdapter.{what}: {reason}")
+# The daemon ships a calculated DURATION sensor; the ccu twin covers the
+# DURATION_VALUE/DURATION_UNIT pair with a combined number instead, so
+# the calculated flavour is suppressed to avoid a surplus entity.
+_SUPPRESSED_CALCULATED_NAMES: Final = frozenset({"DURATION"})
 
 
 def _category_for_type(data_point_type: Any) -> DataPointCategory | None:
@@ -177,21 +205,34 @@ class _DeviceCoordinator:
 
 
 class _HubCoordinator:
-    """``central.hub_coordinator`` surface (sysvars, programs, messages)."""
+    """``central.hub_coordinator`` surface (sysvars, programs, messages, singletons)."""
 
     def __init__(
         self,
         client: LoomClient,
         *,
+        ha_bus: AioEventBus,
         sysvar_markers: tuple[str, ...] = (),
         program_markers: tuple[str, ...] = (),
     ) -> None:
         self._client = client
+        self._ha_bus = ha_bus
         self._sysvar_markers = sysvar_markers
         self._program_markers = program_markers
         # Cache hub data points by unique_id so register()/unregister()
         # bookkeeping survives repeated get_hub_data_points() scans.
         self._cache: dict[str, Any] = {}
+        # Per-central hub singletons, built once on the first
+        # fetch_hub_singleton_data() (the interface list is needed for
+        # the connectivity / install-mode pairs).
+        self._singletons_built = False
+        self._alarm_messages_dp: AlarmMessagesSensor | None = None
+        self._service_messages_dp: ServiceMessagesSensor | None = None
+        self._inbox_dp: InboxSensor | None = None
+        self._update_dp: SystemUpdateDp | None = None
+        self._metrics_dps: MetricsDpType | None = None
+        self._connectivity_dps: dict[str, ConnectivityDpType] = {}
+        self._install_mode_dps: dict[str, InstallModeDpType] = {}
 
     async def set_system_variable(self, *, legacy_name: str, value: Any) -> None:
         await self._client.hub.set_sysvar(name=legacy_name, value=value)
@@ -210,6 +251,17 @@ class _HubCoordinator:
 
     # ---- entity-spawn surface ----
 
+    def _matches_central(self, central: str | None) -> bool:
+        """
+        Return whether a payload's central tag refers to this central.
+
+        Accepts the HA-facing central name (the adapter name) as well as
+        the daemon's own central id, since multi-central deployments may
+        differ between the two.
+        """
+        store = self._client.store
+        return not central or central in (store.central_name, store.central_id)
+
     def _is_local(self, summary: Any) -> bool:
         """
         Return whether a sysvar/program belongs to this central.
@@ -218,8 +270,7 @@ class _HubCoordinator:
         foreign central's variables here would leak entities (with the
         wrong serial in their unique_id) into this HA entry.
         """
-        central = getattr(summary, "central", None)
-        return not central or central == self._client.store.central_name
+        return self._matches_central(getattr(summary, "central", None))
 
     @staticmethod
     def _is_internal(summary: Any) -> bool:
@@ -306,7 +357,8 @@ class _HubCoordinator:
         for uid in list(self._cache):
             if uid not in live:
                 del self._cache[uid]
-        return list(self._cache.values())
+        # The hub singletons are stable instances; they simply ride along.
+        return [*self._cache.values(), *self._hub_singletons()]
 
     def get_hub_data_points(
         self, *, category: Any = None, registered: bool | None = None, **_kwargs: Any
@@ -331,27 +383,251 @@ class _HubCoordinator:
             return None
         return make_sysvar_data_point(summary=sysvar.summary, store=self._client.store)
 
-    @property
-    def install_mode_dps(self) -> dict[str, Any]:
-        """
-        Per-interface install-mode button/sensor pairs.
+    # ---- hub singletons ----
 
-        Returns an empty mapping for now: the daemon exposes install-mode
-        state (``GET /install-mode`` + ``hub.install_mode_changed``), but
-        the button/sensor *entity* pair carries a dual unique_id whose
-        exact derivation must match aiohomematic's registry format — left
-        as a focused follow-up rather than risk orphaned HA entities. The
-        empty mapping keeps HA's orphan-cleanup and platform setup working
-        (no install-mode entities spawn) instead of raising.
+    @property
+    def alarm_messages_dp(self) -> AlarmMessagesSensor | None:
+        """Return the alarm-messages singleton (``None`` before bootstrap)."""
+        return self._alarm_messages_dp
+
+    @property
+    def service_messages_dp(self) -> ServiceMessagesSensor | None:
+        """Return the service-messages singleton (``None`` before bootstrap)."""
+        return self._service_messages_dp
+
+    @property
+    def inbox_dp(self) -> InboxSensor | None:
+        """Return the inbox singleton (``None`` before bootstrap)."""
+        return self._inbox_dp
+
+    @property
+    def update_dp(self) -> SystemUpdateDp | None:
+        """Return the system-update singleton (``None`` before bootstrap)."""
+        return self._update_dp
+
+    @property
+    def metrics_dps(self) -> MetricsDpType | None:
+        """Return the metrics singleton triple (``None`` before bootstrap)."""
+        return self._metrics_dps
+
+    @property
+    def connectivity_dps(self) -> dict[str, ConnectivityDpType]:
+        """Return the per-interface connectivity sensors, keyed by interface id."""
+        return dict(self._connectivity_dps)
+
+    @property
+    def install_mode_dps(self) -> dict[str, InstallModeDpType]:
+        """Return the per-interface install-mode button/sensor pairs."""
+        return dict(self._install_mode_dps)
+
+    def _hub_singletons(self) -> list[Any]:
+        """Return the built hub singletons (empty before the first hub fetch)."""
+        if not self._singletons_built:
+            return []
+        singletons: list[Any] = [
+            dp
+            for dp in (
+                self._alarm_messages_dp,
+                self._service_messages_dp,
+                self._inbox_dp,
+                self._update_dp,
+            )
+            if dp is not None
+        ]
+        if self._metrics_dps is not None:
+            singletons.extend(self._metrics_dps)
+        singletons.extend(entry.sensor for entry in self._connectivity_dps.values())
+        for pair in self._install_mode_dps.values():
+            singletons.extend((pair.sensor, pair.button))
+        return singletons
+
+    async def _ensure_singletons(self) -> None:
+        """Build the hub singletons once (needs the daemon's interface list)."""
+        if self._singletons_built:
+            return
+        store = self._client.store
+        self._alarm_messages_dp = AlarmMessagesSensor(store=store)
+        self._service_messages_dp = ServiceMessagesSensor(store=store)
+        self._inbox_dp = InboxSensor(store=store)
+        self._update_dp = SystemUpdateDp(store=store, system_ops=self._client.system)
+        self._metrics_dps = MetricsDpType(
+            system_health=SystemHealthSensor(store=store),
+            connection_latency=ConnectionLatencySensor(store=store),
+            last_event_age=LastEventAgeSensor(store=store),
+        )
+        try:
+            interfaces = await self._client.system.list_interfaces()
+        except Exception:  # noqa: BLE001 — interfaces endpoint is optional
+            _LOGGER.debug("interfaces unavailable while building hub singletons", exc_info=True)
+            interfaces = []
+        for state in interfaces:
+            if not self._matches_central(state.central_id):
+                continue
+            self._connectivity_dps[state.id] = ConnectivityDpType(
+                interface_id=state.id,
+                interface=state.interface,
+                sensor=InterfaceConnectivityDp(store=store, interface_id=state.id),
+            )
+            if state.interface in INSTALL_MODE_TOKEN_BY_INTERFACE:
+                sensor = InstallModeDpSensor(store=store, interface=state.interface)
+                self._install_mode_dps[state.interface] = InstallModeDpType(
+                    button=InstallModeDpButton(
+                        store=store,
+                        hub_ops=self._client.hub,
+                        interface=state.interface,
+                        sensor=sensor,
+                    ),
+                    sensor=sensor,
+                )
+        self._singletons_built = True
+
+    async def fetch_hub_singleton_data(self, *, scheduled: bool = False) -> None:
         """
-        return {}
+        Build (once) and refresh every hub singleton from the daemon.
+
+        Each endpoint is polled independently and failures degrade to the
+        previous value; changed singletons get their keyed HA
+        state-changed event so the entities re-render.
+        """
+        del scheduled
+        await self._ensure_singletons()
+        changed: list[Any] = []
+        changed.extend(await self._fetch_messages())
+        changed.extend(await self._fetch_inbox())
+        changed.extend(await self._fetch_metrics())
+        changed.extend(await self._fetch_system_update())
+        changed.extend(await self._fetch_install_mode())
+        changed.extend(await self._fetch_connectivity())
+        now = datetime.now(tz=UTC)
+        for dp in changed:
+            await self._ha_bus.publish(
+                event=AioDataPointStateChangedEvent(
+                    timestamp=now, unique_id=dp.unique_id, new_value=dp.value
+                )
+            )
+
+    async def _fetch_messages(self) -> list[Any]:
+        """Refresh the alarm/service message singletons."""
+        changed: list[Any] = []
+        if (alarm_dp := self._alarm_messages_dp) is not None:
+            try:
+                alarms = await self._client.hub.list_alarm_messages()
+            except Exception:  # noqa: BLE001 — endpoint optional, keep last value
+                _LOGGER.debug("alarm-messages fetch failed", exc_info=True)
+            else:
+                local_alarms = [
+                    m for m in alarms if self._matches_central(getattr(m, "central", None))
+                ]
+                if alarm_dp.update_messages(messages=local_alarms):
+                    changed.append(alarm_dp)
+        if (service_dp := self._service_messages_dp) is not None:
+            try:
+                services = await self._client.hub.list_service_messages()
+            except Exception:  # noqa: BLE001 — endpoint optional, keep last value
+                _LOGGER.debug("service-messages fetch failed", exc_info=True)
+            else:
+                local_services = [
+                    m for m in services if self._matches_central(getattr(m, "central", None))
+                ]
+                if service_dp.update_messages(messages=local_services):
+                    changed.append(service_dp)
+        return changed
+
+    async def _fetch_inbox(self) -> list[Any]:
+        """Refresh the inbox-count singleton."""
+        if (inbox_dp := self._inbox_dp) is None:
+            return []
+        try:
+            entries = await self._client.hub.list_inbox()
+        except Exception:  # noqa: BLE001 — endpoint optional, keep last value
+            _LOGGER.debug("inbox fetch failed", exc_info=True)
+            return []
+        count = sum(1 for e in entries if self._matches_central(e.get("central")))
+        return [inbox_dp] if inbox_dp.update_value(value=count) else []
+
+    async def _fetch_metrics(self) -> list[Any]:
+        """Refresh the metrics singletons (None until the daemon observed them)."""
+        if (metrics_dps := self._metrics_dps) is None:
+            return []
+        try:
+            entries = await self._client.system.get_hub_metrics()
+        except Exception:  # noqa: BLE001 — endpoint optional, keep last value
+            _LOGGER.debug("hub-metrics fetch failed", exc_info=True)
+            return []
+        entry = next((e for e in entries if self._matches_central(e.central)), None)
+        if entry is None:
+            return []
+        changed: list[Any] = []
+        for dp, value in (
+            (metrics_dps.system_health, entry.system_health),
+            (metrics_dps.connection_latency, entry.connection_latency_ms),
+            (metrics_dps.last_event_age, entry.last_event_age_seconds),
+        ):
+            if dp.update_value(value=value):
+                changed.append(dp)
+        return changed
+
+    async def _fetch_system_update(self) -> list[Any]:
+        """Refresh the system-update singleton."""
+        if (update_dp := self._update_dp) is None:
+            return []
+        try:
+            entries = await self._client.system.get_system_update()
+        except Exception:  # noqa: BLE001 — endpoint optional, keep last value
+            _LOGGER.debug("system-update fetch failed", exc_info=True)
+            return []
+        entry = next((e for e in entries if self._matches_central(e.central)), None)
+        if entry is None:
+            return []
+        return [update_dp] if update_dp.update_data(entry=entry) else []
+
+    async def _fetch_install_mode(self) -> list[Any]:
+        """Refresh the per-interface install-mode countdown sensors."""
+        if not self._install_mode_dps:
+            return []
+        try:
+            entries = await self._client.hub.list_install_mode_interfaces()
+        except Exception:  # noqa: BLE001 — endpoint optional, keep last value
+            _LOGGER.debug("install-mode fetch failed", exc_info=True)
+            return []
+        changed: list[Any] = []
+        for entry in entries:
+            if not self._matches_central(entry.central):
+                continue
+            if (pair := self._install_mode_dps.get(entry.interface)) is None:
+                continue
+            if pair.sensor.update_value(value=entry.seconds if entry.active else 0):
+                changed.append(pair.sensor)
+        return changed
+
+    async def _fetch_connectivity(self) -> list[Any]:
+        """Refresh the per-interface connectivity binary sensors."""
+        if not self._connectivity_dps:
+            return []
+        try:
+            states = await self._client.system.list_interfaces()
+        except Exception:  # noqa: BLE001 — endpoint optional, keep last value
+            _LOGGER.debug("interface fetch failed", exc_info=True)
+            return []
+        changed: list[Any] = []
+        for state in states:
+            if (entry := self._connectivity_dps.get(state.id)) is None:
+                continue
+            if entry.sensor.update_value(value=bool(state.connected)):
+                changed.append(entry.sensor)
+        return changed
 
 
 class _QueryFacade:
     """``central.query_facade`` surface."""
 
-    def __init__(self, client: LoomClient) -> None:
+    def __init__(self, client: LoomClient, *, extra_data_points: list[Any]) -> None:
         self._client = client
+        # Adapter-built data points without a store summary (week
+        # profiles, schedule switches, combined numbers). The adapter
+        # owns and fills the list during bootstrap; the facade only
+        # reads it, so sharing the reference keeps both in sync.
+        self._extra_data_points = extra_data_points
         # Event groups carry per-instance state (registered flag, last
         # trigger); cache them by unique_id so repeated scans and the
         # refresh bridge's trigger recording hit the same instances.
@@ -381,7 +657,11 @@ class _QueryFacade:
         """
         target = category if category is not None else _category_for_type(data_point_type)
         out: list[Any] = []
-        for dp in (*self._client.store.data_points, *self._client.store.custom_data_points):
+        for dp in (
+            *self._client.store.data_points,
+            *self._client.store.custom_data_points,
+            *self._extra_data_points,
+        ):
             dp_category = getattr(dp, "category", None)
             if target is not None and dp_category != target:
                 continue
@@ -747,11 +1027,19 @@ class LoomCentralAdapter:
         # and the bridges publish real aiohomematic events onto it.
         self._looper: Final = Looper()
         self._ha_bus: Final = AioEventBus(task_scheduler=self._looper)
+        # Adapter-built data points without a store summary (week
+        # profiles, schedule switches, combined numbers); shared with
+        # the query facade so the platforms see them.
+        self._extra_data_points: Final[list[Any]] = []
+        self._hub_refresh_task: asyncio.Task[None] | None = None
         self.device_coordinator: Final = _DeviceCoordinator(client)
         self.hub_coordinator: Final = _HubCoordinator(
-            client, sysvar_markers=sysvar_markers, program_markers=program_markers
+            client,
+            ha_bus=self._ha_bus,
+            sysvar_markers=sysvar_markers,
+            program_markers=program_markers,
         )
-        self.query_facade: Final = _QueryFacade(client)
+        self.query_facade: Final = _QueryFacade(client, extra_data_points=self._extra_data_points)
         self.client_coordinator: Final = _ClientCoordinator(client)
         self.cache_coordinator: Final = _CacheCoordinator(client)
         self.json_rpc_client: Final = _JsonRpcClient(client)
@@ -825,6 +1113,9 @@ class LoomCentralAdapter:
         self._state = CentralState.Starting
         await self._client.bootstrap()
         await self._bootstrap_hub_catalogue()
+        await self.hub_coordinator.fetch_hub_singleton_data()
+        await self._bootstrap_schedules()
+        await self._bootstrap_combined_data_points()
         await self._bootstrap_custom_data_points()
         await self._client.start_events()
         # Fan the daemon's typed value events into the uniform
@@ -844,7 +1135,21 @@ class LoomCentralAdapter:
         # them too. Published on the real aiohomematic bus as the real
         # DataPointsCreatedEvent HA subscribes to.
         await self._emit_data_points_created()
+        # Keep the hub singletons fresh; the daemon has no push channel
+        # for messages/metrics/install mode yet, so they are polled.
+        self._hub_refresh_task = asyncio.create_task(
+            self._hub_singleton_refresh_loop(), name="loom-hub-singleton-refresh"
+        )
         self._state = CentralState.Running
+
+    async def _hub_singleton_refresh_loop(self) -> None:
+        """Re-poll the hub singleton endpoints every refresh interval."""
+        while True:
+            await asyncio.sleep(_HUB_REFRESH_INTERVAL)
+            try:
+                await self.hub_coordinator.fetch_hub_singleton_data(scheduled=True)
+            except Exception:  # noqa: BLE001 — keep the refresh loop alive
+                _LOGGER.debug("hub singleton refresh failed", exc_info=True)
 
     async def _emit_data_points_created(self) -> None:
         """Publish a real ``DataPointsCreatedEvent`` grouped by aiohomematic category."""
@@ -865,6 +1170,7 @@ class LoomCentralAdapter:
         for dp in (
             *self._client.store.data_points,
             *self._client.store.custom_data_points,
+            *self._extra_data_points,
             *hub_dps,
             *update_dps,
             *event_groups,
@@ -921,6 +1227,11 @@ class LoomCentralAdapter:
                 calculated = await self._client.devices.list_calculated_data_points(
                     address=device.address, channel=channel.number
                 )
+                # The combined duration number replaces the daemon's
+                # calculated DURATION sensor (the ccu twin has none).
+                calculated = [
+                    calc for calc in calculated if calc.name not in _SUPPRESSED_CALCULATED_NAMES
+                ]
                 if calculated:
                     self._client.store.attach_channel_calculated_data_points(
                         device_address=device.address,
@@ -928,8 +1239,87 @@ class LoomCentralAdapter:
                         calculated=calculated,
                     )
 
+    async def _bootstrap_schedules(self) -> None:
+        """
+        Build the week-profile and schedule-switch data points.
+
+        Channels whose type ends in ``WEEK_PROFILE`` own the device's
+        weekly program. Per channel, the daemon's week-profile
+        descriptor spawns one :class:`WeekProfileDp` (entry count loaded
+        from the channel schedule, fetch errors degrade to "unknown")
+        plus one :class:`ScheduleChannelSwitch` per ``schedule_enabled``
+        key. Devices without a week-profile channel are skipped.
+        """
+        store = self._client.store
+        for device in list(store.devices):
+            for channel in store.channels_of(address=device.address):
+                if not (channel.channel_type or "").endswith(_WEEK_PROFILE_CHANNEL_SUFFIX):
+                    continue
+                try:
+                    week_profile = await self._client.schedules.get_channel_week_profile(
+                        address=device.address, channel=channel.number
+                    )
+                except Exception:  # noqa: BLE001 — channel has no attached week profile
+                    _LOGGER.debug(
+                        "no week profile on %s:%s", device.address, channel.number, exc_info=True
+                    )
+                    continue
+                wp_dp = WeekProfileDp(
+                    store=store,
+                    device=device,
+                    channel_no=channel.number,
+                    week_profile=week_profile,
+                )
+                try:
+                    schedule = await self._client.schedules.get_channel_schedule(
+                        address=device.address, channel=channel.number
+                    )
+                except Exception:  # noqa: BLE001 — entry count degrades to unknown
+                    _LOGGER.debug(
+                        "schedule fetch failed for %s:%s",
+                        device.address,
+                        channel.number,
+                        exc_info=True,
+                    )
+                else:
+                    wp_dp.update_from(schedule=schedule)
+                self._extra_data_points.append(wp_dp)
+                for channel_key in week_profile.schedule_enabled or {}:
+                    self._extra_data_points.append(
+                        ScheduleChannelSwitch(
+                            store=store,
+                            device=device,
+                            channel_no=channel.number,
+                            channel_key=channel_key,
+                            week_profile_dp=wp_dp,
+                            schedules_ops=self._client.schedules,
+                        )
+                    )
+
+    async def _bootstrap_combined_data_points(self) -> None:
+        """
+        Build one combined duration number per DURATION_VALUE/UNIT pair.
+
+        Mirrors aiohomematic's combined timer: channels carrying both
+        parameters get a single seconds-typed number entity.
+        """
+        store = self._client.store
+        for device in list(store.devices):
+            for channel in store.channels_of(address=device.address):
+                if channel_has_duration_pair(
+                    store=store, address=device.address, channel_no=channel.number
+                ):
+                    self._extra_data_points.append(
+                        CombinedDurationDp(store=store, device=device, channel_no=channel.number)
+                    )
+
     async def stop(self) -> None:
-        """Cancel the refresh bridge, close the client, and mark the central stopped."""
+        """Cancel the refresh bridge and hub poll, close the client, and stop."""
+        if self._hub_refresh_task is not None:
+            self._hub_refresh_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._hub_refresh_task
+            self._hub_refresh_task = None
         if self._refresh_group is not None:
             self._refresh_group.cancel()
             self._refresh_group = None

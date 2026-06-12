@@ -140,6 +140,17 @@ class Device:
         return SimpleNamespace(name=self._store.central_name)
 
     @property
+    def config_provider(self) -> SimpleNamespace:
+        """
+        Return a minimal aiohomematic-shaped config provider.
+
+        The HA schedule entities read ``device.config_provider.config.locale``
+        to translate the schedule name; the daemon does not carry a per-client
+        locale, so this is fixed to English.
+        """
+        return SimpleNamespace(config=SimpleNamespace(locale="en"))
+
+    @property
     def room(self) -> str | None:
         """Return the single assigned room, or ``None`` unless exactly one is set."""
         rooms = self.rooms

@@ -10,17 +10,6 @@ a few cross-repo follow-ups, and some deferred refinements.
 - `openccu-loom` → `feat/channel-name-category-schema` (openapi `ChannelSummary.name` + `category`)
 - `openccu-loom-types` → `feat/channel-name-category` (regenerated `rest.py`)
 
-## P1 — finish the last feature stub
-
-- [ ] **`hub_coordinator.install_mode_dps`**: currently returns `{}` (safe, no
-      crash). Build the real per-interface install-mode button/sensor pair
-      (`InstallModeDpType(button, sensor)`). The button/sensor carry a dual
-      `unique_id` — match aiohomematic's registry format exactly
-      (`generate_unique_id(central_id, address="install_mode", parameter=slugify(name))`,
-      with the button/sensor distinguisher) or HA gets orphaned entities.
-      Source: `aiohomematic/model/hub/install_mode.py`. Daemon state:
-      `GET /install-mode` + `hub.install_mode_changed`.
-
 ## P1 — HA-side (homematicip_local)
 
 - [ ] **`websocket_api.py`**: the config-UI paramset description getters are

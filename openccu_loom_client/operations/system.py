@@ -9,11 +9,13 @@ from typing import Any
 
 from openccu_loom_types.rest import (
     Health,
+    HubMetricsEntry,
     Info,
     InterfaceState,
     Snapshot,
     StartupCaptureConfig,
     SystemCCUEntry,
+    SystemUpdateEntry,
 )
 
 from openccu_loom_client.operations._base import _OperationsBase
@@ -74,6 +76,43 @@ class SystemOperations(_OperationsBase):
             f"/interfaces/{interface_id}/reconnect",
             allow_retry=False,
         )
+
+    # ---- system update / metrics ----
+
+    async def get_system_update(self) -> list[SystemUpdateEntry]:
+        """
+        Return the per-central CCU system-update state.
+
+        Wire: ``GET /system/update``. Firmware fields stay ``None``
+        until the daemon has observed the CCU's update endpoint.
+        """
+        payload = await self._transport.request("GET", "/system/update")
+        return [SystemUpdateEntry.model_validate(e) for e in (payload or [])]
+
+    async def install_system_update(self, *, central: str | None = None) -> None:
+        """
+        Trigger the CCU system-update install (admin).
+
+        Wire: ``POST /system/update/install?central=<name>``. Without
+        ``central`` the daemon resolves its default central. Not
+        retried — a duplicated trigger could double-run the CCU update.
+        """
+        await self._transport.request(
+            "POST",
+            "/system/update/install",
+            params={"central": central} if central else None,
+            allow_retry=False,
+        )
+
+    async def get_hub_metrics(self) -> list[HubMetricsEntry]:
+        """
+        Return per-central hub metrics (health, latency, event age).
+
+        Wire: ``GET /system/metrics``. Metric fields are ``None`` until
+        the daemon has observed them.
+        """
+        payload = await self._transport.request("GET", "/system/metrics")
+        return [HubMetricsEntry.model_validate(m) for m in (payload or [])]
 
     # ---- CCU repair surface ----
 

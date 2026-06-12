@@ -1,3 +1,13 @@
+# Version 2026.6.7 (2026-06-12)
+
+- Feat: **hub singletons** — the loom backend now spawns aiohomematic's per-central hub entities: alarm-messages, service-messages and inbox count sensors (with `alarm_N`/`message_N` attributes), the metrics diagnostics (system health %, connection latency ms, last event age s — `None` until the daemon observed them), one connectivity binary sensor per interface (`connectivity-<slug(interface_id)>`), the CCU system-update entity (`POST /system/update/install`) and the per-interface install-mode sensor/button pairs (`install_mode` pseudo-address, slugs `hmip`/`bidcos` + `*-button`; `hub_coordinator.install_mode_dps` now returns the real `InstallModeDpType` pairs). All unique_ids match aiohomematic's registry format; values are polled every 30 s via `hub_coordinator.fetch_hub_singleton_data` and changed singletons ping their keyed `DataPointStateChangedEvent`.
+- Feat: **schedule layer** — channels whose type ends in `WEEK_PROFILE` spawn a `WeekProfileDp` sensor (uid `loom_week_profile_<addr>_week_profile`; value = active entry count, climate counts the active profile's periods, simple schedules their entries; attributes from the daemon's week-profile descriptor) plus one `ScheduleChannelSwitch` per `schedule_enabled` key (uid `loom_schedule_channel_switch_<addr>_schedule_channel_lock_<key>`, disabled by default) toggling the week-program participation via `PUT …/week_profile/channel-locks/{key}` with optimistic state.
+- Feat: **combined duration number** — channels carrying both `DURATION_VALUE` and `DURATION_UNIT` get one seconds-typed number (uid `loom_combined_<addr>_<channel>_duration`; reads convert through the unit factor s/min/h, writes pin the unit to seconds then send the integer value). The daemon's calculated `DURATION` sensor is suppressed (the ccu twin has none).
+- Feat: **operations** — `system.get_system_update` / `system.install_system_update` / `system.get_hub_metrics`, `hub.list_install_mode_interfaces` / `hub.set_install_mode_interface`, `schedules.set_channel_lock`.
+- Fix: `hub.list_inbox` returns the daemon's list shape (`list[dict]`) — the previous `dict()` coercion raised on a non-empty inbox.
+- Feat: `Device.config_provider` exposes the minimal `config.locale` surface the HA schedule entities read.
+- Chore: pin `openccu-loom-types==0.1.16` (daemon api 1.4.0: hub singleton + schedule channel-lock contract); `_HubEntitySurface` extracted to `model/hub/_surface.py`.
+
 # Version 2026.6.6 (2026-06-11)
 
 - Fix: **sysvar hard exclusions** — names carrying `OldVal`/`pcCCUID` (CCU calculation scratch values, hub.py `_EXCLUDED`) and the fixed CCU IDs 40/41 (alarm/service messages; dedicated hub singletons) never spawn generic sysvar entities, mirroring the reference stack.
