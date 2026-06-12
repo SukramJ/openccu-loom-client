@@ -382,12 +382,41 @@ class LoomStore:
         for sysvar in snapshot.sysvars or ():
             self._upsert_sysvar(sysvar)
 
-    @staticmethod
-    def _infer_central_id(snapshot: Snapshot) -> str | None:
-        """Derive the central id from the first interface that carries one."""
-        for iface in snapshot.interfaces or ():
-            if iface.central_id:
-                return iface.central_id
+    def _infer_central_id(self, snapshot: Snapshot) -> str | None:
+        """
+        Derive this central's id from the snapshot's interface list.
+
+        The daemon mediates *every* configured central, so the interface
+        list may carry several distinct ``central_id`` values (the
+        daemon-side central *names*). Adopting a foreign central's id
+        would make ``_matches_central``-style filters accept that
+        central's sysvars/programs/interfaces and leak its entities into
+        this HA entry. Resolution order:
+
+        1. the candidate equal to the configured :attr:`central_name`
+           (the integration's instance name) — the only safe pick in a
+           multi-central deployment;
+        2. the single unique candidate when all interfaces agree
+           (single-central deployment whose daemon name may differ from
+           the HA instance name);
+        3. ``None`` when the list is ambiguous — central-scoped filters
+           then match the configured name only.
+        """
+        candidates = [iface.central_id for iface in snapshot.interfaces or () if iface.central_id]
+        if self._central_name and self._central_name in candidates:
+            return self._central_name
+        unique = list(dict.fromkeys(candidates))
+        if len(unique) == 1:
+            return unique[0]
+        if unique:
+            _LOGGER.warning(
+                "Snapshot reports multiple centrals %s and none matches the "
+                "configured central name %r — leaving central_id unset so "
+                "only payloads tagged %r are accepted",
+                unique,
+                self._central_name,
+                self._central_name,
+            )
         return None
 
     def attach_device_detail(self, detail: DeviceDetail) -> None:
