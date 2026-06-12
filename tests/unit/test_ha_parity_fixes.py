@@ -317,7 +317,7 @@ class TestCustomTranslatedName:
                         {
                             "address": "VCU1",
                             "interface": "home:HmIP-RF",
-                            "model": "HmIP-DRD3",
+                            "model": "HmIP-BDT",
                             "name": "Küchenstrahler",
                             "available": True,
                             "channels_count": 7,
@@ -331,7 +331,7 @@ class TestCustomTranslatedName:
                 {
                     "address": "VCU1",
                     "interface": "home:HmIP-RF",
-                    "model": "HmIP-DRD3",
+                    "model": "HmIP-BDT",
                     "name": "Küchenstrahler",
                     "available": True,
                     "channels_count": 7,
@@ -339,21 +339,21 @@ class TestCustomTranslatedName:
                         {
                             "address": "VCU1:4",
                             "number": 4,
-                            "name": "Küchenstrahler",
+                            "name": "Küchenstrahler:4",
                             "paramset_key": "VALUES",
                             "data_points_count": 3,
                         },
                         {
                             "address": "VCU1:5",
                             "number": 5,
-                            "name": "Küchenstrahler:vch5",
+                            "name": "Küchenstrahler:5",
                             "paramset_key": "VALUES",
                             "data_points_count": 3,
                         },
                         {
                             "address": "VCU1:6",
                             "number": 6,
-                            "name": "Küchenstrahler:vch6",
+                            "name": "Küchenstrahler:6",
                             "paramset_key": "VALUES",
                             "data_points_count": 3,
                         },

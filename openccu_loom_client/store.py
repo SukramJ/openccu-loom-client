@@ -79,6 +79,9 @@ class LoomStore:
         # central via ``Device.central_info.name``, so it must match the
         # adapter name — which may differ from the daemon ``central_id``.
         self._central_name: str = ""
+        # The HA-facing locale; read back by Device.config_provider for
+        # locale-aware schedule names. Defaults to English.
+        self._locale: str = "en"
         self._calculated_factory: Callable[..., DataPoint] | None = None
         # The CCU serial suffix (last 10 chars, lower-cased). This is the
         # central-id slot of every canonical HA routing key for hub /
@@ -124,6 +127,15 @@ class LoomStore:
     def set_central_name(self, central_name: str | None) -> None:
         """Record the HA-facing central name (the integration's instance name)."""
         self._central_name = central_name or ""
+
+    @property
+    def locale(self) -> str:
+        """The HA-facing locale (drives translated schedule names)."""
+        return self._locale
+
+    def set_locale(self, locale: str | None) -> None:
+        """Record the HA-facing locale (the integration's UI language)."""
+        self._locale = locale or "en"
 
     @property
     def serial_suffix(self) -> str:
@@ -302,6 +314,21 @@ class LoomStore:
             if cdp_address == address and cdp.summary.channel_no == channel_no:
                 return cdp
         return None
+
+    def is_parameter_in_multiple_channels(self, *, address: str, parameter: str) -> bool:
+        """
+        Return whether a parameter exists on more than one channel of a device.
+
+        Mirrors aiohomematic's paramset-description check that drives the
+        `` chN`` display-name postfix for generic data points.
+        """
+        count = 0
+        for dp_address, _channel, dp_parameter in self._data_points:
+            if dp_address == address and dp_parameter == parameter:
+                count += 1
+                if count > 1:
+                    return True
+        return False
 
     # ---- programs ----
 

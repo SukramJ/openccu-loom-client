@@ -145,10 +145,10 @@ class Device:
         Return a minimal aiohomematic-shaped config provider.
 
         The HA schedule entities read ``device.config_provider.config.locale``
-        to translate the schedule name; the daemon does not carry a per-client
-        locale, so this is fixed to English.
+        to translate the schedule name; the locale is the one the integration
+        configured on the store (HA's UI language), defaulting to English.
         """
-        return SimpleNamespace(config=SimpleNamespace(locale="en"))
+        return SimpleNamespace(config=SimpleNamespace(locale=self._store.locale))
 
     @property
     def room(self) -> str | None:

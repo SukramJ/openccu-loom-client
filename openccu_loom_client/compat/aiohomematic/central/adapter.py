@@ -1004,6 +1004,7 @@ class LoomCentralAdapter:
         serial: str | None = None,
         sysvar_markers: tuple[str, ...] = (),
         program_markers: tuple[str, ...] = (),
+        locale: str = "en",
     ) -> None:
         """Wire the coordinator surface and data-point factories onto ``client``."""
         self._client = client
@@ -1024,6 +1025,9 @@ class LoomCentralAdapter:
         # HA links every device to this central via Device.central_info.name,
         # which must equal the adapter name (the integration's instance name).
         client.store.set_central_name(name)
+        # The HA UI language; entities read it back through
+        # ``device.config_provider.config.locale`` (schedule names).
+        client.store.set_locale(locale)
         self._refresh_group: Any = None
         # HA entities subscribe on aiohomematic's *own* event bus and match
         # events by ``type(event)``/``.key``. The adapter therefore exposes a

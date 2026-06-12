@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any
 from openccu_loom_types.enums import DataPointCategory, DataPointUsage, DeviceTriggerEventType
 
 from openccu_loom_client.canonical import LOOM_NAMESPACE, generate_channel_unique_id
+from openccu_loom_client.compat.aiohomematic.model.naming import channel_display_name
 
 if TYPE_CHECKING:
     from openccu_loom_client.model import Channel, DataPoint
@@ -147,15 +148,30 @@ class ChannelEventGroup:
 
     @property
     def name(self) -> str:
-        """Return the short display name of the group."""
-        return _TRIGGER_SHORT[self._event_type]
+        """
+        Return the channel-derived display name of the group.
+
+        Mirrors aiohomematic's ``ChannelEventGroup.name``
+        (``name_data.channel_name`` from ``get_event_name``): a
+        default-named channel renders ``ch<no>`` (empty on channel 0), a
+        user-renamed channel keeps its custom name minus the device-name
+        prefix ("Galerie aus" → "aus").
+        """
+        device = self.device
+        if device is None:
+            return _TRIGGER_SHORT[self._event_type]
+        return channel_display_name(
+            store=self._channel._store,  # noqa: SLF001 — package-internal store handle
+            device=device,
+            channel_no=self._channel.number,
+        )
 
     @property
     def full_name(self) -> str:
         """Return the device-qualified name of the group."""
         device = self.device
         owner = device.name if device is not None else self._channel.address
-        return f"{owner} {self.name}"
+        return f"{owner} {self.name}".strip()
 
     @property
     def translation_key(self) -> str:
