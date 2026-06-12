@@ -398,6 +398,69 @@ class TestInternalSysvarInclusion:
         assert names == ["Temperatur Garten", "svEnergyCounter_14179"]
         assert all(dp.enabled_default is False for dp in sensors)
 
+    async def test_oldval_and_fixed_ids_excluded(self) -> None:
+        from openccu_loom_client.compat.aiohomematic.model.hub import SysvarDpSensor
+
+        central = await _make_config().create_central()
+        central._client.store.load_snapshot(
+            Snapshot.model_validate(
+                {
+                    "generated_at": "2026-05-24T08:00:00Z",
+                    "devices": [],
+                    "programs": [],
+                    "sysvars": [
+                        # OldVal scratch values never spawn (hub.py _EXCLUDED).
+                        {
+                            "name": "svEnergyCounterOldVal_14179",
+                            "value_type": "FLOAT",
+                            "value": 1.0,
+                            "observed": True,
+                            "is_internal": True,
+                        },
+                        {
+                            "name": "pcCCUID",
+                            "value_type": "STRING",
+                            "value": "x",
+                            "observed": True,
+                            "is_internal": True,
+                        },
+                        # Fixed CCU IDs 40/41 back the alarm/service-message
+                        # hub singletons (IGNORE_SYSVARS_BY_ID).
+                        {
+                            "name": "Alarmmeldungen",
+                            "value_type": "INTEGER",
+                            "value": 0,
+                            "observed": True,
+                            "is_internal": True,
+                            "vid": 40,
+                        },
+                        {
+                            "name": "Servicemeldungen",
+                            "value_type": "INTEGER",
+                            "value": 0,
+                            "observed": True,
+                            "is_internal": True,
+                            "vid": 41,
+                        },
+                        # Control: a plain internal counter stays included.
+                        {
+                            "name": "svEnergyCounter_14179",
+                            "value_type": "FLOAT",
+                            "value": 2.0,
+                            "observed": True,
+                            "is_internal": True,
+                            "vid": 14179,
+                        },
+                    ],
+                }
+            )
+        )
+        central._client.store.set_serial("3014F711A0001234")
+        sensors = central.hub_coordinator.get_hub_data_points(
+            category=SysvarDpSensor.default_category()
+        )
+        assert [dp.name for dp in sensors] == ["svEnergyCounter_14179"]
+
 
 class TestEventGroupsAndInstallMode:
     async def test_get_event_groups_returns_tuple(self) -> None:

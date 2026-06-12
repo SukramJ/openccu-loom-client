@@ -1,3 +1,8 @@
+# Version 2026.6.6 (2026-06-11)
+
+- Fix: **sysvar hard exclusions** — names carrying `OldVal`/`pcCCUID` (CCU calculation scratch values, hub.py `_EXCLUDED`) and the fixed CCU IDs 40/41 (alarm/service messages; dedicated hub singletons) never spawn generic sysvar entities, mirroring the reference stack.
+- Chore: pin `openccu-loom-types==0.1.15` (`SysvarSummary.vid`, first stamped schema digest, daemon api 1.3.0).
+
 # Version 2026.6.5 (2026-06-11)
 
 - Feat: **usage=event filter** — physical devices' PRESS\_\* parameters (daemon verdict `usage=event`) no longer spawn generic button entities; they surface through keypress event groups only, matching aiohomematic (212 surplus buttons in the HA parity run). Virtual remotes keep their buttons.
