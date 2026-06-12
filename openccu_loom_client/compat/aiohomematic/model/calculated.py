@@ -74,6 +74,10 @@ def synthesize_summary(calc: CalculatedDPSummary) -> DataPointSummary:
             "operations": {"read": True, "write": False, "event": True},
             "category": calc.category or "sensor",
             "type": "BOOL" if calc.category == "binary_sensor" else None,
+            # daemon api 1.5.0 ships the locale-aware label for calc DPs
+            # (same chain as generic DPs); the generic naming path picks
+            # it up like any other daemon label.
+            "translated_name": getattr(calc, "translated_name", None),
         }
     )
 

@@ -1,3 +1,8 @@
+# Version 2026.6.10 (2026-06-12)
+
+- Feat: calculated/combined data points consume the daemon's locale-aware `translated_name` (api 1.5.0) — resolves the last 10+2 friendly-name diffs vs the reference twin ("Taupunkt", "Zeitdauer"); the suppressed calculated `DURATION` entry donates its label to the combined number.
+- Chore: pin `openccu-loom-types==0.1.17`.
+
 # Version 2026.6.9 (2026-06-12)
 
 - Fix: `SystemInformation` carries `ccu_type` (defaults to `CCUType.OPENCCU`) — the HA hub-update entity branches on it for the release-notes URL and crashed with `AttributeError`, so the system-update entity never spawned on the loom backend.
