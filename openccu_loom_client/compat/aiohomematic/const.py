@@ -15,7 +15,7 @@ the client-side defaults only matter for the HA-config-flow shape.
 from __future__ import annotations
 
 import re
-from typing import Final
+from typing import Any, Final
 
 # ---- enum re-exports (single source of truth: openccu_loom_types) ----
 from openccu_loom_types.enums import (
@@ -176,11 +176,20 @@ class SystemInformation:
         serial: str | None = None,
         version: str | None = None,
         available_interfaces: tuple[str, ...] = (),
+        ccu_type: Any = None,
     ) -> None:
-        """Store the CCU serial, version and available interfaces."""
+        """Store the CCU serial, version, interfaces and CCU type."""
         self.serial = serial
         self.version = version
         self.available_interfaces = available_interfaces
+        # The HA hub-update entity branches on
+        # ``system_information.ccu_type == CCUType.OPENCCU`` (release-notes
+        # URL); the loom daemon always fronts an OpenCCU-class central.
+        if ccu_type is None:
+            from aiohomematic.const import CCUType  # noqa: PLC0415
+
+            ccu_type = CCUType.OPENCCU
+        self.ccu_type = ccu_type
 
 
 # ---- helper: default port per interface ----
