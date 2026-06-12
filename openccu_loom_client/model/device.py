@@ -152,9 +152,21 @@ class Device:
 
     @property
     def room(self) -> str | None:
-        """Return the single assigned room, or ``None`` unless exactly one is set."""
+        """
+        Return the device's room (aiohomematic ``Device.room`` semantics).
+
+        The single assigned device room wins; with zero or several
+        rooms the maintenance channel's resolved room (group-master
+        fallback included, daemon api 1.6.0 ``room`` field) decides.
+        ``None`` when neither source yields a unique room.
+        """
         rooms = self.rooms
-        return rooms[0] if len(rooms) == 1 else None
+        if len(rooms) == 1:
+            return rooms[0]
+        maintenance = self._store.get_channel(address=self.address, number=0)
+        if maintenance is not None:
+            return maintenance.room
+        return None
 
     @property
     def has_sub_devices(self) -> bool:

@@ -234,3 +234,32 @@ class TestChannelGroupSurface:
         vch = store.get_channel(address="0009DRSI4001", number=9)
         assert vch is not None
         assert vch.room is None
+
+
+class TestDeviceRoom:
+    """aiohomematic semantics: unique device room, else maintenance-channel room."""
+
+    def test_multi_room_device_falls_back_to_maintenance_channel(self) -> None:
+        addr = "ROOMDEV01"
+        dev = _device(address=addr, name="Schalter")
+        channels = [
+            _channel(address=addr, number=0, room="Dachboden"),
+            _channel(
+                address=addr,
+                number=6,
+                group_no=6,
+                is_group_master=True,
+                is_in_multi_group=True,
+                room="Terrasse",
+            ),
+        ]
+        device = _store_with(dev, channels).get_device(address=addr)
+        assert device is not None
+        assert device.room == "Dachboden"
+
+    def test_no_rooms_anywhere_is_none(self) -> None:
+        addr = "ROOMDEV02"
+        dev = _device(address=addr, name="Schalter")
+        device = _store_with(dev, [_channel(address=addr, number=0)]).get_device(address=addr)
+        assert device is not None
+        assert device.room is None
