@@ -1,3 +1,7 @@
+# Version 2026.6.9 (2026-06-12)
+
+- Fix: `SystemInformation` carries `ccu_type` (defaults to `CCUType.OPENCCU`) — the HA hub-update entity branches on it for the release-notes URL and crashed with `AttributeError`, so the system-update entity never spawned on the loom backend.
+
 # Version 2026.6.8 (2026-06-12)
 
 - Fix: **climate card temperatures** — `BaseCustomDpClimate.current_temperature` / `target_temperature` / `current_humidity` fall back to the CDP channel's generic data points (`ACTUAL_TEMPERATURE`, `SET_POINT_TEMPERATURE`, `HUMIDITY`) when the daemon's CDP state dict does not carry them (it ships only hvac/preset/action); unobserved DPs read `None`. The refresh bridge additionally pings the channel's custom data point on every member field-DP `datapoint.value_changed` (aiohomematic re-renders CDP entities on field events), so the HA climate card updates live.

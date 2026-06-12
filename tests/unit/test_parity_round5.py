@@ -899,3 +899,15 @@ class TestLocalePlumbing:
 
     def test_locale_defaults_to_english(self) -> None:
         assert LoomStore().locale == "en"
+
+
+class TestSystemInformationCcuType:
+    """The HA hub-update entity reads system_information.ccu_type."""
+
+    def test_defaults_to_openccu(self) -> None:
+        from aiohomematic.const import CCUType
+
+        from openccu_loom_client.compat.aiohomematic.const import SystemInformation
+
+        info = SystemInformation(serial="ABC", version="3.87")
+        assert info.ccu_type == CCUType.OPENCCU
