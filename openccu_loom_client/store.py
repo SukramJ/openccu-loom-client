@@ -79,6 +79,9 @@ class LoomStore:
         # central via ``Device.central_info.name``, so it must match the
         # adapter name — which may differ from the daemon ``central_id``.
         self._central_name: str = ""
+        # The HA-facing locale; read back by Device.config_provider for
+        # locale-aware schedule names. Defaults to English.
+        self._locale: str = "en"
         self._calculated_factory: Callable[..., DataPoint] | None = None
         # The CCU serial suffix (last 10 chars, lower-cased). This is the
         # central-id slot of every canonical HA routing key for hub /
@@ -124,6 +127,15 @@ class LoomStore:
     def set_central_name(self, central_name: str | None) -> None:
         """Record the HA-facing central name (the integration's instance name)."""
         self._central_name = central_name or ""
+
+    @property
+    def locale(self) -> str:
+        """The HA-facing locale (drives translated schedule names)."""
+        return self._locale
+
+    def set_locale(self, locale: str | None) -> None:
+        """Record the HA-facing locale (the integration's UI language)."""
+        self._locale = locale or "en"
 
     @property
     def serial_suffix(self) -> str:
@@ -294,6 +306,30 @@ class LoomStore:
             key=lambda c: c.name,
         )
 
+    def get_custom_data_point_by_channel(
+        self, *, address: str, channel_no: int
+    ) -> CustomDataPoint | None:
+        """Return the CDP whose primary channel is ``channel_no``, or ``None``."""
+        for (cdp_address, _name), cdp in self._cdps.items():
+            if cdp_address == address and cdp.summary.channel_no == channel_no:
+                return cdp
+        return None
+
+    def is_parameter_in_multiple_channels(self, *, address: str, parameter: str) -> bool:
+        """
+        Return whether a parameter exists on more than one channel of a device.
+
+        Mirrors aiohomematic's paramset-description check that drives the
+        `` chN`` display-name postfix for generic data points.
+        """
+        count = 0
+        for dp_address, _channel, dp_parameter in self._data_points:
+            if dp_address == address and dp_parameter == parameter:
+                count += 1
+                if count > 1:
+                    return True
+        return False
+
     # ---- programs ----
 
     @property
@@ -373,12 +409,41 @@ class LoomStore:
         for sysvar in snapshot.sysvars or ():
             self._upsert_sysvar(sysvar)
 
-    @staticmethod
-    def _infer_central_id(snapshot: Snapshot) -> str | None:
-        """Derive the central id from the first interface that carries one."""
-        for iface in snapshot.interfaces or ():
-            if iface.central_id:
-                return iface.central_id
+    def _infer_central_id(self, snapshot: Snapshot) -> str | None:
+        """
+        Derive this central's id from the snapshot's interface list.
+
+        The daemon mediates *every* configured central, so the interface
+        list may carry several distinct ``central_id`` values (the
+        daemon-side central *names*). Adopting a foreign central's id
+        would make ``_matches_central``-style filters accept that
+        central's sysvars/programs/interfaces and leak its entities into
+        this HA entry. Resolution order:
+
+        1. the candidate equal to the configured :attr:`central_name`
+           (the integration's instance name) — the only safe pick in a
+           multi-central deployment;
+        2. the single unique candidate when all interfaces agree
+           (single-central deployment whose daemon name may differ from
+           the HA instance name);
+        3. ``None`` when the list is ambiguous — central-scoped filters
+           then match the configured name only.
+        """
+        candidates = [iface.central_id for iface in snapshot.interfaces or () if iface.central_id]
+        if self._central_name and self._central_name in candidates:
+            return self._central_name
+        unique = list(dict.fromkeys(candidates))
+        if len(unique) == 1:
+            return unique[0]
+        if unique:
+            _LOGGER.warning(
+                "Snapshot reports multiple centrals %s and none matches the "
+                "configured central name %r — leaving central_id unset so "
+                "only payloads tagged %r are accepted",
+                unique,
+                self._central_name,
+                self._central_name,
+            )
         return None
 
     def attach_device_detail(self, detail: DeviceDetail) -> None:

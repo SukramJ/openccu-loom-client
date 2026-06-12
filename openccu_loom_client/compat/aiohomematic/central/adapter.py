@@ -65,7 +65,11 @@ from openccu_loom_client.compat.aiohomematic.model.combined import (
     CombinedDurationDp,
     channel_has_duration_pair,
 )
-from openccu_loom_client.compat.aiohomematic.model.custom import make_custom_data_point
+from openccu_loom_client.compat.aiohomematic.model.custom import (
+    BaseCustomDpSiren,
+    CustomDpSoundPlayer,
+    make_custom_data_point,
+)
 from openccu_loom_client.compat.aiohomematic.model.event_group import build_event_groups
 from openccu_loom_client.compat.aiohomematic.model.generic import make_generic_data_point
 from openccu_loom_client.compat.aiohomematic.model.hub import (
@@ -1000,6 +1004,7 @@ class LoomCentralAdapter:
         serial: str | None = None,
         sysvar_markers: tuple[str, ...] = (),
         program_markers: tuple[str, ...] = (),
+        locale: str = "en",
     ) -> None:
         """Wire the coordinator surface and data-point factories onto ``client``."""
         self._client = client
@@ -1020,6 +1025,9 @@ class LoomCentralAdapter:
         # HA links every device to this central via Device.central_info.name,
         # which must equal the adapter name (the integration's instance name).
         client.store.set_central_name(name)
+        # The HA UI language; entities read it back through
+        # ``device.config_provider.config.locale`` (schedule names).
+        client.store.set_locale(locale)
         self._refresh_group: Any = None
         # HA entities subscribe on aiohomematic's *own* event bus and match
         # events by ``type(event)``/``.key``. The adapter therefore exposes a
@@ -1114,9 +1122,12 @@ class LoomCentralAdapter:
         await self._client.bootstrap()
         await self._bootstrap_hub_catalogue()
         await self.hub_coordinator.fetch_hub_singleton_data()
+        # Custom DPs first: schedule discovery and the combined duration
+        # number key off the devices' CDP catalogue (aiohomematic builds
+        # both through the custom data points).
+        await self._bootstrap_custom_data_points()
         await self._bootstrap_schedules()
         await self._bootstrap_combined_data_points()
-        await self._bootstrap_custom_data_points()
         await self._client.start_events()
         # Fan the daemon's typed value events into the uniform
         # DataPointStateChangedEvent the HA entities subscribe to.
@@ -1243,74 +1254,108 @@ class LoomCentralAdapter:
         """
         Build the week-profile and schedule-switch data points.
 
-        Channels whose type ends in ``WEEK_PROFILE`` own the device's
-        weekly program. Per channel, the daemon's week-profile
-        descriptor spawns one :class:`WeekProfileDp` (entry count loaded
-        from the channel schedule, fetch errors degrade to "unknown")
-        plus one :class:`ScheduleChannelSwitch` per ``schedule_enabled``
-        key. Devices without a week-profile channel are skipped.
+        aiohomematic initialises a device's week profile only through a
+        custom data point, so devices without a CDP never spawn schedule
+        entities. The schedule channel is the channel whose type ends in
+        ``WEEK_PROFILE``; climate devices carry no such channel — their
+        schedule lives on the climate CDP's channel, probed directly
+        (a 404 means the device has no schedule). Per schedule channel,
+        the daemon's week-profile descriptor spawns one
+        :class:`WeekProfileDp` (entry count loaded from the channel
+        schedule, fetch errors degrade to "unknown") plus — for
+        non-climate devices only, like aiohomematic — one
+        :class:`ScheduleChannelSwitch` per ``schedule_enabled`` key.
         """
         store = self._client.store
         for device in list(store.devices):
-            for channel in store.channels_of(address=device.address):
-                if not (channel.channel_type or "").endswith(_WEEK_PROFILE_CHANNEL_SUFFIX):
+            cdps = store.custom_data_points_of(address=device.address)
+            if not cdps:
+                continue
+            climate_cdp = next(
+                (cdp for cdp in cdps if (cdp.summary.category or "") == "climate"), None
+            )
+            schedule_channel_no = next(
+                (
+                    channel.number
+                    for channel in store.channels_of(address=device.address)
+                    if (channel.channel_type or "").endswith(_WEEK_PROFILE_CHANNEL_SUFFIX)
+                ),
+                None,
+            )
+            if schedule_channel_no is None:
+                if climate_cdp is None:
                     continue
-                try:
-                    week_profile = await self._client.schedules.get_channel_week_profile(
-                        address=device.address, channel=channel.number
-                    )
-                except Exception:  # noqa: BLE001 — channel has no attached week profile
-                    _LOGGER.debug(
-                        "no week profile on %s:%s", device.address, channel.number, exc_info=True
-                    )
-                    continue
-                wp_dp = WeekProfileDp(
+                schedule_channel_no = climate_cdp.summary.channel_no
+            await self._spawn_schedule_data_points(
+                device=device,
+                channel_no=schedule_channel_no,
+                with_switches=climate_cdp is None,
+            )
+
+    async def _spawn_schedule_data_points(
+        self, *, device: Device, channel_no: int, with_switches: bool
+    ) -> None:
+        """Probe one schedule channel and spawn its week-profile (+switch) DPs."""
+        store = self._client.store
+        try:
+            week_profile = await self._client.schedules.get_channel_week_profile(
+                address=device.address, channel=channel_no
+            )
+        except Exception:  # noqa: BLE001 — channel has no attached week profile
+            _LOGGER.debug("no week profile on %s:%s", device.address, channel_no, exc_info=True)
+            return
+        wp_dp = WeekProfileDp(
+            store=store,
+            device=device,
+            channel_no=channel_no,
+            week_profile=week_profile,
+        )
+        try:
+            schedule = await self._client.schedules.get_channel_schedule(
+                address=device.address, channel=channel_no
+            )
+        except Exception:  # noqa: BLE001 — entry count degrades to unknown
+            _LOGGER.debug(
+                "schedule fetch failed for %s:%s", device.address, channel_no, exc_info=True
+            )
+        else:
+            wp_dp.update_from(schedule=schedule)
+        self._extra_data_points.append(wp_dp)
+        if not with_switches:
+            return
+        for channel_key in week_profile.schedule_enabled or {}:
+            self._extra_data_points.append(
+                ScheduleChannelSwitch(
                     store=store,
                     device=device,
-                    channel_no=channel.number,
-                    week_profile=week_profile,
+                    channel_no=channel_no,
+                    channel_key=channel_key,
+                    week_profile_dp=wp_dp,
+                    schedules_ops=self._client.schedules,
                 )
-                try:
-                    schedule = await self._client.schedules.get_channel_schedule(
-                        address=device.address, channel=channel.number
-                    )
-                except Exception:  # noqa: BLE001 — entry count degrades to unknown
-                    _LOGGER.debug(
-                        "schedule fetch failed for %s:%s",
-                        device.address,
-                        channel.number,
-                        exc_info=True,
-                    )
-                else:
-                    wp_dp.update_from(schedule=schedule)
-                self._extra_data_points.append(wp_dp)
-                for channel_key in week_profile.schedule_enabled or {}:
-                    self._extra_data_points.append(
-                        ScheduleChannelSwitch(
-                            store=store,
-                            device=device,
-                            channel_no=channel.number,
-                            channel_key=channel_key,
-                            week_profile_dp=wp_dp,
-                            schedules_ops=self._client.schedules,
-                        )
-                    )
+            )
 
     async def _bootstrap_combined_data_points(self) -> None:
         """
-        Build one combined duration number per DURATION_VALUE/UNIT pair.
+        Build the combined duration number for siren channels.
 
-        Mirrors aiohomematic's combined timer: channels carrying both
-        parameters get a single seconds-typed number entity.
+        aiohomematic's only *visible* combined timer is
+        ``CustomDpIpSiren._dp_duration`` (sound players declare the
+        DURATION pair too, but invisible), so the seconds-typed number
+        spawns solely on channels hosting a plain siren CDP that carries
+        both ``DURATION_VALUE`` and ``DURATION_UNIT``.
         """
         store = self._client.store
         for device in list(store.devices):
-            for channel in store.channels_of(address=device.address):
+            for cdp in store.custom_data_points_of(address=device.address):
+                if not isinstance(cdp, BaseCustomDpSiren) or isinstance(cdp, CustomDpSoundPlayer):
+                    continue
+                channel_no = cdp.summary.channel_no
                 if channel_has_duration_pair(
-                    store=store, address=device.address, channel_no=channel.number
+                    store=store, address=device.address, channel_no=channel_no
                 ):
                     self._extra_data_points.append(
-                        CombinedDurationDp(store=store, device=device, channel_no=channel.number)
+                        CombinedDurationDp(store=store, device=device, channel_no=channel_no)
                     )
 
     async def stop(self) -> None:

@@ -36,7 +36,11 @@ from aiohomematic.model.custom import ClimateMode, ClimateProfile
 from openccu_loom_types.enums import DataPointCategory
 
 from openccu_loom_client.canonical import canonical_unique_id
-from openccu_loom_client.compat.aiohomematic.model._protocol_surface import _CustomProtocolSurface
+from openccu_loom_client.compat.aiohomematic.model._protocol_surface import (
+    _CustomProtocolSurface,
+    _NameData,
+)
+from openccu_loom_client.compat.aiohomematic.model.naming import custom_name_parts
 from openccu_loom_client.model import CustomDataPoint
 
 if TYPE_CHECKING:
@@ -126,6 +130,10 @@ class _CustomEntitySurface(_CustomProtocolSurface, CustomDataPoint):
 
     _category: ClassVar[DataPointCategory] = DataPointCategory.Switch
 
+    # aiohomematic's lock classes ignore the multi-channel marker for
+    # their display name (button locks render their postfix instead).
+    _ignore_multiple_channels_for_name: ClassVar[bool] = False
+
     @property
     def category(self) -> DataPointCategory:
         """Return the HA data-point category from the daemon string, else the class default."""
@@ -184,28 +192,47 @@ class _CustomEntitySurface(_CustomProtocolSurface, CustomDataPoint):
         config = getattr(self._summary, "config", None) or {}
         return config.get(key)
 
+    def _name_parts(self) -> tuple[str | None, str]:
+        """Return the ``(translated_name, parameter_name)`` pair for this CDP."""
+        device = self.device
+        if device is None:
+            return None, ""
+        return custom_name_parts(
+            store=self._store,
+            device=device,
+            channel_no=self._summary.channel_no,
+            # The *resolved* category (class default when the daemon's
+            # string has no twin — e.g. fixed-colour lights shipped as
+            # "number") keys the DeviceProfileRegistry lookup.
+            category_token=self.category.value,
+            postfix=self.data_point_name_postfix,
+            ignore_multiple_channels_for_name=self._ignore_multiple_channels_for_name,
+        )
+
     @property
     def translated_name(self) -> str | None:
         """
         Return the channel-derived display name, aiohomematic-style.
 
-        aiohomematic names a custom DP after its CCU channel: the channel
-        name minus the device-name prefix ("Küchenstrahler:vch5" →
-        "vch5", a user-renamed channel keeps its full name). The primary
-        channel usually carries the bare device name, which strips to
-        nothing → ``None`` and HA falls back to the device name alone —
-        exactly the reference behaviour (primary ``None``, secondaries
-        "vch5"/"vch6").
+        Mirrors ``get_custom_data_point_name``: the device's only primary
+        channel collapses to ``None`` (HA falls back to the device name),
+        grouped channels carry a ``ch<no>``/``vch<no>`` marker and a
+        user-renamed channel keeps its custom name (minus the device-name
+        prefix). Primary channels come from aiohomematic's
+        ``DeviceProfileRegistry`` — the ccu twin's exact source.
         """
-        channel = self._store.get_channel(
-            address=self._device_address, number=self._summary.channel_no
+        translated_name, _parameter_name = self._name_parts()
+        return translated_name
+
+    @property
+    def name_data(self) -> _NameData:
+        """Return the name parts HA reads (``parameter_name`` drives translation)."""
+        translated_name, parameter_name = self._name_parts()
+        return _NameData(
+            parameter_name=parameter_name or self.name,
+            name=translated_name or self.name,
+            full_name=self.full_name,
         )
-        raw = (channel.summary.name if channel is not None else None) or ""
-        device = self.device
-        device_name = (device.name if device is not None else "") or ""
-        if device_name and raw.startswith(device_name):
-            raw = raw[len(device_name) :].lstrip(":").strip()
-        return raw or None
 
     @property
     def is_registered(self) -> bool:
@@ -554,12 +581,23 @@ class BaseCustomDpClimate(_CustomEntitySurface):
     Thermostat CDP.
 
     ``hvac_mode``/``preset_mode``/``action`` come straight from the
-    daemon's climate state. Current/target temperature are read from the
-    state dict when present (key names may evolve daemon-side); the
-    setters drive the documented ``set_*`` operations.
+    daemon's climate state. Current/target temperature and humidity fall
+    back to the channel's generic data points (``ACTUAL_TEMPERATURE``,
+    ``SET_POINT_TEMPERATURE``, ``HUMIDITY``) when the daemon's CDP state
+    does not carry them — mirroring aiohomematic's field data points;
+    the setters drive the documented ``set_*`` operations.
     """
 
     _category: ClassVar[DataPointCategory] = DataPointCategory.Climate
+
+    def _generic_channel_value(self, parameter: str) -> Any:
+        """Return the CDP channel's generic DP value (``None`` when absent/unobserved)."""
+        dp = self._store.get_data_point(
+            address=self._device_address,
+            channel=self._summary.channel_no,
+            parameter=parameter,
+        )
+        return dp.value if dp is not None else None
 
     @property
     def hvac_mode(self) -> str:
@@ -579,20 +617,27 @@ class BaseCustomDpClimate(_CustomEntitySurface):
 
     @property
     def current_temperature(self) -> float | None:
-        """Return the measured temperature from ``current_temperature``, or ``None``."""
+        """Return the measured temperature (state key, else ``ACTUAL_TEMPERATURE`` DP)."""
         val = self._state.get("current_temperature")
-        return float(val) if isinstance(val, (int, float)) else None
+        if isinstance(val, (int, float)):
+            return float(val)
+        return _as_float(self._generic_channel_value("ACTUAL_TEMPERATURE"))
 
     @property
     def target_temperature(self) -> float | None:
-        """Return the target temperature from ``set_temperature``/``target_temperature``, or ``None``."""
+        """Return the target temperature (state key, else ``SET_POINT_TEMPERATURE`` DP)."""
         val = self._state.get("set_temperature", self._state.get("target_temperature"))
-        return float(val) if isinstance(val, (int, float)) else None
+        if isinstance(val, (int, float)):
+            return float(val)
+        return _as_float(self._generic_channel_value("SET_POINT_TEMPERATURE"))
 
     @property
     def current_humidity(self) -> int | None:
-        """Return the measured humidity from the ``current_humidity`` state key, or ``None``."""
-        return _as_int(self._state.get("current_humidity"))
+        """Return the measured humidity (state key, else ``HUMIDITY`` DP)."""
+        val = _as_int(self._state.get("current_humidity"))
+        if val is not None:
+            return val
+        return _as_int(self._generic_channel_value("HUMIDITY"))
 
     @property
     def temperature_offset(self) -> str | None:
@@ -671,9 +716,29 @@ class BaseCustomDpClimate(_CustomEntitySurface):
 
     @property
     def profiles(self) -> tuple[ClimateProfile, ...]:
-        """Return the available profiles (config ``preset_modes``) as enums."""
+        """
+        Return the available profiles (config ``preset_modes``) as enums.
+
+        aiohomematic always lists :attr:`ClimateProfile.NONE` (it is the
+        "no profile active" preset every thermostat supports), placed
+        after the control-mode block (boost/comfort/eco/away) and before
+        the week-program names. The daemon's list omits it, so it is
+        inserted here.
+        """
         raw = self._config_value("preset_modes") or self._state.get("available_profiles") or ()
-        return tuple(ClimateProfile(str(p)) for p in raw if str(p) in _CLIMATE_PROFILE_VALUES)
+        profiles = [ClimateProfile(str(p)) for p in raw if str(p) in _CLIMATE_PROFILE_VALUES]
+        if ClimateProfile.NONE not in profiles:
+            control_block = {
+                ClimateProfile.AWAY,
+                ClimateProfile.BOOST,
+                ClimateProfile.COMFORT,
+                ClimateProfile.ECO,
+            }
+            insert_at = 0
+            while insert_at < len(profiles) and profiles[insert_at] in control_block:
+                insert_at += 1
+            profiles.insert(insert_at, ClimateProfile.NONE)
+        return tuple(profiles)
 
     async def set_temperature(self, temperature: float) -> None:
         """Set the target temperature."""
@@ -724,6 +789,9 @@ class BaseCustomDpLock(_CustomEntitySurface):
     """Lock CDP."""
 
     _category: ClassVar[DataPointCategory] = DataPointCategory.Lock
+
+    # aiohomematic's lock classes never carry the ch/vch marker.
+    _ignore_multiple_channels_for_name: ClassVar[bool] = True
 
     @property
     def data_point_name_postfix(self) -> str:

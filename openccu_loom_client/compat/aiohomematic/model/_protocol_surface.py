@@ -31,6 +31,8 @@ from typing import Any
 
 from openccu_loom_types.enums import DataPointType, DataPointUsage, ParamsetKey
 
+from openccu_loom_client.compat.aiohomematic.model.naming import generic_translated_name
+
 
 class _NameData:
     """Minimal stand-in for aiohomematic's ``name_data`` value object."""
@@ -246,14 +248,34 @@ class _GenericProtocolSurface(_CommonProtocolSurface):
 
     @property
     def translated_name(self) -> str | None:
-        # The daemon resolves the locale-aware entity name (identical to
-        # the MQTT discovery `name`) and the "primary parameter" marker.
-        # label_omitted → None so HA collapses the entity to the device
-        # name alone, mirroring MQTT discovery's `name: null`.
+        """
+        Return the aiohomematic-schema display name.
+
+        Combines the (possibly user-renamed) CCU channel name, the
+        daemon's locale-resolved parameter label (``translated_name``,
+        suppressed when ``label_omitted`` marks the channel's primary
+        parameter) and the `` chN`` multi-channel postfix — the exact
+        composition of aiohomematic's ``get_data_point_name_data``.
+        ``None`` collapses the entity to the device name alone.
+        """
         summary = getattr(self, "summary", None)
-        if summary is None or getattr(summary, "label_omitted", False):
+        if summary is None:
             return None
-        return getattr(summary, "translated_name", None) or None
+        device = getattr(self, "device", None)
+        if device is None:
+            # No device in the store (e.g. partial fixtures): fall back to
+            # the daemon's plain label without channel-name composition.
+            if getattr(summary, "label_omitted", False):
+                return None
+            return getattr(summary, "translated_name", None) or None
+        return generic_translated_name(
+            store=self._store,  # type: ignore[attr-defined]
+            device=device,
+            channel_no=self.channel_number,  # type: ignore[attr-defined]
+            parameter=self.parameter,  # type: ignore[attr-defined]
+            translation=getattr(summary, "translated_name", None) or None,
+            label_omitted=bool(getattr(summary, "label_omitted", False)),
+        )
 
     @property
     def translated_full_name(self) -> str | None:

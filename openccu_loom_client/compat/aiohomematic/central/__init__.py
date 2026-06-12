@@ -68,6 +68,7 @@ class CentralConfig:
         client_session: Any | None = None,
         sysvar_markers: tuple[Any, ...] = (),
         program_markers: tuple[Any, ...] = (),
+        locale: str = "en",
         **_ignored: Any,
     ) -> None:
         """Capture the daemon-relevant config and resolve the auth method."""
@@ -76,6 +77,9 @@ class CentralConfig:
         self._port = port
         self._tls = tls
         self._verify_tls = verify_tls
+        # HA's UI language — drives the locale-aware schedule names the
+        # HA entities read off ``device.config_provider.config.locale``.
+        self._locale = locale
         # Optional CCU serial injected by the integration (HA's
         # ``entry.unique_id``). It fills the central-id slot of canonical
         # HA routing keys; when given it wins over the serial the daemon
@@ -126,6 +130,7 @@ class CentralConfig:
             serial=self._serial,
             sysvar_markers=self._sysvar_markers,
             program_markers=self._program_markers,
+            locale=self._locale,
         )
 
 
