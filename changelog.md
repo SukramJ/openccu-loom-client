@@ -1,3 +1,7 @@
+# Version 2026.6.14 (2026-06-13)
+
+- Fix: **per-channel schedule switches are named after their target channel** — e.g. "Schedule SHUTTER_VIRTUAL_RECEIVER" instead of the bare "Schedule", matching the direct-CCU twin. The daemon now ships the channel-lock key → actuator-channel mapping in the week-profile response (`available_target_channels`, api 1.7.0); `ScheduleChannelSwitch.name_data.channel_name` is sourced from it (was hard-coded `None` because the mapping was previously not on the wire). Falls back to the bare schedule name on daemons older than api 1.7.0. Requires openccu-loom-types ≥ 0.1.19. Surfaced by the three-way godevccu parity e2e harness.
+
 # Version 2026.6.13 (2026-06-13)
 
 - Fix: **calculated data-point names** now match the direct-CCU twin (e.g. "… Dew Point", "… Intrusion Alarm" rather than "… DEW_POINT", "… INTRUSION_ALARM"). The calc DPs already exposed the daemon's locale-aware label via `translated_name`, but their `name` still fell back to the generic surface's `parameter_label or parameter` (raw, since calc DPs carry no `parameter_label`). The HA integration builds the entity description's `name` (hence HA's resolved `super().name`) from `name_data.name`, then re-injects it into the composed entity name — so the raw parameter leaked back into an otherwise-correct name. `_CalculatedKeyMixin` now sources `name` from the daemon's `translated_name`, falling back to the raw parameter only when the daemon ships none. Surfaced by the three-way godevccu parity e2e harness.
