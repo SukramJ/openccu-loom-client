@@ -32,6 +32,22 @@ class _CalculatedKeyMixin:
     """unique_id override: the ``calculated`` prefix segregates the keys."""
 
     @property
+    def name(self) -> str:
+        """
+        Return the calc DP's display name from the daemon's label.
+
+        Generic DPs name themselves from the daemon's per-parameter label
+        (``parameter_label``); calculated DPs carry their full locale-aware
+        label in ``translated_name`` instead. Without this override the
+        generic fallback returns the raw parameter (e.g. ``DEW_POINT``),
+        which the HA integration then re-injects into the composed entity
+        name — so the calc entity would read ``… DEW_POINT`` where the
+        direct-CCU twin reads ``… Dew Point``.
+        """
+        translated = getattr(self.summary, "translated_name", None)  # type: ignore[attr-defined]
+        return translated or self.parameter  # type: ignore[attr-defined,no-any-return]
+
+    @property
     def unique_id(self) -> str:
         """Return ``loom_calculated_<address>_<channel>_<parameter>``."""
         return canonical_unique_id(
