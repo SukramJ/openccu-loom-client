@@ -192,6 +192,15 @@ class _CustomEntitySurface(_CustomProtocolSurface, CustomDataPoint):
         config = getattr(self._summary, "config", None) or {}
         return config.get(key)
 
+    def _generic_channel_value(self, parameter: str) -> Any:
+        """Return the CDP channel's generic DP value (``None`` when absent/unobserved)."""
+        dp = self._store.get_data_point(
+            address=self._device_address,
+            channel=self._summary.channel_no,
+            parameter=parameter,
+        )
+        return dp.value if dp is not None else None
+
     def _name_parts(self) -> tuple[str | None, str]:
         """Return the ``(translated_name, parameter_name)`` pair for this CDP."""
         device = self.device
@@ -262,13 +271,27 @@ class CustomDpSwitch(_CustomEntitySurface):
 
     @property
     def value(self) -> bool | None:
-        """Return the raw ``is_on`` state value, or ``None`` if unknown."""
-        return self._state.get("is_on")
+        """
+        Return the raw ``is_on`` state value, or ``None`` if unknown.
+
+        Falls back to the channel's generic ``STATE`` data point when the
+        CDP ``state`` dict carries no ``is_on`` — mirroring the climate
+        ``current_temperature`` field-DP fallback. The refresh bridge pings
+        the channel's CDP on every member ``value_changed`` (``on_value`` →
+        ``get_custom_data_point_by_channel``), so the HA entity re-renders on
+        a ch-STATE event and reads the freshly-observed STATE value even if a
+        ``custom_data_point.state_changed`` for the CDP is delayed or missing.
+        """
+        val = self._state.get("is_on")
+        if val is not None:
+            return bool(val)
+        generic = self._generic_channel_value("STATE")
+        return bool(generic) if generic is not None else None
 
     @property
     def is_on(self) -> bool:
-        """Return whether the switch is on, from the ``is_on`` state key."""
-        return bool(self._state.get("is_on"))
+        """Return whether the switch is on (``is_on`` state key, else generic ``STATE`` DP)."""
+        return bool(self.value)
 
     @property
     def group_value(self) -> Any:
@@ -589,15 +612,6 @@ class BaseCustomDpClimate(_CustomEntitySurface):
     """
 
     _category: ClassVar[DataPointCategory] = DataPointCategory.Climate
-
-    def _generic_channel_value(self, parameter: str) -> Any:
-        """Return the CDP channel's generic DP value (``None`` when absent/unobserved)."""
-        dp = self._store.get_data_point(
-            address=self._device_address,
-            channel=self._summary.channel_no,
-            parameter=parameter,
-        )
-        return dp.value if dp is not None else None
 
     @property
     def hvac_mode(self) -> str:

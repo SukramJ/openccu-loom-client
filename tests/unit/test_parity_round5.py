@@ -204,6 +204,78 @@ class TestClimateGenericFallback:
         assert cdp.current_humidity is None
 
 
+def _switch_cdp_summary(**overrides: Any) -> CustomDPSummary:
+    payload: dict[str, Any] = {
+        "name": "STATE@3",
+        "category": "switch",
+        "channel_no": 3,
+        "supported_operations": ["turn_on", "turn_off"],
+        "kind": "switch",
+    }
+    payload.update(overrides)
+    return CustomDPSummary.model_validate(payload)
+
+
+def _switch_store(*, state_observed: bool = True, state_value: bool = True) -> LoomStore:
+    """Channel-group switch device with a generic STATE DP on ch3."""
+    store = _store_with_device(
+        address="VCU9",
+        model="HMIP-PS",
+        name="Bücherregal",
+        channels=[_channel(address="VCU9", number=3, name="Bücherregal:3")],
+    )
+    store.attach_channel_data_points(
+        device_address="VCU9",
+        channel_number=3,
+        data_points=[
+            _dp_summary(
+                parameter="STATE",
+                type="BOOL",
+                value=state_value,
+                observed=state_observed,
+                operations={"read": True, "write": True, "event": True},
+                category="switch",
+            )
+        ],
+    )
+    store.attach_custom_data_points(device_address="VCU9", cdps=[_switch_cdp_summary()])
+    return store
+
+
+def _switch_cdp(store: LoomStore) -> Any:
+    cdp = store.get_custom_data_point(address="VCU9", name="STATE@3")
+    assert cdp is not None
+    return cdp
+
+
+class TestSwitchGenericFallback:
+    """A channel-group switch falls back to its generic STATE DP."""
+
+    def test_value_from_generic_state_dp(self) -> None:
+        # No CDP state delivered (the channel-group state_changed bug); the
+        # generic STATE DP on ch3 backs the value.
+        cdp = _switch_cdp(_switch_store(state_value=True))
+        assert cdp.value is True
+        assert cdp.is_on is True
+
+    def test_off_from_generic_state_dp(self) -> None:
+        cdp = _switch_cdp(_switch_store(state_value=False))
+        assert cdp.value is False
+        assert cdp.is_on is False
+
+    def test_cdp_state_key_wins_over_generic_dp(self) -> None:
+        store = _switch_store(state_value=False)
+        _switch_cdp(store)._replace_state({"is_on": True})
+        cdp = _switch_cdp(store)
+        assert cdp.value is True
+        assert cdp.is_on is True
+
+    def test_unobserved_generic_dp_reads_none(self) -> None:
+        cdp = _switch_cdp(_switch_store(state_observed=False))
+        assert cdp.value is None
+        assert cdp.is_on is False
+
+
 class TestRefreshBridgePingsChannelCdp:
     """A field-DP value change re-renders the channel's custom data point."""
 
