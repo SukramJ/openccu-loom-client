@@ -161,6 +161,20 @@ class WeekProfileDp(_ScheduleEntityBase):
         """Return whether the entry count has been loaded."""
         return self._value is not None
 
+    def target_channel_name(self, channel_key: str) -> str | None:
+        """
+        Return the display name of the actuator channel a lock key controls.
+
+        Sourced from the daemon's ``available_target_channels`` (api 1.7.0);
+        ``None`` on older daemons that do not ship the mapping.
+        """
+        # Field present since types 0.1.19; None when the daemon (api < 1.7.0)
+        # does not populate it, so the switch falls back to the bare schedule name.
+        targets = self._week_profile.available_target_channels
+        if targets and (info := targets.get(channel_key)) is not None:
+            return info.name
+        return None
+
     def update_from(self, *, schedule: Schedule) -> None:
         """Recompute the entry count from a fetched channel schedule."""
         self._schedule = schedule
@@ -318,14 +332,17 @@ class ScheduleChannelSwitch(_ScheduleEntityBase):
         """
         Return the name data the HA switch entity reads.
 
-        ``channel_name`` stays ``None``: the daemon's channel-key →
-        CCU-channel mapping is not on the wire, so the entity falls back
-        to the translated schedule name.
+        ``channel_name`` carries the actuator channel the lock key controls
+        (from the daemon's ``available_target_channels``, api 1.7.0), so the HA
+        switch composes ``<Schedule> <channel name>`` like the reference twin.
+        It stays ``None`` on older daemons, where the entity falls back to the
+        bare translated schedule name.
         """
         return _NameData(
             parameter_name=self.name,
             name=self.name,
             full_name=self.full_name,
+            channel_name=self._week_profile_dp.target_channel_name(self._channel_key),
         )
 
     # ---- value / actions ----

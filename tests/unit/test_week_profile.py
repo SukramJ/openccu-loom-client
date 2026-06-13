@@ -199,6 +199,46 @@ class TestScheduleChannelSwitch:
         assert switch.channel_key == "1_1"
         assert switch.is_valid is True
 
+    def test_name_data_carries_target_channel_name(self) -> None:
+        store, device = _store_with_device()
+        wp_dp = WeekProfileDp(
+            store=store,
+            device=device,
+            channel_no=1,
+            week_profile=WeekProfileResponse.model_validate(
+                {
+                    "address": f"{_ADDRESS}:1",
+                    "schedule_type": "default",
+                    "min_temp": 0,
+                    "max_temp": 0,
+                    "profile_count": 1,
+                    "has_climate_schedule": False,
+                    "schedule_enabled": {"1_1": True},
+                    "available_target_channels": {
+                        "1_1": {
+                            "channel_no": 4,
+                            "channel_address": f"{_ADDRESS}:4",
+                            "name": "SHUTTER_VIRTUAL_RECEIVER",
+                            "channel_type": "primary",
+                        },
+                    },
+                }
+            ),
+        )
+        switch = ScheduleChannelSwitch(
+            store=store,
+            device=device,
+            channel_no=1,
+            channel_key="1_1",
+            week_profile_dp=wp_dp,
+            schedules_ops=_FakeSchedulesOps(),  # type: ignore[arg-type]
+        )
+        # The HA switch composes "<Schedule> <channel_name>" from this.
+        assert switch.name_data.channel_name == "SHUTTER_VIRTUAL_RECEIVER"
+        assert wp_dp.target_channel_name("1_1") == "SHUTTER_VIRTUAL_RECEIVER"
+        # Unknown key (older daemon / no mapping) -> bare schedule name fallback.
+        assert wp_dp.target_channel_name("9_9") is None
+
     def test_enabled_default_is_false(self) -> None:
         switch, wp_dp, _ops = self._build()
         assert switch.enabled_default is False
