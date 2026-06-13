@@ -39,10 +39,12 @@ class _NameData:
 
     __slots__ = ("channel_name", "full_name", "name", "parameter_name")
 
-    def __init__(self, *, parameter_name: str, name: str, full_name: str) -> None:
+    def __init__(
+        self, *, parameter_name: str, name: str, full_name: str, channel_name: str | None = None
+    ) -> None:
         """Carry the few name fields HA reads off ``name_data``."""
         self.parameter_name = parameter_name
-        self.channel_name = None
+        self.channel_name = channel_name
         self.name = name
         self.full_name = full_name
 
