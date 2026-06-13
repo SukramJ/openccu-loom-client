@@ -1,3 +1,8 @@
+# Version 2026.6.12 (2026-06-13)
+
+- Fix: **switch state robustness** — `CustomDpSwitch.value` / `is_on` fall back to the CDP channel's generic `STATE` data point when the daemon's CDP `state` dict carries no `is_on`, mirroring the climate `current_temperature` field-DP fallback (`_generic_channel_value`, now shared on `_CustomEntitySurface`). The refresh bridge already pings the channel's custom data point on every member `datapoint.value_changed` (`on_value` → `get_custom_data_point_by_channel`), so the HA switch re-renders on a ch-`STATE` event and reads the freshly-observed wire value even if a `custom_data_point.state_changed` for the CDP is delayed or missing — the failure mode seen on channel-group switches (HMIP-PS/PSM, `STATE@3`/`@4`/`@5`) before the daemon-side wire-name fix. An unobserved `STATE` DP reads `None`.
+- Note: cover/lock/dimmer CDPs keep reading purely from the daemon `state` dict — their generic-DP → state-key mapping (LEVEL scaling, multi-DP composition) is not a risk-free 1:1 like the switch's `STATE` → bool, and the daemon now emits `custom_data_point.state_changed` for every CDP, so no client fallback is warranted there.
+
 # Version 2026.6.11 (2026-06-12)
 
 - Feat: **HA sub-device support** — the domain model exposes the channel-group surface the HA integration's `sub_devices_enabled` option consumes: `Channel.group_no` / `is_group_master` / `is_in_multi_group` / `room` (daemon api 1.6.0 fields), `Channel.group_master` (aiohomematic-shaped view: `name` with `ChannelNameData` strip semantics, `room`, `group_no`) and a real `Device.has_sub_devices` (≥ 2 multi-member channel groups, aiohomematic counting). Daemons older than api 1.6.0 degrade gracefully (no groups → no split).
