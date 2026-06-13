@@ -1004,6 +1004,53 @@ class TestCalculatedTranslatedName:
         )
         assert synthesize_summary(calc).translated_name == "Taupunkt"
 
+    def test_calculated_name_uses_translated_label(self) -> None:
+        """
+        The calc DP's ``name`` is the daemon label, not the raw parameter.
+
+        The HA integration builds the entity description name from
+        ``name_data.name``; without this the generic fallback returns the raw
+        parameter ("DEW_POINT") and the composed entity name reads "… DEW_POINT".
+        """
+        from openccu_loom_types.rest import CalculatedDPSummary
+
+        from openccu_loom_client.compat.aiohomematic.model.calculated import (
+            make_calculated_data_point,
+        )
+        from openccu_loom_client.store import LoomStore
+
+        calc = CalculatedDPSummary.model_validate(
+            {
+                "name": "DEW_POINT",
+                "category": "sensor",
+                "value": 12.5,
+                "observed": True,
+                "translated_name": "HEATING_CLIMATECONTROL_TRANSCEIVER Dew Point",
+            }
+        )
+        dp = make_calculated_data_point(
+            summary=calc, device_address="VCU0000001", channel_number=1, store=LoomStore()
+        )
+        assert dp.name == "HEATING_CLIMATECONTROL_TRANSCEIVER Dew Point"
+        assert dp.name_data.name == "HEATING_CLIMATECONTROL_TRANSCEIVER Dew Point"
+
+    def test_calculated_name_falls_back_to_parameter(self) -> None:
+        """Without a daemon label, the calc DP name falls back to the parameter."""
+        from openccu_loom_types.rest import CalculatedDPSummary
+
+        from openccu_loom_client.compat.aiohomematic.model.calculated import (
+            make_calculated_data_point,
+        )
+        from openccu_loom_client.store import LoomStore
+
+        calc = CalculatedDPSummary.model_validate(
+            {"name": "ENTHALPY", "category": "sensor", "value": 1.0, "observed": True}
+        )
+        dp = make_calculated_data_point(
+            summary=calc, device_address="VCU0000001", channel_number=1, store=LoomStore()
+        )
+        assert dp.name == "ENTHALPY"
+
     def test_combined_summary_carries_translated_name(self) -> None:
         from types import SimpleNamespace
 
