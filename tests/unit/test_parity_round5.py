@@ -555,6 +555,44 @@ class TestScheduleDiscovery:
         assert profiles[0].unique_id == "loom_week_profile_vcu1_week_profile"
         assert switches == []
 
+    async def test_climate_device_with_week_profile_channel_spawns_switches(self) -> None:
+        # HmIP-WGTC carries a climate CDP yet exposes its schedule on a
+        # dedicated WEEK_PROFILE channel — the switches follow the channel,
+        # not the mere presence of a climate CDP.
+        store = _store_with_device(
+            address="VCU1",
+            model="HmIP-WGTC",
+            name="Gefahrenmelder",
+            channels=[
+                _channel(address="VCU1", number=1, name="Gefahrenmelder:1"),
+                _channel(
+                    address="VCU1",
+                    number=7,
+                    name="Gefahrenmelder Wochenprogramm",
+                    channel_type="SWITCH_WEEK_PROFILE",
+                ),
+            ],
+        )
+        store.attach_custom_data_points(
+            device_address="VCU1",
+            cdps=[_cdp_summary(name="SET_POINT_TEMPERATURE@1", category="climate", channel_no=1)],
+        )
+        schedules = _FakeSchedulesOps(
+            week_profiles={
+                ("VCU1", 7): _week_profile_response(
+                    address="VCU1", channel=7, schedule_enabled={"1_1": True, "1_2": False}
+                )
+            }
+        )
+        adapter = _adapter_for(store, schedules=schedules)
+        await adapter._bootstrap_schedules()
+        profiles = [dp for dp in adapter._extra_data_points if isinstance(dp, WeekProfileDp)]
+        switches = [
+            dp for dp in adapter._extra_data_points if isinstance(dp, ScheduleChannelSwitch)
+        ]
+        assert len(profiles) == 1
+        assert {sw.channel_key for sw in switches} == {"1_1", "1_2"}
+
     async def test_device_without_cdp_spawns_nothing(self) -> None:
         # aiohomematic only initialises week profiles through a custom DP
         # (HmIP-MIO16-PCB: 24 surplus switches + 1 surplus sensor on loom).
