@@ -1,3 +1,7 @@
+# Version 2026.6.15 (2026-06-14)
+
+- Fix: **per-channel schedule switches follow the WEEK_PROFILE channel, not the absence of a climate CDP**. A device may carry a climate CDP and still expose its schedule on a dedicated `*_WEEK_PROFILE` channel (HmIP-WGTC): such a schedule is a plain (non-climate) week profile and must spawn its `ScheduleChannelSwitch`es. `_bootstrap_schedules` now gates the switches on the presence of a WEEK_PROFILE channel (`with_switches=week_profile_channel_no is not None`) rather than `climate_cdp is None`; the schedule channel still falls back to the climate CDP's own channel when no WEEK_PROFILE channel exists (climate path, no switches — unchanged). Pairs with the daemon-side normalize pass that detaches the climate week profile from `WEEK_PROGRAM_CHANNEL_LOCKS` devices so the switch-bearing schedule is built. Surfaced by the three-way godevccu parity e2e harness.
+
 # Version 2026.6.14 (2026-06-13)
 
 - Fix: **per-channel schedule switches are named after their target channel** — e.g. "Schedule SHUTTER_VIRTUAL_RECEIVER" instead of the bare "Schedule", matching the direct-CCU twin. The daemon now ships the channel-lock key → actuator-channel mapping in the week-profile response (`available_target_channels`, api 1.7.0); `ScheduleChannelSwitch.name_data.channel_name` is sourced from it (was hard-coded `None` because the mapping was previously not on the wire). Falls back to the bare schedule name on daemons older than api 1.7.0. Requires openccu-loom-types ≥ 0.1.19. Surfaced by the three-way godevccu parity e2e harness.
