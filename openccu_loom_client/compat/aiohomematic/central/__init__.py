@@ -167,9 +167,59 @@ async def check_config(
     return failures
 
 
+async def list_ccus(
+    *,
+    host: str,
+    token: str | None = None,
+    port: int | None = None,
+    tls: bool = False,
+    verify_tls: bool = True,
+    base_path: str | None = None,
+    client_session: Any = None,
+) -> list[dict[str, Any]]:
+    """
+    Return the daemon's CCUs for the HA config flow's CCU-selection step.
+
+    Connects to the daemon (raising ``LoomAuthError`` / ``LoomTransportError``
+    on bad token / unreachable host), reads ``GET /system/ccu`` and returns a
+    plain-dict projection (``name``, ``serial``, ``host``, ``model``,
+    ``available``) so the caller stays decoupled from the wire types.
+    """
+    config_kwargs: dict[str, Any] = {
+        "host": host,
+        "port": port,
+        "tls": tls,
+        "verify_tls": verify_tls,
+        # A blank token yields an empty bearer; the daemon then rejects with
+        # LoomAuthError, which the config flow maps to invalid_auth.
+        "auth": BearerAuth(token=token or ""),
+    }
+    if base_path is not None:
+        config_kwargs["base_path"] = base_path
+    config = LoomConfig(**config_kwargs)
+    transport = HttpTransport(config, session=client_session)
+    client = LoomClient(config, http_transport=transport)
+    try:
+        await client.connect()
+        ccus = await client.system.list_system_ccus()
+    finally:
+        await client.close()
+    return [
+        {
+            "name": ccu.name,
+            "serial": ccu.serial,
+            "host": ccu.host,
+            "model": ccu.model,
+            "available": ccu.available,
+        }
+        for ccu in ccus
+    ]
+
+
 __all__: Final = [
     "CentralConfig",
     "CentralUnit",
     "LoomCentralAdapter",
     "check_config",
+    "list_ccus",
 ]
