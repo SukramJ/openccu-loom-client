@@ -1,3 +1,7 @@
+# Version 2026.6.16 (2026-06-14)
+
+- Feat: **`list_ccus` config-flow helper** — `compat.aiohomematic.central.list_ccus(host, token, port, tls, …)` connects to a daemon, reads `GET /system/ccu` and returns a plain-dict projection (`name`, `serial`, `host`, `model`, `available`). The Home Assistant config flow uses it for mDNS-discovered daemon setup: after the user supplies the bearer token, it lists the daemon's CCUs so the user picks one (name/serial) instead of typing an instance name. Raises `LoomAuthError`/`LoomTransportError` on bad token / unreachable host (mapped to invalid_auth/cannot_connect by the flow); always closes the client.
+
 # Version 2026.6.15 (2026-06-14)
 
 - Fix: **per-channel schedule switches follow the WEEK_PROFILE channel, not the absence of a climate CDP**. A device may carry a climate CDP and still expose its schedule on a dedicated `*_WEEK_PROFILE` channel (HmIP-WGTC): such a schedule is a plain (non-climate) week profile and must spawn its `ScheduleChannelSwitch`es. `_bootstrap_schedules` now gates the switches on the presence of a WEEK_PROFILE channel (`with_switches=week_profile_channel_no is not None`) rather than `climate_cdp is None`; the schedule channel still falls back to the climate CDP's own channel when no WEEK_PROFILE channel exists (climate path, no switches — unchanged). Pairs with the daemon-side normalize pass that detaches the climate week profile from `WEEK_PROGRAM_CHANNEL_LOCKS` devices so the switch-bearing schedule is built. Surfaced by the three-way godevccu parity e2e harness.

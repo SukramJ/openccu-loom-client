@@ -85,7 +85,7 @@ _HOMEMATICIP_LOCAL_IMPORTS: list[tuple[str, list[str]]] = [
     ),
     (
         "openccu_loom_client.compat.aiohomematic.central",
-        ["CentralConfig", "CentralUnit", "check_config"],
+        ["CentralConfig", "CentralUnit", "check_config", "list_ccus"],
     ),
     (
         "openccu_loom_client.compat.aiohomematic.central.events",
@@ -308,6 +308,62 @@ class TestCheckConfig:
 
         failures = await check_config(central_name="test", host="loom.local")
         assert failures == []
+
+
+class TestListCcus:
+    async def test_projects_entries_and_closes(self) -> None:
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from openccu_loom_client.compat.aiohomematic.central import list_ccus
+
+        client = MagicMock()
+        client.connect = AsyncMock()
+        client.close = AsyncMock()
+        client.system.list_system_ccus = AsyncMock(
+            return_value=[
+                SimpleNamespace(
+                    name="Home", serial="ABC123", host="ccu.local", model="CCU3", available=True
+                ),
+            ]
+        )
+        with (
+            patch("openccu_loom_client.compat.aiohomematic.central.HttpTransport"),
+            patch(
+                "openccu_loom_client.compat.aiohomematic.central.LoomClient", return_value=client
+            ),
+        ):
+            result = await list_ccus(host="daemon.local", token="tok", port=8080, tls=False)
+
+        assert result == [
+            {
+                "name": "Home",
+                "serial": "ABC123",
+                "host": "ccu.local",
+                "model": "CCU3",
+                "available": True,
+            }
+        ]
+        client.connect.assert_awaited_once()
+        client.close.assert_awaited_once()
+
+    async def test_closes_on_connect_error(self) -> None:
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from openccu_loom_client.compat.aiohomematic.central import list_ccus
+
+        client = MagicMock()
+        client.connect = AsyncMock(side_effect=RuntimeError("boom"))
+        client.close = AsyncMock()
+        with (
+            patch("openccu_loom_client.compat.aiohomematic.central.HttpTransport"),
+            patch(
+                "openccu_loom_client.compat.aiohomematic.central.LoomClient", return_value=client
+            ),
+            pytest.raises(RuntimeError),
+        ):
+            await list_ccus(host="daemon.local", token="tok")
+        client.close.assert_awaited_once()
 
 
 class TestCallParameterCollector:
