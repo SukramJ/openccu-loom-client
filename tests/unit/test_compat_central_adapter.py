@@ -398,6 +398,47 @@ class TestInternalSysvarInclusion:
         assert names == ["Temperatur Garten", "svEnergyCounter_14179"]
         assert all(dp.enabled_default is False for dp in sensors)
 
+    async def test_enabled_default_flows_from_daemon(self) -> None:
+        # The daemon (api >= 1.9.0) resolves the marker-driven
+        # enabled-by-default flag; the client reads it off the wire.
+        from openccu_loom_client.compat.aiohomematic.model.hub import SysvarDpSensor
+
+        central = await _make_config().create_central()
+        central._client.store.load_snapshot(
+            Snapshot.model_validate(
+                {
+                    "generated_at": "2026-05-24T08:00:00Z",
+                    "devices": [],
+                    "programs": [],
+                    "sysvars": [
+                        {
+                            "name": "Marked",
+                            "value_type": "FLOAT",
+                            "value": 1.0,
+                            "observed": True,
+                            "enabled_default": True,
+                        },
+                        {
+                            "name": "Unmarked",
+                            "value_type": "FLOAT",
+                            "value": 2.0,
+                            "observed": True,
+                            "enabled_default": False,
+                        },
+                    ],
+                }
+            )
+        )
+        central._client.store.set_serial("3014F711A0001234")
+        sensors = {
+            dp.name: dp
+            for dp in central.hub_coordinator.get_hub_data_points(
+                category=SysvarDpSensor.default_category()
+            )
+        }
+        assert sensors["Marked"].enabled_default is True
+        assert sensors["Unmarked"].enabled_default is False
+
     async def test_oldval_and_fixed_ids_excluded(self) -> None:
         from openccu_loom_client.compat.aiohomematic.model.hub import SysvarDpSensor
 

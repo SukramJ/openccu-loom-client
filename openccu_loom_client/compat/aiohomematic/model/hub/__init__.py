@@ -182,41 +182,6 @@ class HmUpdate:
     """
 
 
-def resolve_hub_inclusion(
-    *,
-    name: str,
-    description: str | None,
-    is_internal: bool,
-    markers: tuple[str, ...],
-    include_internal_default: bool,
-) -> tuple[bool, bool]:
-    """
-    Resolve ``(include, enabled_default)`` for a sysvar/program.
-
-    Mirrors aiohomematic's ``_resolve_sysvar_enabled_default``: internal
-    entries need the ``INTERNAL`` marker (or the type's
-    include-internal default); non-internal entries with configured
-    markers are included (and enabled) only when the description starts
-    with one of them; without markers everything non-excluded is
-    included but disabled by default.
-    """
-    del name
-    enabled_default = False
-    if is_internal:
-        if markers:
-            if "INTERNAL" not in markers:
-                return False, enabled_default
-            enabled_default = True
-        elif not include_internal_default:
-            return False, enabled_default
-    elif markers:
-        desc = description or ""
-        if not any(desc.startswith(str(marker)) for marker in markers):
-            return False, enabled_default
-        enabled_default = True
-    return True, enabled_default
-
-
 # ---- factories ----
 
 # CCU SysvarType → class, mirroring aiohomematic's non-extended default
@@ -306,7 +271,6 @@ __all__ = [
     "make_program_data_points",
     "make_sysvar_data_point",
     "program_unique_id",
-    "resolve_hub_inclusion",
     "resolve_sysvar_class",
     "sysvar_unique_id",
 ]

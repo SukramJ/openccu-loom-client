@@ -1,3 +1,7 @@
+# Version 2026.6.17 (2026-06-14)
+
+- Feat: **stop client-side sysvar/program marker filtering — read `enabled_default` from the daemon**. The daemon (api ≥ 1.9.0) now applies the marker + internal inclusion filter and resolves the enabled-by-default flag itself, and strips the markers from the description before sending. The client therefore renders every sysvar/program the daemon sends (minus its own hard exclusions — `${…}`, `OldVal`/`pcCCUID`, fixed IDs 40/41) and reads `enabled_default` off `SysvarSummary`/`ProgramSummary` (absent → disabled, for older daemons). Removed `resolve_hub_inclusion` and the `sysvar_markers`/`program_markers` parameters from `CentralConfig` / `LoomCentralAdapter` / `_HubCoordinator` (any markers the integration still passes are absorbed and ignored), plus the now-unused `_HubCoordinator._is_internal`. Requires `openccu-loom-types==0.1.20`.
+
 # Version 2026.6.16 (2026-06-14)
 
 - Feat: **`list_ccus` config-flow helper** — `compat.aiohomematic.central.list_ccus(host, token, port, tls, …)` connects to a daemon, reads `GET /system/ccu` and returns a plain-dict projection (`name`, `serial`, `host`, `model`, `available`). The Home Assistant config flow uses it for mDNS-discovered daemon setup: after the user supplies the bearer token, it lists the daemon's CCUs so the user picks one (name/serial) instead of typing an instance name. Raises `LoomAuthError`/`LoomTransportError` on bad token / unreachable host (mapped to invalid_auth/cannot_connect by the flow); always closes the client.
