@@ -1313,7 +1313,7 @@ class LoomCentralAdapter:
             climate_cdp = next(
                 (cdp for cdp in cdps if (cdp.summary.category or "") == "climate"), None
             )
-            schedule_channel_no = next(
+            week_profile_channel_no = next(
                 (
                     channel.number
                     for channel in store.channels_of(address=device.address)
@@ -1321,14 +1321,24 @@ class LoomCentralAdapter:
                 ),
                 None,
             )
+            # The schedule lives on the WEEK_PROFILE channel when one exists,
+            # otherwise on the climate CDP's own channel (probed directly).
+            schedule_channel_no = week_profile_channel_no
             if schedule_channel_no is None:
                 if climate_cdp is None:
                     continue
                 schedule_channel_no = climate_cdp.summary.channel_no
+            # Per-channel schedule switches are bound only to a non-climate
+            # (DefaultWeekProfile) schedule — i.e. one that lives on a
+            # WEEK_PROFILE channel, mirroring the reference, which gates the
+            # switches on the week profile NOT being a ClimateWeekProfile.
+            # A device may carry a climate CDP and still expose its schedule on
+            # a WEEK_PROFILE channel (HmIP-WGTC): the switches follow the
+            # channel, not the mere presence of a climate CDP.
             await self._spawn_schedule_data_points(
                 device=device,
                 channel_no=schedule_channel_no,
-                with_switches=climate_cdp is None,
+                with_switches=week_profile_channel_no is not None,
             )
 
     async def _spawn_schedule_data_points(
