@@ -66,8 +66,6 @@ class CentralConfig:
         verify_tls: bool = True,
         serial: str | None = None,
         client_session: Any | None = None,
-        sysvar_markers: tuple[Any, ...] = (),
-        program_markers: tuple[Any, ...] = (),
         locale: str = "en",
         **_ignored: Any,
     ) -> None:
@@ -88,10 +86,9 @@ class CentralConfig:
         # serial when omitted.
         self._serial = serial
         self._client_session = client_session
-        # Description markers gate which CCU sysvars / programs spawn HA
-        # entities (and enabled-by-default), mirroring aiohomematic.
-        self._sysvar_markers = tuple(str(m) for m in sysvar_markers)
-        self._program_markers = tuple(str(m) for m in program_markers)
+        # Sysvar/program visibility (marker filter + enabled-by-default) is
+        # resolved daemon-side (api ≥ 1.9.0); any markers the integration
+        # still passes are absorbed by **_ignored and intentionally unused.
         self._auth = self._resolve_auth(
             auth=auth, token=token, username=username, password=password
         )
@@ -128,8 +125,6 @@ class CentralConfig:
             client=client,
             name=self._name,
             serial=self._serial,
-            sysvar_markers=self._sysvar_markers,
-            program_markers=self._program_markers,
             locale=self._locale,
         )
 

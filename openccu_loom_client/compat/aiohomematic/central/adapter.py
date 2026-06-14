@@ -75,7 +75,6 @@ from openccu_loom_client.compat.aiohomematic.model.generic import make_generic_d
 from openccu_loom_client.compat.aiohomematic.model.hub import (
     make_program_data_points,
     make_sysvar_data_point,
-    resolve_hub_inclusion,
 )
 from openccu_loom_client.compat.aiohomematic.model.hub.singletons import (
     INSTALL_MODE_TOKEN_BY_INTERFACE,
@@ -216,13 +215,9 @@ class _HubCoordinator:
         client: LoomClient,
         *,
         ha_bus: AioEventBus,
-        sysvar_markers: tuple[str, ...] = (),
-        program_markers: tuple[str, ...] = (),
     ) -> None:
         self._client = client
         self._ha_bus = ha_bus
-        self._sysvar_markers = sysvar_markers
-        self._program_markers = program_markers
         # Cache hub data points by unique_id so register()/unregister()
         # bookkeeping survives repeated get_hub_data_points() scans.
         self._cache: dict[str, Any] = {}
@@ -277,20 +272,6 @@ class _HubCoordinator:
         return self._matches_central(getattr(summary, "central", None))
 
     @staticmethod
-    def _is_internal(summary: Any) -> bool:
-        """
-        Return whether a sysvar is CCU-internal.
-
-        Prefers the wire flag (``is_internal`` from SysVar.getAll);
-        falls back to the ``${…}`` name heuristic for daemons that do
-        not ship it yet. aiohomematic surfaces internals through
-        dedicated hub singletons, never as generic sysvar entities.
-        """
-        if getattr(summary, "is_internal", None):
-            return True
-        return str(getattr(summary, "name", "")).startswith("${")
-
-    @staticmethod
     def _is_excluded_sysvar(summary: Any) -> bool:
         """
         Return whether a sysvar never spawns a generic entity.
@@ -316,39 +297,23 @@ class _HubCoordinator:
                 continue
             if self._is_excluded_sysvar(sysvar.summary):
                 continue
-            include, enabled = resolve_hub_inclusion(
-                name=sysvar.summary.name,
-                description=getattr(sysvar.summary, "description", None),
-                is_internal=self._is_internal(sysvar.summary),
-                markers=self._sysvar_markers,
-                # aiohomematic includes internal sysvars by default
-                # (DEFAULT_INCLUDE_INTERNAL_SYSVARS=True): CCU bookkeeping
-                # variables (svEnergyCounter_…, CCU-Reboot, …) spawn
-                # disabled-by-default, exactly like the ccu twin.
-                include_internal_default=True,
-            )
-            if not include:
-                continue
+            # The daemon already applied the marker + internal inclusion
+            # filter and resolved enabled-by-default (api ≥ 1.9.0); render
+            # every sysvar it sent and read the flag from the wire (absent →
+            # disabled by default on older daemons).
             sv_dp: Any = make_sysvar_data_point(
-                summary=sysvar.summary, store=self._client.store, enabled_default=enabled
+                summary=sysvar.summary,
+                store=self._client.store,
+                enabled_default=bool(getattr(sysvar.summary, "enabled_default", False)),
             )
             live[sv_dp.unique_id] = sv_dp
         for program in self._client.store.programs:
             if not self._is_local(program.summary):
                 continue
-            include, enabled = resolve_hub_inclusion(
-                name=program.summary.name,
-                description=getattr(program.summary, "description", None),
-                is_internal=bool(getattr(program.summary, "is_internal", False)),
-                markers=self._program_markers,
-                # DEFAULT_INCLUDE_INTERNAL_PROGRAMS is False — CCU-internal
-                # helper programs (prgEnergyCounter-…) never spawn.
-                include_internal_default=False,
-            )
-            if not include:
-                continue
             for pr_dp in make_program_data_points(
-                summary=program.summary, store=self._client.store, enabled_default=enabled
+                summary=program.summary,
+                store=self._client.store,
+                enabled_default=bool(getattr(program.summary, "enabled_default", False)),
             ):
                 # Button and switch share the canonical key; HA scopes
                 # unique_ids per platform, the cache needs both.
@@ -1028,8 +993,6 @@ class LoomCentralAdapter:
         client: LoomClient,
         name: str,
         serial: str | None = None,
-        sysvar_markers: tuple[str, ...] = (),
-        program_markers: tuple[str, ...] = (),
         locale: str = "en",
     ) -> None:
         """Wire the coordinator surface and data-point factories onto ``client``."""
@@ -1074,8 +1037,6 @@ class LoomCentralAdapter:
         self.hub_coordinator: Final = _HubCoordinator(
             client,
             ha_bus=self._ha_bus,
-            sysvar_markers=sysvar_markers,
-            program_markers=program_markers,
         )
         self.query_facade: Final = _QueryFacade(client, extra_data_points=self._extra_data_points)
         self.client_coordinator: Final = _ClientCoordinator(client)

@@ -16,7 +16,7 @@ from typing import Any
 
 from openccu_loom_types.rest import CustomDPSummary, DataPointSummary, SysvarSummary
 
-from openccu_loom_client.compat.aiohomematic.central.adapter import _HubCoordinator, _is_creatable
+from openccu_loom_client.compat.aiohomematic.central.adapter import _is_creatable
 from openccu_loom_client.compat.aiohomematic.model.custom import (
     BaseCustomDpLock,
     BaseCustomDpSiren,
@@ -590,19 +590,6 @@ def _sysvar_summary(**overrides: Any) -> SysvarSummary:
     }
     payload.update(overrides)
     return SysvarSummary.model_validate(payload)
-
-
-class TestSysvarInternalFlag:
-    """is_internal rides the wire flag, name heuristic is the fallback."""
-
-    def test_wire_flag_wins(self) -> None:
-        assert _HubCoordinator._is_internal(_sysvar_summary(is_internal=True)) is True
-
-    def test_name_heuristic_fallback(self) -> None:
-        assert _HubCoordinator._is_internal(_sysvar_summary(name="${sysVarAlarmMessages}")) is True
-
-    def test_plain_user_variable_is_not_internal(self) -> None:
-        assert _HubCoordinator._is_internal(_sysvar_summary(is_internal=False)) is False
 
 
 class TestSysvarExtendedClasses:
