@@ -15,9 +15,7 @@ from openccu_loom_client.store import LoomStore
 
 
 def _program_summary(*, program_id: str = "p1") -> ProgramSummary:
-    return ProgramSummary.model_validate(
-        {"id": program_id, "name": "All off", "description": "", "active": True}
-    )
+    return ProgramSummary.model_validate({"id": program_id, "name": "All off", "description": "", "active": True})
 
 
 def _sysvar_summary(*, name: str = "temp", value: Any = 21.5) -> SysvarSummary:
@@ -70,7 +68,7 @@ class TestSnapshotLoad:
     def test_programs_and_sysvars_land_from_snapshot(self) -> None:
         store = LoomStore()
         store.load_snapshot(
-            _snapshot(
+            snapshot=_snapshot(
                 programs=[_program_summary(program_id="p1"), _program_summary(program_id="p2")],
                 sysvars=[_sysvar_summary(name="a"), _sysvar_summary(name="b")],
             )
@@ -80,14 +78,12 @@ class TestSnapshotLoad:
 
     def test_reload_updates_in_place(self) -> None:
         store = LoomStore()
-        store.load_snapshot(_snapshot(programs=[_program_summary()]))
+        store.load_snapshot(snapshot=_snapshot(programs=[_program_summary()]))
         original = store.get_program(program_id="p1")
         assert original is not None
         store.load_snapshot(
-            _snapshot(
-                programs=[
-                    ProgramSummary.model_validate({"id": "p1", "name": "Renamed", "active": False})
-                ]
+            snapshot=_snapshot(
+                programs=[ProgramSummary.model_validate({"id": "p1", "name": "Renamed", "active": False})]
             )
         )
         same = store.get_program(program_id="p1")
@@ -99,13 +95,13 @@ class TestSnapshotLoad:
 class TestSysvarValueUpdate:
     def test_apply_sysvar_changed_updates_value(self) -> None:
         store = LoomStore()
-        store.load_snapshot(_snapshot(sysvars=[_sysvar_summary(name="temp", value=21.5)]))
+        store.load_snapshot(snapshot=_snapshot(sysvars=[_sysvar_summary(name="temp", value=21.5)]))
         sysvar = store.get_sysvar(name="temp")
         assert sysvar is not None
         assert sysvar.value == 21.5
 
         store.apply_sysvar_changed(
-            SysvarChangedPayload.model_validate(
+            payload=SysvarChangedPayload.model_validate(
                 {
                     "central": "home",
                     "name": "temp",
@@ -120,7 +116,7 @@ class TestSysvarValueUpdate:
     def test_apply_sysvar_changed_for_unknown_sysvar_is_noop(self) -> None:
         store = LoomStore()
         store.apply_sysvar_changed(
-            SysvarChangedPayload.model_validate(
+            payload=SysvarChangedPayload.model_validate(
                 {
                     "central": "home",
                     "name": "GHOST",
@@ -136,27 +132,27 @@ class TestSysvarSetValue:
     async def test_set_value_round_trips(self) -> None:
         transport = _FakeTransport()
         store = LoomStore(transport=transport)  # type: ignore[arg-type]
-        store.load_snapshot(_snapshot(sysvars=[_sysvar_summary(name="temp")]))
+        store.load_snapshot(snapshot=_snapshot(sysvars=[_sysvar_summary(name="temp")]))
         sysvar = store.get_sysvar(name="temp")
         assert sysvar is not None
-        await sysvar.set_value(22.0)
+        await sysvar.set_value(value=22.0)
         assert transport.calls[0] == ("PUT", "/sysvars/temp", {"value": 22.0})
 
     async def test_set_value_without_transport_raises(self) -> None:
         store = LoomStore()
-        store.load_snapshot(_snapshot(sysvars=[_sysvar_summary()]))
+        store.load_snapshot(snapshot=_snapshot(sysvars=[_sysvar_summary()]))
         sysvar = store.get_sysvar(name="temp")
         assert sysvar is not None
         store._transport = None  # type: ignore[attr-defined]
         with pytest.raises(RuntimeError):
-            await sysvar.set_value(22.0)
+            await sysvar.set_value(value=22.0)
 
 
 class TestProgramExecute:
     async def test_execute_round_trips(self) -> None:
         transport = _FakeTransport()
         store = LoomStore(transport=transport)  # type: ignore[arg-type]
-        store.load_snapshot(_snapshot(programs=[_program_summary(program_id="p1")]))
+        store.load_snapshot(snapshot=_snapshot(programs=[_program_summary(program_id="p1")]))
         program = store.get_program(program_id="p1")
         assert program is not None
         await program.execute()
@@ -172,7 +168,7 @@ class TestProgramExecutedEvent:
         """
         store = LoomStore()
         store.apply_program_executed(
-            ProgramExecutedPayload.model_validate(
+            payload=ProgramExecutedPayload.model_validate(
                 {
                     "central": "home",
                     "program_id": "p1",

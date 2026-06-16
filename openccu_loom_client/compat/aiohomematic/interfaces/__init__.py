@@ -107,6 +107,7 @@ class ScheduleChannelSwitchProtocol(Protocol):
 
 
 __all__ = [
+    # General
     "ChannelEventGroupProtocol",
     "ClimateWeekProfileDataPointProtocol",
     "CombinedDataPointProtocol",

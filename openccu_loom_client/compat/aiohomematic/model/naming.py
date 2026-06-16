@@ -39,7 +39,7 @@ if TYPE_CHECKING:
 _ADDRESS_SEPARATOR: Final = ":"
 
 
-def has_channel_no_suffix(name: str) -> bool:
+def has_channel_no_suffix(*, name: str) -> bool:
     """Return whether a channel name ends in ``:<int>`` (aiohomematic check)."""
     if name.count(_ADDRESS_SEPARATOR) == 1:
         try:
@@ -84,7 +84,7 @@ def channel_display_name(*, store: LoomStore, device: Device, channel_no: int) -
     minus the device-name prefix.
     """
     base = channel_base_name(store=store, device=device, channel_no=channel_no)
-    if has_channel_no_suffix(base):
+    if has_channel_no_suffix(name=base):
         return "" if channel_no == 0 else f"ch{channel_no}"
     name = base
     if device.name and name.startswith(device.name):
@@ -117,13 +117,11 @@ def generic_translated_name(
     (never on channel 0).
     """
     c_postfix = ""
-    if channel_no != 0 and store.is_parameter_in_multiple_channels(
-        address=device.address, parameter=parameter
-    ):
+    if channel_no != 0 and store.is_parameter_in_multiple_channels(address=device.address, parameter=parameter):
         c_postfix = f" ch{channel_no}"
     if label_omitted:
         base = channel_base_name(store=store, device=device, channel_no=channel_no)
-        c_name = base.split(_ADDRESS_SEPARATOR)[0] if has_channel_no_suffix(base) else base
+        c_name = base.split(_ADDRESS_SEPARATOR)[0] if has_channel_no_suffix(name=base) else base
         name = f"{c_name}{c_postfix}".strip()
         return strip_device_prefix(name=name, device_name=device.name)
     if translation:
@@ -131,9 +129,7 @@ def generic_translated_name(
         # never double it ("Eingangsspannung ch10" stays as-is).
         if c_postfix and translation.endswith(c_postfix.strip()):
             c_postfix = ""
-        return strip_device_prefix(
-            name=f"{translation}{c_postfix}".strip(), device_name=device.name
-        )
+        return strip_device_prefix(name=f"{translation}{c_postfix}".strip(), device_name=device.name)
     # No daemon translation: suppress the name instead of fabricating an
     # English parameter title in a localised deployment.
     return None
@@ -193,7 +189,7 @@ def custom_name_parts(
     base = channel_base_name(store=store, device=device, channel_no=channel_no)
     device_name = device.name
     postfix_title = postfix.replace("_", " ").title() if postfix else ""
-    if not has_channel_no_suffix(base):
+    if not has_channel_no_suffix(name=base):
         return strip_device_prefix(name=base, device_name=device_name), postfix_title
     c_name, no_token = base.split(_ADDRESS_SEPARATOR)
     fallback_channels = [

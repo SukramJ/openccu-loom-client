@@ -56,9 +56,7 @@ def _make_app(script: FakeDaemonScript, received_frames: list[dict]) -> web.Appl
 
 
 @pytest.fixture
-async def fake_daemon() -> AsyncIterator[
-    Callable[[FakeDaemonScript], Awaitable[tuple[LoomConfig, list[dict]]]]
-]:
+async def fake_daemon() -> AsyncIterator[Callable[[FakeDaemonScript], Awaitable[tuple[LoomConfig, list[dict]]]]]:
     """
     Spawn a fresh fake-daemon WS server per test.
 
@@ -98,7 +96,7 @@ class TestSubscribeAndReceive:
             await asyncio.sleep(0.2)  # let the client send first
 
         cfg, rx = await fake_daemon(script)
-        async with WsTransport(cfg, initial_subscriptions=["device.*", "hub.*"]):
+        async with WsTransport(config=cfg, initial_subscriptions=["device.*", "hub.*"]):
             await asyncio.sleep(0.3)
 
         subs = [f for f in rx if f.get("op") == "subscribe"]
@@ -131,7 +129,7 @@ class TestSubscribeAndReceive:
             await asyncio.sleep(0.2)
 
         cfg, _rx = await fake_daemon(script)
-        async with WsTransport(cfg, initial_subscriptions=["device.*"]) as ws:
+        async with WsTransport(config=cfg, initial_subscriptions=["device.*"]) as ws:
             it = ws.events()
             env = await asyncio.wait_for(anext(it), timeout=1.0)
             assert env.seq == 42
@@ -144,7 +142,7 @@ class TestSubscribeAndReceive:
             await asyncio.sleep(0.2)
 
         cfg, rx = await fake_daemon(script)
-        async with WsTransport(cfg, initial_subscriptions=["device.*"]):
+        async with WsTransport(config=cfg, initial_subscriptions=["device.*"]):
             await asyncio.sleep(0.3)
 
         pongs = [f for f in rx if f.get("op") == "pong"]
@@ -164,7 +162,7 @@ class TestReplayLost:
             await asyncio.sleep(0.2)
 
         cfg, _rx = await fake_daemon(script)
-        async with WsTransport(cfg, initial_subscriptions=["device.*"], on_replay_lost=on_lost):
+        async with WsTransport(config=cfg, initial_subscriptions=["device.*"], on_replay_lost=on_lost):
             await asyncio.sleep(0.3)
 
         assert captured == [901]
@@ -176,12 +174,12 @@ class TestRuntimeSubscriptions:
             await asyncio.sleep(0.4)
 
         cfg, rx = await fake_daemon(script)
-        async with WsTransport(cfg, initial_subscriptions=["device.*"]) as ws:
+        async with WsTransport(config=cfg, initial_subscriptions=["device.*"]) as ws:
             await asyncio.sleep(0.1)
             # Existing topic — should be no-op.
-            await ws.subscribe(["device.*"])
+            await ws.subscribe(topics=["device.*"])
             # New topic — should send a fresh subscribe frame.
-            await ws.subscribe(["hub.*"])
+            await ws.subscribe(topics=["hub.*"])
             await asyncio.sleep(0.15)
 
         subs = [f for f in rx if f.get("op") == "subscribe"]
@@ -194,9 +192,9 @@ class TestRuntimeSubscriptions:
             await asyncio.sleep(0.3)
 
         cfg, rx = await fake_daemon(script)
-        async with WsTransport(cfg, initial_subscriptions=["device.*", "hub.*"]) as ws:
+        async with WsTransport(config=cfg, initial_subscriptions=["device.*", "hub.*"]) as ws:
             await asyncio.sleep(0.1)
-            await ws.unsubscribe(["hub.*"])
+            await ws.unsubscribe(topics=["hub.*"])
             await asyncio.sleep(0.1)
             assert "hub.*" not in ws.subscriptions
             assert "device.*" in ws.subscriptions

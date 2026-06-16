@@ -89,9 +89,7 @@ class CentralConfig:
         # Sysvar/program visibility (marker filter + enabled-by-default) is
         # resolved daemon-side (api ≥ 1.9.0); any markers the integration
         # still passes are absorbed by **_ignored and intentionally unused.
-        self._auth = self._resolve_auth(
-            auth=auth, token=token, username=username, password=password
-        )
+        self._auth = self._resolve_auth(auth=auth, token=token, username=username, password=password)
 
     @staticmethod
     def _resolve_auth(
@@ -119,8 +117,8 @@ class CentralConfig:
             verify_tls=self._verify_tls,
             auth=self._auth,
         )
-        transport = HttpTransport(config, session=self._client_session)
-        client = LoomClient(config, http_transport=transport)
+        transport = HttpTransport(config=config, session=self._client_session)
+        client = LoomClient(config=config, http_transport=transport)
         return LoomCentralAdapter(
             client=client,
             name=self._name,
@@ -192,8 +190,8 @@ async def list_ccus(
     if base_path is not None:
         config_kwargs["base_path"] = base_path
     config = LoomConfig(**config_kwargs)
-    transport = HttpTransport(config, session=client_session)
-    client = LoomClient(config, http_transport=transport)
+    transport = HttpTransport(config=config, session=client_session)
+    client = LoomClient(config=config, http_transport=transport)
     try:
         await client.connect()
         ccus = await client.system.list_system_ccus()
@@ -212,9 +210,15 @@ async def list_ccus(
 
 
 __all__: Final = [
+    # General
+    "BasicAuth",
+    "BearerAuth",
     "CentralConfig",
     "CentralUnit",
+    "HttpTransport",
     "LoomCentralAdapter",
+    "LoomClient",
+    "LoomConfig",
     "check_config",
     "list_ccus",
 ]

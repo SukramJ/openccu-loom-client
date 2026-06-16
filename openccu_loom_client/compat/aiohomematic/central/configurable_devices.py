@@ -78,7 +78,7 @@ class ConfigurableDevice:
     maintenance: MaintenanceData
 
 
-def _maintenance_for(device: Device) -> MaintenanceData:
+def _maintenance_for(*, device: Device) -> MaintenanceData:
     channel = device.get_channel(number=0)
     if channel is None:
         return MaintenanceData()
@@ -90,7 +90,7 @@ def _maintenance_for(device: Device) -> MaintenanceData:
     return MaintenanceData(**fields)
 
 
-def build_configurable_devices(store: LoomStore) -> tuple[ConfigurableDevice, ...]:
+def build_configurable_devices(*, store: LoomStore) -> tuple[ConfigurableDevice, ...]:
     """Build the configurable-device descriptors from the live store."""
     out: list[ConfigurableDevice] = []
     for device in store.devices:
@@ -123,7 +123,7 @@ def build_configurable_devices(store: LoomStore) -> tuple[ConfigurableDevice, ..
                 name=device.name,
                 firmware=device.firmware,
                 channels=tuple(channels),
-                maintenance=_maintenance_for(device),
+                maintenance=_maintenance_for(device=device),
             )
         )
     return tuple(out)

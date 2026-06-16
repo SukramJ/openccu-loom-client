@@ -65,22 +65,22 @@ def bind_ws_events_to_store(
     """
 
     async def on_value(event: DataPointValueChangedEvent) -> None:
-        store.apply_value_changed(event.payload)
+        store.apply_value_changed(payload=event.payload)
 
     async def on_cdp_state(event: CustomDataPointStateChangedEvent) -> None:
-        store.apply_custom_data_point_state_changed(event.payload)
+        store.apply_custom_data_point_state_changed(payload=event.payload)
 
     async def on_created(event: DeviceCreatedEvent) -> None:
-        store.apply_device_created(event.payload)
+        store.apply_device_created(payload=event.payload)
 
     async def on_removed(event: DeviceRemovedEvent) -> None:
-        store.apply_device_removed(event.payload)
+        store.apply_device_removed(payload=event.payload)
 
     async def on_sysvar(event: SysvarChangedEvent) -> None:
-        store.apply_sysvar_changed(event.payload)
+        store.apply_sysvar_changed(payload=event.payload)
 
     async def on_program(event: ProgramExecutedEvent) -> None:
-        store.apply_program_executed(event.payload)
+        store.apply_program_executed(payload=event.payload)
 
     group.subscribe(event_type=DataPointValueChangedEvent, handler=on_value)
     group.subscribe(event_type=CustomDataPointStateChangedEvent, handler=on_cdp_state)

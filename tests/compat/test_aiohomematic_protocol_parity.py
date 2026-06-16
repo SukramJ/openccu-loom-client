@@ -73,17 +73,13 @@ def _store() -> LoomStore:
 
 
 def _generic_instance(class_name: str) -> Any:
-    summary = DataPointSummary(
-        parameter="STATE", observed=True, operations=_OPS, type="BOOL", value=True
-    )
+    summary = DataPointSummary(parameter="STATE", observed=True, operations=_OPS, type="BOOL", value=True)
     cls = getattr(_generic, class_name)
     return cls(summary=summary, device_address=_DEVICE, channel_number=1, store=_store())
 
 
 def _custom_instance(class_name: str) -> Any:
-    summary = CustomDPSummary(
-        name="cdp", category=DataPointCategory.Switch, channel_no=1, supported_operations=["set"]
-    )
+    summary = CustomDPSummary(name="cdp", category=DataPointCategory.Switch, channel_no=1, supported_operations=["set"])
     cls = getattr(_custom, class_name)
     return cls(summary=summary, device_address=_DEVICE, store=_store())
 
@@ -143,10 +139,7 @@ _CASES: list[tuple[str, Any, Any]] = [
             "SysvarDpSelect",
         )
     ),
-    *(
-        (n, _program_instance, GenericProgramDataPointProtocol)
-        for n in ("ProgramDpButton", "ProgramDpSwitch")
-    ),
+    *((n, _program_instance, GenericProgramDataPointProtocol) for n in ("ProgramDpButton", "ProgramDpSwitch")),
 ]
 
 
@@ -177,11 +170,8 @@ def _missing_members(instance: Any, protocol: Any) -> list[str]:
     _CASES,
     ids=[f"{name}->{proto.__name__}" for name, _, proto in _CASES],
 )
-def test_compat_dp_satisfies_aiohomematic_protocol(
-    class_name: str, builder: Any, protocol: Any
-) -> None:
+def test_compat_dp_satisfies_aiohomematic_protocol(class_name: str, builder: Any, protocol: Any) -> None:
     instance = builder(class_name)
     assert isinstance(instance, protocol), (
-        f"{class_name} does not satisfy {protocol.__name__}; "
-        f"missing members: {_missing_members(instance, protocol)}"
+        f"{class_name} does not satisfy {protocol.__name__}; missing members: {_missing_members(instance, protocol)}"
     )

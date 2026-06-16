@@ -19,12 +19,7 @@ import pytest
 
 from openccu_loom_client.events import InstallModeChangedEvent
 from openccu_loom_client.events.types import event_from_envelope
-from openccu_loom_client.operations import (
-    DevicesOperations,
-    HubOperations,
-    LinksOperations,
-    SchedulesOperations,
-)
+from openccu_loom_client.operations import DevicesOperations, HubOperations, LinksOperations, SchedulesOperations
 from openccu_loom_client.transport import HttpTransport
 from tests.helpers import MockDaemon
 
@@ -42,7 +37,7 @@ _INFO = {
 
 @pytest.fixture
 async def http(mock_daemon: MockDaemon):
-    t = HttpTransport(mock_daemon.config, backoff_sequence=(0.0,))
+    t = HttpTransport(config=mock_daemon.config, backoff_sequence=(0.0,))
     mock_daemon.get("/api/v1/info", payload=_INFO)
     await t.connect()
     yield t, mock_daemon
@@ -68,9 +63,7 @@ class TestSchedulesOperations:
                 "has_climate_schedule": True,
             },
         )
-        result = await SchedulesOperations(transport=t).get_channel_week_profile(
-            address="VCU1", channel=1
-        )
+        result = await SchedulesOperations(transport=t).get_channel_week_profile(address="VCU1", channel=1)
         assert result.schedule_type == "climate"
         assert result.profile_count == 3
 
@@ -81,9 +74,7 @@ class TestSchedulesOperations:
             channel=ScheduleChannelRef(address="VCU1:1", number=1, device_address="VCU1"),
             kind="climate",
         )
-        await SchedulesOperations(transport=t).put_channel_schedule(
-            address="VCU1", channel=1, schedule=schedule
-        )
+        await SchedulesOperations(transport=t).put_channel_schedule(address="VCU1", channel=1, schedule=schedule)
         body = _find_call(mock, "PUT").json()
         assert body["kind"] == "climate"
         assert body["channel"]["device_address"] == "VCU1"
@@ -91,9 +82,7 @@ class TestSchedulesOperations:
     async def test_set_device_active_profile(self, http) -> None:
         t, mock = http
         mock.post("/api/v1/devices/VCU1/schedule/active-profile", status=202)
-        await SchedulesOperations(transport=t).set_device_active_profile(
-            address="VCU1", profile="P2"
-        )
+        await SchedulesOperations(transport=t).set_device_active_profile(address="VCU1", profile="P2")
         assert _find_call(mock, "POST").json() == {"profile": "P2"}
 
 
@@ -119,9 +108,7 @@ class TestLinksOperations:
             "/api/v1/devices/VCU1/links",
             status=202,
         )
-        await LinksOperations(transport=t).remove_link(
-            address="VCU1", sender="VCU1:1", receiver="VCU2:1"
-        )
+        await LinksOperations(transport=t).remove_link(address="VCU1", sender="VCU1:1", receiver="VCU2:1")
 
     async def test_enable_central_links(self, http) -> None:
         t, mock = http
@@ -150,9 +137,7 @@ class TestDevicesOperationsGaps:
             "/api/v1/devices/VCU1/channels/1/calc-dps",
             payload=[{"name": "DEW_POINT", "value": 12.3, "observed": True}],
         )
-        result = await DevicesOperations(transport=t).list_calculated_data_points(
-            address="VCU1", channel=1
-        )
+        result = await DevicesOperations(transport=t).list_calculated_data_points(address="VCU1", channel=1)
         assert result[0].name == "DEW_POINT"
         assert result[0].value == 12.3
 
@@ -206,9 +191,7 @@ class TestHubOperationsGaps:
     async def test_update_sysvar_metadata(self, http) -> None:
         t, mock = http
         mock.patch("/api/v1/sysvars/my_var", status=202)
-        await HubOperations(transport=t).update_sysvar_metadata(
-            name="my_var", description="Living room", unit="°C"
-        )
+        await HubOperations(transport=t).update_sysvar_metadata(name="my_var", description="Living room", unit="°C")
         assert _find_call(mock, "PATCH").json() == {
             "description": "Living room",
             "unit": "°C",
@@ -227,7 +210,7 @@ class TestInstallModeChangedEvent:
                 "payload": {"central": "home", "enabled": True, "remaining_s": 60},
             }
         )
-        ev = event_from_envelope(env)
+        ev = event_from_envelope(envelope=env)
         assert isinstance(ev, InstallModeChangedEvent)
         assert ev.payload.enabled is True
         assert ev.payload.remaining_s == 60

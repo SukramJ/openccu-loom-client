@@ -21,12 +21,17 @@ pytest tests/unit/test_store.py          # one file
 pytest tests/unit/test_store.py::test_x  # one test
 pytest -k "value_changed"                # by name pattern
 
-ruff check .                             # lint (line-length 100, py311 target)
+ruff check .                             # lint (line-length 120, py314 target)
 ruff format .                            # format
 mypy openccu_loom_client                 # strict mode is on
+pylint openccu_loom_client               # extra checks beyond ruff
+
+python script/lint_kwonly.py openccu_loom_client  # enforce keyword-only params
+python script/lint_all_exports.py                 # validate grouped/sorted __all__
 
 prek install                             # one-time: enable pre-commit hooks
 prek run --all-files                     # run all hooks manually
+prek run --hook-stage manual --all-files # manual-stage hooks (python-typing-update, …)
 ```
 
 Requires Python ≥ 3.14. Tests use `pytest-asyncio` (auto mode — no `@pytest.mark.asyncio` needed) and `aioresponses` to mock the daemon's HTTP surface.

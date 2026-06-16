@@ -44,12 +44,7 @@ import logging
 from typing import TYPE_CHECKING, Final, Self
 
 from openccu_loom_client.bridge import bind_ws_events_to_store
-from openccu_loom_client.events import (
-    EventBus,
-    SubscriptionGroup,
-    event_from_envelope,
-    new_data_points_created_event,
-)
+from openccu_loom_client.events import EventBus, SubscriptionGroup, event_from_envelope, new_data_points_created_event
 from openccu_loom_client.operations import (
     AuthOperations,
     BackupOperations,
@@ -99,8 +94,8 @@ class LoomClient:
 
     def __init__(
         self,
-        config: LoomConfig,
         *,
+        config: LoomConfig,
         store: LoomStore | None = None,
         bus: EventBus | None = None,
         http_transport: HttpTransport | None = None,
@@ -108,11 +103,11 @@ class LoomClient:
     ) -> None:
         """Compose the store, bus, transports and operation façades."""
         self._config: Final = config
-        self._http: Final = http_transport or HttpTransport(config)
+        self._http: Final = http_transport or HttpTransport(config=config)
         self._store: Final = store or LoomStore(transport=self._http)
         # Ensure the store always has the transport reference — important
         # when the caller injects a pre-built store built without one.
-        self._store.set_transport(self._http)
+        self._store.set_transport(transport=self._http)
         self._bus: Final = bus or EventBus()
         self._ws_transport_external: Final = ws_transport
         self._ws: WsTransport | None = ws_transport
@@ -169,6 +164,7 @@ class LoomClient:
         exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
+        /,
     ) -> None:
         """Close the client on context exit."""
         await self.close()
@@ -210,14 +206,14 @@ class LoomClient:
         contract that's available today.
         """
         snapshot = await self.system.get_snapshot()
-        self._store.load_snapshot(snapshot)
+        self._store.load_snapshot(snapshot=snapshot)
 
         # load_snapshot derives the central id from the interface list.
         central_name = self._store.central_id or None
 
         for device_summary in snapshot.devices:
             detail = await self.devices.get_device_detail(address=device_summary.address)
-            self._store.attach_device_detail(detail)
+            self._store.attach_device_detail(detail=detail)
 
             if not fetch_data_points:
                 continue
@@ -234,13 +230,10 @@ class LoomClient:
 
         # Announce the bootstrap completion as one batch event.
         await self._bus.publish(
-            new_data_points_created_event(
+            event=new_data_points_created_event(
                 devices=list(self._store.devices),
                 data_points=[
-                    dp
-                    for device in self._store.devices
-                    for channel in device.channels
-                    for dp in channel.data_points
+                    dp for device in self._store.devices for channel in device.channels for dp in channel.data_points
                 ],
                 central=central_name,
             )
@@ -261,7 +254,7 @@ class LoomClient:
 
         if self._ws is None:
             self._ws = WsTransport(
-                self._config,
+                config=self._config,
                 initial_subscriptions=list(subscriptions or _DEFAULT_WS_SUBSCRIPTIONS),
                 on_replay_lost=self._on_replay_lost,
             )
@@ -272,9 +265,7 @@ class LoomClient:
         bind_ws_events_to_store(bus=self._bus, store=self._store, group=self._wire_group)
 
         # Dispatch loop: WsEnvelope → typed event → bus.publish.
-        self._dispatch_task = asyncio.create_task(
-            self._dispatch_loop(), name="openccu-loom-dispatch"
-        )
+        self._dispatch_task = asyncio.create_task(self._dispatch_loop(), name="openccu-loom-dispatch")
 
     async def close(self) -> None:
         """Tear down WS, HTTP, and all bus subscriptions."""
@@ -300,14 +291,14 @@ class LoomClient:
         assert self._ws is not None  # noqa: S101 — invariant: dispatch loop runs only after start_events()
         try:
             async for envelope in self._ws.events():
-                event = event_from_envelope(envelope)
-                await self._bus.publish(event)
+                event = event_from_envelope(envelope=envelope)
+                await self._bus.publish(event=event)
         except asyncio.CancelledError:
             raise
         except Exception:
             _LOGGER.exception("WS dispatch loop crashed")
 
-    async def _on_replay_lost(self, oldest_seq: int) -> None:
+    async def _on_replay_lost(self, oldest_seq: int, /) -> None:
         """
         Re-bootstrap the store after the daemon's replay buffer aged out.
 

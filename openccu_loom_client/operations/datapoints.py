@@ -37,8 +37,8 @@ class DataPointsOperations(_OperationsBase):
         if priority is not None:
             body["priority"] = priority
         await self._transport.request(
-            "PUT",
-            f"/devices/{address}/channels/{channel}/data-points/{parameter}/value",
+            method="PUT",
+            path=f"/devices/{address}/channels/{channel}/data-points/{parameter}/value",
             json_body=body,
             allow_retry=True,
         )
@@ -47,6 +47,7 @@ class DataPointsOperations(_OperationsBase):
 
     async def batch_read(
         self,
+        *,
         queries: list[tuple[str, int, str]],
     ) -> dict[tuple[str, int, str], Any]:
         """
@@ -60,15 +61,11 @@ class DataPointsOperations(_OperationsBase):
         rejected (e.g. auth).
         """
         body = ValuesBatchRequest.model_validate(
-            {
-                "queries": [
-                    Query(address=a, channel=c, parameter=p).model_dump() for (a, c, p) in queries
-                ]
-            }
+            {"queries": [Query(address=a, channel=c, parameter=p).model_dump() for (a, c, p) in queries]}
         )
         payload = await self._transport.request(
-            "POST",
-            "/devices/values:batch",
+            method="POST",
+            path="/devices/values:batch",
             json_body=body.model_dump(),
             # Reads are idempotent — let the transport retry on transient upstream errors.
             allow_retry=True,
@@ -100,8 +97,8 @@ class DataPointsOperations(_OperationsBase):
         controls the typing per-parameter.
         """
         payload = await self._transport.request(
-            "GET",
-            f"/devices/{address}/paramsets/{paramset_key}",
+            method="GET",
+            path=f"/devices/{address}/paramsets/{paramset_key}",
         )
         return dict(payload or {})
 
@@ -123,8 +120,8 @@ class DataPointsOperations(_OperationsBase):
         colour, …).
         """
         await self._transport.request(
-            "PUT",
-            f"/devices/{address}/paramsets/{paramset_key}",
+            method="PUT",
+            path=f"/devices/{address}/paramsets/{paramset_key}",
             json_body=values,
             allow_retry=True,
         )

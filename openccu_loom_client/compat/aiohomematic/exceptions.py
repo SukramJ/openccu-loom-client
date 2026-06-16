@@ -5,12 +5,7 @@
 
 from __future__ import annotations
 
-from openccu_loom_client.exceptions import (
-    BaseLoomException,
-    LoomAuthError,
-    LoomTransportError,
-    LoomValidationError,
-)
+from openccu_loom_client.exceptions import BaseLoomException, LoomAuthError, LoomTransportError, LoomValidationError
 
 # Direct aliases — homematicip_local uses both classes as ``except``
 # targets, never as instance constructors that depend on the original

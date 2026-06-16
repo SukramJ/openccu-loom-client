@@ -137,7 +137,7 @@ _CODE_TO_EXCEPTION: dict[Code, type[LoomHttpError]] = {
 }
 
 
-def _problem_code(problem: Problem) -> Code | None:
+def _problem_code(*, problem: Problem) -> Code | None:
     """
     Extract the ``Code`` enum value from a Problem.
 
@@ -182,7 +182,7 @@ def http_error_from_problem(
     """
     cls: type[LoomHttpError] = LoomHttpError
     if problem is not None:
-        code = _problem_code(problem)
+        code = _problem_code(problem=problem)
         if code is not None:
             cls = _CODE_TO_EXCEPTION.get(code, LoomHttpError)
     return cls(
@@ -194,7 +194,7 @@ def http_error_from_problem(
     )
 
 
-def parse_problem(payload: Any) -> Problem | None:
+def parse_problem(*, payload: Any) -> Problem | None:
     """
     Parse a JSON payload into a ``Problem``; return None on mismatch.
 

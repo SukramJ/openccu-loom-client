@@ -18,4 +18,8 @@ from __future__ import annotations
 from openccu_loom_client.transport.http import HttpTransport
 from openccu_loom_client.transport.ws import WsTransport
 
-__all__ = ["HttpTransport", "WsTransport"]
+__all__ = [
+    # General
+    "HttpTransport",
+    "WsTransport",
+]

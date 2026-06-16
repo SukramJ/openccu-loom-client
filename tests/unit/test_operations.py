@@ -9,12 +9,7 @@ from collections.abc import AsyncIterator
 
 import pytest
 
-from openccu_loom_client.operations import (
-    DataPointsOperations,
-    DevicesOperations,
-    HubOperations,
-    SystemOperations,
-)
+from openccu_loom_client.operations import DataPointsOperations, DevicesOperations, HubOperations, SystemOperations
 from openccu_loom_client.transport import HttpTransport
 from tests.helpers import MockDaemon
 
@@ -32,7 +27,7 @@ _INFO = {
 
 @pytest.fixture
 async def http(mock_daemon: MockDaemon) -> AsyncIterator[HttpTransport]:
-    t = HttpTransport(mock_daemon.config, backoff_sequence=(0.0,))
+    t = HttpTransport(config=mock_daemon.config, backoff_sequence=(0.0,))
     mock_daemon.get("/api/v1/info", payload=_INFO)
     await t.connect()
     yield t
@@ -73,15 +68,11 @@ class TestDevicesOperations:
         assert detail.channels is not None
         assert detail.channels[0].number == 1
 
-    async def test_refresh_all_does_not_retry_post(
-        self, mock_daemon: MockDaemon, http: HttpTransport
-    ) -> None:
+    async def test_refresh_all_does_not_retry_post(self, mock_daemon: MockDaemon, http: HttpTransport) -> None:
         mock_daemon.post("/api/v1/devices/refresh", status=202)
         await DevicesOperations(transport=http).refresh_all()
 
-    async def test_patch_device_sends_name(
-        self, mock_daemon: MockDaemon, http: HttpTransport
-    ) -> None:
+    async def test_patch_device_sends_name(self, mock_daemon: MockDaemon, http: HttpTransport) -> None:
         mock_daemon.patch("/api/v1/devices/VCU0001", status=200, payload={})
         await DevicesOperations(transport=http).patch_device(address="VCU0001", name="Renamed")
         patch_req = next(r for r in mock_daemon.requests if r.method == "PATCH")
@@ -89,9 +80,7 @@ class TestDevicesOperations:
 
 
 class TestDataPointsOperations:
-    async def test_set_value_with_priority(
-        self, mock_daemon: MockDaemon, http: HttpTransport
-    ) -> None:
+    async def test_set_value_with_priority(self, mock_daemon: MockDaemon, http: HttpTransport) -> None:
         mock_daemon.put("/api/v1/devices/VCU0001/channels/1/data-points/LEVEL/value", status=202)
         await DataPointsOperations(transport=http).set_value(
             address="VCU0001", channel=1, parameter="LEVEL", value=0.5, priority="high"
@@ -102,9 +91,7 @@ class TestDataPointsOperations:
             "/api/v1/devices/VCU0001/paramsets/MASTER",
             payload={"TRANSMIT_DUTY_CYCLE_LEVEL": 1, "PARAM_X": "hello"},
         )
-        result = await DataPointsOperations(transport=http).get_paramset(
-            address="VCU0001", paramset_key="MASTER"
-        )
+        result = await DataPointsOperations(transport=http).get_paramset(address="VCU0001", paramset_key="MASTER")
         assert result == {"TRANSMIT_DUTY_CYCLE_LEVEL": 1, "PARAM_X": "hello"}
 
 

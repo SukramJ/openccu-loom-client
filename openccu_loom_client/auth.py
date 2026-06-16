@@ -34,7 +34,7 @@ class AuthMethod(ABC):
     """Strategy interface for outbound HTTP/WS request authentication."""
 
     @abstractmethod
-    def apply_to_headers(self, headers: dict[str, str]) -> None:
+    def apply_to_headers(self, *, headers: dict[str, str]) -> None:
         """
         Mutate ``headers`` in place with whatever this method needs.
 
@@ -60,7 +60,7 @@ class BasicAuth(AuthMethod):
     username: str
     password: str
 
-    def apply_to_headers(self, headers: dict[str, str]) -> None:
+    def apply_to_headers(self, *, headers: dict[str, str]) -> None:
         """Attach the Basic ``Authorization`` header for this credential."""
         token = b64encode(f"{self.username}:{self.password}".encode()).decode("ascii")
         headers["Authorization"] = f"Basic {token}"
@@ -85,7 +85,7 @@ class BearerAuth(AuthMethod):
     token: str
     label: str = "bearer"
 
-    def apply_to_headers(self, headers: dict[str, str]) -> None:
+    def apply_to_headers(self, *, headers: dict[str, str]) -> None:
         """Attach the Bearer ``Authorization`` header for this token."""
         headers["Authorization"] = f"Bearer {self.token}"
 
@@ -94,11 +94,7 @@ class BearerAuth(AuthMethod):
         """Return a log-safe identity hint exposing only the token suffix."""
         # Last six chars only — same convention the daemon uses when
         # listing tokens via GET /auth/tokens.
-        suffix = (
-            self.token[-_TOKEN_FINGERPRINT_LENGTH:]
-            if len(self.token) >= _TOKEN_FINGERPRINT_LENGTH
-            else "******"
-        )
+        suffix = self.token[-_TOKEN_FINGERPRINT_LENGTH:] if len(self.token) >= _TOKEN_FINGERPRINT_LENGTH else "******"
         return f"bearer:{self.label}:…{suffix}"
 
 
@@ -116,7 +112,7 @@ class SessionAuth(AuthMethod):
     cookie_value: str
     cookie_name: str = "openccu_loom_session"
 
-    def apply_to_headers(self, headers: dict[str, str]) -> None:
+    def apply_to_headers(self, *, headers: dict[str, str]) -> None:
         """Append the session cookie to the outgoing ``Cookie`` header."""
         existing = headers.get("Cookie", "")
         pair = f"{self.cookie_name}={self.cookie_value}"

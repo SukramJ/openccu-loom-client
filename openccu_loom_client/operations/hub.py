@@ -29,14 +29,14 @@ class HubOperations(_OperationsBase):
 
     async def list_programs(self) -> list[ProgramSummary]:
         """List all programs on the CCU. Wire: ``GET /programs``."""
-        payload = await self._transport.request("GET", "/programs")
+        payload = await self._transport.request(method="GET", path="/programs")
         return [ProgramSummary.model_validate(p) for p in (payload or [])]
 
     async def execute_program(self, *, program_id: str) -> None:
         """Wire: ``POST /programs/{id}/execute``."""
         await self._transport.request(
-            "POST",
-            f"/programs/{program_id}/execute",
+            method="POST",
+            path=f"/programs/{program_id}/execute",
             allow_retry=False,
         )
 
@@ -48,8 +48,8 @@ class HubOperations(_OperationsBase):
         setting the same flag twice is a no-op on the CCU.
         """
         await self._transport.request(
-            "PATCH",
-            f"/programs/{program_id}",
+            method="PATCH",
+            path=f"/programs/{program_id}",
             json_body={"active": active},
             allow_retry=True,
         )
@@ -58,7 +58,7 @@ class HubOperations(_OperationsBase):
 
     async def list_sysvars(self) -> list[SysvarSummary]:
         """List all system variables on the CCU. Wire: ``GET /sysvars``."""
-        payload = await self._transport.request("GET", "/sysvars")
+        payload = await self._transport.request(method="GET", path="/sysvars")
         return [SysvarSummary.model_validate(s) for s in (payload or [])]
 
     async def create_sysvar(
@@ -70,8 +70,8 @@ class HubOperations(_OperationsBase):
         description: str | None = None,
         unit: str | None = None,
         value_list: list[str] | None = None,
-        min: Any = None,  # noqa: A002 — CCU/Rega field name
-        max: Any = None,  # noqa: A002 — CCU/Rega field name
+        min: Any = None,  # noqa: A002 — CCU/Rega field name  # pylint: disable=redefined-builtin
+        max: Any = None,  # noqa: A002 — CCU/Rega field name  # pylint: disable=redefined-builtin
     ) -> None:
         """
         Create a system variable on the CCU.
@@ -97,8 +97,8 @@ class HubOperations(_OperationsBase):
         if max is not None:
             body["max"] = max
         await self._transport.request(
-            "POST",
-            "/sysvars",
+            method="POST",
+            path="/sysvars",
             json_body=body,
             allow_retry=False,
         )
@@ -109,8 +109,8 @@ class HubOperations(_OperationsBase):
         name: str,
         description: str | None = None,
         unit: str | None = None,
-        min: str | None = None,  # noqa: A002 — CCU convention: bounds are strings
-        max: str | None = None,  # noqa: A002 — CCU convention: bounds are strings
+        min: str | None = None,  # noqa: A002 — CCU bounds are strings  # pylint: disable=redefined-builtin
+        max: str | None = None,  # noqa: A002 — CCU bounds are strings  # pylint: disable=redefined-builtin
         value_list: list[str] | None = None,
     ) -> None:
         """
@@ -132,15 +132,15 @@ class HubOperations(_OperationsBase):
         if value_list is not None:
             body["value_list"] = value_list
         await self._transport.request(
-            "PATCH",
-            f"/sysvars/{name}",
+            method="PATCH",
+            path=f"/sysvars/{name}",
             json_body=body,
             allow_retry=True,
         )
 
     async def get_sysvar(self, *, name: str) -> SysvarSummary:
         """Return one system variable by name. Wire: ``GET /sysvars/{name}``."""
-        payload = await self._transport.request("GET", f"/sysvars/{name}")
+        payload = await self._transport.request(method="GET", path=f"/sysvars/{name}")
         return SysvarSummary.model_validate(payload)
 
     async def set_sysvar(self, *, name: str, value: Any) -> None:
@@ -152,21 +152,21 @@ class HubOperations(_OperationsBase):
         types come back as 422 ``LoomValidationError``.
         """
         await self._transport.request(
-            "PUT",
-            f"/sysvars/{name}",
+            method="PUT",
+            path=f"/sysvars/{name}",
             json_body={"value": value},
             allow_retry=True,
         )
 
     async def delete_sysvar(self, *, name: str) -> None:
         """Delete a system variable by name. Wire: ``DELETE /sysvars/{name}``."""
-        await self._transport.request("DELETE", f"/sysvars/{name}")
+        await self._transport.request(method="DELETE", path=f"/sysvars/{name}")
 
     # ---- messages ----
 
     async def list_alarm_messages(self) -> list[AlarmMessage]:
         """List pending alarm messages. Wire: ``GET /alarm-messages``."""
-        payload = await self._transport.request("GET", "/alarm-messages")
+        payload = await self._transport.request(method="GET", path="/alarm-messages")
         return [AlarmMessage.model_validate(m) for m in (payload or [])]
 
     async def ack_alarm_message(self, *, message_id: str) -> None:
@@ -177,14 +177,14 @@ class HubOperations(_OperationsBase):
         already-cleared message is a no-op.
         """
         await self._transport.request(
-            "POST",
-            f"/alarm-messages/{message_id}/ack",
+            method="POST",
+            path=f"/alarm-messages/{message_id}/ack",
             allow_retry=True,
         )
 
     async def list_service_messages(self) -> list[ServiceMessage]:
         """List pending service messages. Wire: ``GET /service-messages``."""
-        payload = await self._transport.request("GET", "/service-messages")
+        payload = await self._transport.request(method="GET", path="/service-messages")
         return [ServiceMessage.model_validate(m) for m in (payload or [])]
 
     async def ack_service_message(self, *, message_id: str) -> None:
@@ -194,8 +194,8 @@ class HubOperations(_OperationsBase):
         Wire: ``POST /service-messages/{id}/ack``. Idempotent.
         """
         await self._transport.request(
-            "POST",
-            f"/service-messages/{message_id}/ack",
+            method="POST",
+            path=f"/service-messages/{message_id}/ack",
             allow_retry=True,
         )
 
@@ -207,7 +207,7 @@ class HubOperations(_OperationsBase):
 
         Wire: ``GET /rooms``.
         """
-        payload = await self._transport.request("GET", "/rooms")
+        payload = await self._transport.request(method="GET", path="/rooms")
         return [Room.model_validate(r) for r in (payload or [])]
 
     async def list_functions(self) -> list[Function]:
@@ -216,7 +216,7 @@ class HubOperations(_OperationsBase):
 
         Wire: ``GET /functions``.
         """
-        payload = await self._transport.request("GET", "/functions")
+        payload = await self._transport.request(method="GET", path="/functions")
         return [Function.model_validate(f) for f in (payload or [])]
 
     async def list_inbox(self) -> list[dict[str, Any]]:
@@ -227,21 +227,21 @@ class HubOperations(_OperationsBase):
         centrals (each entry carries its ``central``). Promote a
         candidate with :meth:`DevicesOperations.accept_device`.
         """
-        payload = await self._transport.request("GET", "/inbox")
+        payload = await self._transport.request(method="GET", path="/inbox")
         return [dict(e) for e in (payload or [])]
 
     # ---- install mode ----
 
     async def get_install_mode(self) -> InstallModeState:
         """Return the current install-mode state. Wire: ``GET /install-mode``."""
-        payload = await self._transport.request("GET", "/install-mode")
+        payload = await self._transport.request(method="GET", path="/install-mode")
         return InstallModeState.model_validate(payload)
 
     async def set_install_mode(self, *, active: bool, seconds: int = 60) -> None:
         """Toggle install mode for a duration. Wire: ``POST /install-mode``."""
         await self._transport.request(
-            "POST",
-            "/install-mode",
+            method="POST",
+            path="/install-mode",
             json_body={"active": active, "seconds": seconds},
             allow_retry=False,
         )
@@ -253,12 +253,10 @@ class HubOperations(_OperationsBase):
         Wire: ``GET /install-mode/interfaces`` — one entry per CCU
         interface, across all centrals.
         """
-        payload = await self._transport.request("GET", "/install-mode/interfaces")
+        payload = await self._transport.request(method="GET", path="/install-mode/interfaces")
         return [InstallModeInterfaceEntry.model_validate(e) for e in (payload or [])]
 
-    async def set_install_mode_interface(
-        self, *, interface: str, active: bool, seconds: int = 60
-    ) -> None:
+    async def set_install_mode_interface(self, *, interface: str, active: bool, seconds: int = 60) -> None:
         """
         Toggle install mode for one interface.
 
@@ -268,8 +266,8 @@ class HubOperations(_OperationsBase):
         """
         body = InstallModeInterfaceRequest(interface=interface, active=active, seconds=seconds)
         await self._transport.request(
-            "POST",
-            "/install-mode/interfaces",
+            method="POST",
+            path="/install-mode/interfaces",
             json_body=body.model_dump(mode="json", exclude_none=True),
             allow_retry=False,
         )

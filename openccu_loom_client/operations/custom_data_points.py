@@ -24,12 +24,12 @@ class CustomDataPointsOperations(_OperationsBase):
 
     async def list_for_device(self, *, address: str) -> list[CustomDPSummary]:
         """Wire: ``GET /devices/{addr}/cdps``."""
-        payload = await self._transport.request("GET", f"/devices/{address}/cdps")
+        payload = await self._transport.request(method="GET", path=f"/devices/{address}/cdps")
         return [CustomDPSummary.model_validate(c) for c in (payload or [])]
 
     async def get(self, *, address: str, name: str) -> CustomDPSummary:
         """Wire: ``GET /devices/{addr}/cdps/{name}``."""
-        payload = await self._transport.request("GET", f"/devices/{address}/cdps/{name}")
+        payload = await self._transport.request(method="GET", path=f"/devices/{address}/cdps/{name}")
         return CustomDPSummary.model_validate(payload)
 
     async def invoke(
@@ -59,8 +59,8 @@ class CustomDataPointsOperations(_OperationsBase):
         if priority is not None:
             body["priority"] = priority
         await self._transport.request(
-            "POST",
-            f"/devices/{address}/cdps/{name}/{operation}",
+            method="POST",
+            path=f"/devices/{address}/cdps/{name}/{operation}",
             json_body=body or None,
             allow_retry=False,
         )

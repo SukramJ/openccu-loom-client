@@ -119,9 +119,7 @@ def start_godevccu(*, binary: Path, timeout: float = _PORTS_TIMEOUT_S) -> Godevc
     ports line. Raises :class:`RuntimeError` if the helper exits before
     reporting, or :class:`TimeoutError` if it never does within ``timeout``.
     """
-    log = tempfile.NamedTemporaryFile(
-        prefix="godevccu-e2e-", suffix=".log", mode="w+", delete=False
-    )
+    log = tempfile.NamedTemporaryFile(prefix="godevccu-e2e-", suffix=".log", mode="w+", delete=False)
     proc = subprocess.Popen(  # noqa: S603
         [str(binary)],
         stdout=log,

@@ -32,7 +32,7 @@ def sysvar_state_path(*, name: str) -> str:
     return f"{_SYSVAR_STATE_PATH_ROOT}/{name}"
 
 
-def parse_device_state_path(state_path: str) -> tuple[str, int, str] | None:
+def parse_device_state_path(*, state_path: str) -> tuple[str, int, str] | None:
     """Parse a generic-DP state path into ``(address, channel, parameter)``."""
     parts = state_path.split("/")
     if len(parts) != 5 or parts[0] != "device" or parts[1] != "status":
@@ -43,7 +43,7 @@ def parse_device_state_path(state_path: str) -> tuple[str, int, str] | None:
     return address, int(channel), parameter
 
 
-def parse_sysvar_state_path(state_path: str) -> str | None:
+def parse_sysvar_state_path(*, state_path: str) -> str | None:
     """Parse a sysvar state path into its name."""
     prefix = f"{_SYSVAR_STATE_PATH_ROOT}/"
     if not state_path.startswith(prefix):

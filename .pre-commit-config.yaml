@@ -32,12 +32,17 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
+      - id: check-executables-have-shebangs
+        stages: [manual]
       - id: check-json
         exclude: (.vscode|.devcontainer)
       - id: check-yaml
       - id: check-merge-conflict
       - id: end-of-file-fixer
       - id: trailing-whitespace
+      - id: no-commit-to-branch
+        args:
+          - --branch=main
   - repo: https://github.com/adrienverge/yamllint.git
     rev: v1.37.1
     hooks:
@@ -48,6 +53,20 @@ repos:
       - id: prettier
         files: ^.+\.(md|json|ya?ml)$
         exclude: ^(tests/fixtures/|\.github/)
+  - repo: https://github.com/cdce8p/python-typing-update
+    rev: v0.7.3
+    hooks:
+      # Run `python-typing-update` hook manually from time to time
+      # to update python typing syntax.
+      # Will require manual work, before submitting changes!
+      # prek run --hook-stage manual python-typing-update --all-files
+      - id: python-typing-update
+        stages: [manual]
+        args:
+          - --py314-plus
+          - --force
+          - --keep-updates
+        files: ^(openccu_loom_client|tests|script)/.+\.py$
   - repo: local
     hooks:
       # Run mypy through our wrapper script in order to get the possible
@@ -61,3 +80,21 @@ repos:
         types_or: [python, pyi]
         require_serial: true
         files: ^openccu_loom_client/.+\.py$
+      - id: pylint
+        name: pylint
+        entry: script/run-in-env.sh pylint -j 0
+        language: script
+        types_or: [python, pyi]
+        files: ^openccu_loom_client/.+\.py$
+      - id: kwonly-lint
+        name: kwonly-lint
+        entry: script/run-in-env.sh python script/lint_kwonly.py openccu_loom_client
+        language: script
+        types_or: [python, pyi]
+        files: ^openccu_loom_client/.+\.py$
+      - id: lint-all-exports
+        name: lint-all-exports
+        entry: script/run-in-env.sh python script/lint_all_exports.py
+        language: script
+        files: ^openccu_loom_client/.+/__init__\.py$
+        pass_filenames: false

@@ -113,8 +113,8 @@ class CustomDataPoint:
 
     async def invoke(
         self,
-        operation: str,
         *,
+        operation: str,
         params: dict[str, Any] | None = None,
         priority: str | None = None,
     ) -> None:
@@ -139,11 +139,11 @@ class CustomDataPoint:
 
     # ---- mutation hooks (called by the store) ----
 
-    def _replace_state(self, state: dict[str, Any]) -> None:
+    def _replace_state(self, *, state: dict[str, Any]) -> None:
         """Replace the current state dict in place (called by the store)."""
         self._state = dict(state)
 
-    def _replace_summary(self, summary: CustomDPSummary) -> None:
+    def _replace_summary(self, *, summary: CustomDPSummary) -> None:
         """Replace the backing summary in place (called by the store)."""
         self._summary = summary
 

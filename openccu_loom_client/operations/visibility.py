@@ -29,7 +29,7 @@ class VisibilityOperations(_OperationsBase):
 
         Wire: ``GET /visibility/unignore``.
         """
-        payload = await self._transport.request("GET", "/visibility/unignore")
+        payload = await self._transport.request(method="GET", path="/visibility/unignore")
         return UnIgnoreListResponse.model_validate(payload)
 
     async def put_unignore(self, *, request: UnIgnoreUpdateRequest) -> UnIgnoreUpdateResponse:
@@ -39,8 +39,8 @@ class VisibilityOperations(_OperationsBase):
         Wire: ``PUT /visibility/unignore``.
         """
         payload = await self._transport.request(
-            "PUT",
-            "/visibility/unignore",
+            method="PUT",
+            path="/visibility/unignore",
             json_body=request.model_dump(mode="json", exclude_none=True),
             allow_retry=True,
         )
@@ -52,5 +52,5 @@ class VisibilityOperations(_OperationsBase):
 
         Wire: ``GET /visibility/unignore/candidates``.
         """
-        payload = await self._transport.request("GET", "/visibility/unignore/candidates")
+        payload = await self._transport.request(method="GET", path="/visibility/unignore/candidates")
         return UnIgnoreCandidateList.model_validate(payload)

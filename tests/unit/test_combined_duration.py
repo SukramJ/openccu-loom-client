@@ -9,10 +9,7 @@ from typing import Any
 
 from openccu_loom_types.rest import DataPointSummary, DeviceSummary
 
-from openccu_loom_client.compat.aiohomematic.model.combined import (
-    CombinedDurationDp,
-    channel_has_duration_pair,
-)
+from openccu_loom_client.compat.aiohomematic.model.combined import CombinedDurationDp, channel_has_duration_pair
 from openccu_loom_client.model import Device
 from openccu_loom_client.store import LoomStore
 
@@ -55,9 +52,9 @@ def _dp_summary(*, parameter: str, value: Any, type_: str = "FLOAT") -> DataPoin
 def _store_with_duration_pair(*, unit_value: Any = 1) -> tuple[LoomStore, Device, _FakeTransport]:
     transport = _FakeTransport()
     store = LoomStore(transport=transport)  # type: ignore[arg-type]
-    store.set_serial("ABC1234567")
+    store.set_serial(serial="ABC1234567")
     device = store._upsert_device_summary(
-        DeviceSummary.model_validate(
+        summary=DeviceSummary.model_validate(
             {
                 "address": _ADDRESS,
                 "interface": "HmIP-RF",

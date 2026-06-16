@@ -28,12 +28,12 @@ class SystemOperations(_OperationsBase):
 
     async def get_info(self) -> Info:
         """Build + runtime info (also runs at connect() in HttpTransport)."""
-        payload = await self._transport.request("GET", "/info")
+        payload = await self._transport.request(method="GET", path="/info")
         return Info.model_validate(payload)
 
     async def get_health(self) -> Health:
         """Return the daemon health probe. Wire: ``GET /health``."""
-        payload = await self._transport.request("GET", "/health")
+        payload = await self._transport.request(method="GET", path="/health")
         return Health.model_validate(payload)
 
     async def get_diagnostics(self) -> dict[str, Any]:
@@ -44,7 +44,7 @@ class SystemOperations(_OperationsBase):
         component layout decides what's in there. HA repair flows
         get a typed map to display.
         """
-        payload = await self._transport.request("GET", "/diagnostics")
+        payload = await self._transport.request(method="GET", path="/diagnostics")
         return dict(payload or {})
 
     # ---- snapshot ----
@@ -59,21 +59,21 @@ class SystemOperations(_OperationsBase):
         will eventually replace this with cursor pagination — until
         then the client is expected to take the one-shot hit.
         """
-        payload = await self._transport.request("GET", "/snapshot")
+        payload = await self._transport.request(method="GET", path="/snapshot")
         return Snapshot.model_validate(payload)
 
     # ---- interfaces ----
 
     async def list_interfaces(self) -> list[InterfaceState]:
         """List all CCU interfaces and their state. Wire: ``GET /interfaces``."""
-        payload = await self._transport.request("GET", "/interfaces")
+        payload = await self._transport.request(method="GET", path="/interfaces")
         return [InterfaceState.model_validate(i) for i in (payload or [])]
 
     async def reconnect_interface(self, *, interface_id: str) -> None:
         """Wire: ``POST /interfaces/{id}/reconnect``."""
         await self._transport.request(
-            "POST",
-            f"/interfaces/{interface_id}/reconnect",
+            method="POST",
+            path=f"/interfaces/{interface_id}/reconnect",
             allow_retry=False,
         )
 
@@ -86,7 +86,7 @@ class SystemOperations(_OperationsBase):
         Wire: ``GET /system/update``. Firmware fields stay ``None``
         until the daemon has observed the CCU's update endpoint.
         """
-        payload = await self._transport.request("GET", "/system/update")
+        payload = await self._transport.request(method="GET", path="/system/update")
         return [SystemUpdateEntry.model_validate(e) for e in (payload or [])]
 
     async def install_system_update(self, *, central: str | None = None) -> None:
@@ -98,8 +98,8 @@ class SystemOperations(_OperationsBase):
         retried — a duplicated trigger could double-run the CCU update.
         """
         await self._transport.request(
-            "POST",
-            "/system/update/install",
+            method="POST",
+            path="/system/update/install",
             params={"central": central} if central else None,
             allow_retry=False,
         )
@@ -111,7 +111,7 @@ class SystemOperations(_OperationsBase):
         Wire: ``GET /system/metrics``. Metric fields are ``None`` until
         the daemon has observed them.
         """
-        payload = await self._transport.request("GET", "/system/metrics")
+        payload = await self._transport.request(method="GET", path="/system/metrics")
         return [HubMetricsEntry.model_validate(m) for m in (payload or [])]
 
     # ---- CCU repair surface ----
@@ -123,7 +123,7 @@ class SystemOperations(_OperationsBase):
         The daemon wraps the list in an ``{"entries": [...]}`` envelope;
         unwrap it, while tolerating a bare list for forward-compatibility.
         """
-        payload = await self._transport.request("GET", "/system/ccu")
+        payload = await self._transport.request(method="GET", path="/system/ccu")
         entries = payload.get("entries", []) if isinstance(payload, dict) else (payload or [])
         return [SystemCCUEntry.model_validate(c) for c in entries]
 
@@ -131,7 +131,7 @@ class SystemOperations(_OperationsBase):
 
     async def get_system_status(self) -> dict[str, Any]:
         """Recent system-status events. Wire: ``GET /system/status``."""
-        payload = await self._transport.request("GET", "/system/status")
+        payload = await self._transport.request(method="GET", path="/system/status")
         return dict(payload or {})
 
     async def restart(self) -> dict[str, Any]:
@@ -140,7 +140,7 @@ class SystemOperations(_OperationsBase):
 
         Wire: ``POST /system/restart``. Not retried.
         """
-        payload = await self._transport.request("POST", "/system/restart", allow_retry=False)
+        payload = await self._transport.request(method="POST", path="/system/restart", allow_retry=False)
         return dict(payload or {})
 
     async def get_startup_capture(self) -> StartupCaptureConfig:
@@ -149,7 +149,7 @@ class SystemOperations(_OperationsBase):
 
         Wire: ``GET /system/startup-capture``.
         """
-        payload = await self._transport.request("GET", "/system/startup-capture")
+        payload = await self._transport.request(method="GET", path="/system/startup-capture")
         return StartupCaptureConfig.model_validate(payload)
 
     async def set_startup_capture(self, *, config: StartupCaptureConfig) -> StartupCaptureConfig:
@@ -159,8 +159,8 @@ class SystemOperations(_OperationsBase):
         Wire: ``PUT /system/startup-capture``.
         """
         payload = await self._transport.request(
-            "PUT",
-            "/system/startup-capture",
+            method="PUT",
+            path="/system/startup-capture",
             json_body=config.model_dump(mode="json", exclude_none=True),
             allow_retry=True,
         )

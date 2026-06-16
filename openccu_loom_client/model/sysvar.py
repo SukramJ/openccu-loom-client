@@ -70,7 +70,7 @@ class Sysvar:
         """Return whether the daemon streams updates for this sysvar."""
         return self._summary.observed
 
-    async def set_value(self, value: Any) -> None:
+    async def set_value(self, *, value: Any) -> None:
         """
         Write a new runtime value to this sysvar.
 
@@ -78,7 +78,7 @@ class Sysvar:
         """
         await self._store.set_sysvar(name=self.name, value=value)
 
-    def _replace_summary(self, summary: SysvarSummary) -> None:
+    def _replace_summary(self, *, summary: SysvarSummary) -> None:
         self._summary = summary
 
     def __repr__(self) -> str:

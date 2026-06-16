@@ -30,10 +30,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Final
 from openccu_loom_types.enums import DataPointCategory
 
 from openccu_loom_client.canonical import canonical_unique_id
-from openccu_loom_client.compat.aiohomematic.model._protocol_surface import (
-    _CommonProtocolSurface,
-    _NameData,
-)
+from openccu_loom_client.compat.aiohomematic.model._protocol_surface import _CommonProtocolSurface, _NameData
 from openccu_loom_client.compat.aiohomematic.model.hub._surface import _HubEntitySurface
 
 if TYPE_CHECKING:
@@ -161,7 +158,7 @@ class WeekProfileDp(_ScheduleEntityBase):
         """Return whether the entry count has been loaded."""
         return self._value is not None
 
-    def target_channel_name(self, channel_key: str) -> str | None:
+    def target_channel_name(self, *, channel_key: str) -> str | None:
         """
         Return the display name of the actuator channel a lock key controls.
 
@@ -194,11 +191,7 @@ class WeekProfileDp(_ScheduleEntityBase):
             profiles = schedule.profiles or {}
             if (active := schedule.active_profile) and active in profiles:
                 profiles = {active: profiles[active]}
-            return sum(
-                len(weekday.periods)
-                for profile in profiles.values()
-                for weekday in profile.weekdays.values()
-            )
+            return sum(len(weekday.periods) for profile in profiles.values() for weekday in profile.weekdays.values())
         return len(schedule.simple_entries or [])
 
     # ---- schedule metadata (read by the HA week-profile sensor) ----
@@ -342,7 +335,7 @@ class ScheduleChannelSwitch(_ScheduleEntityBase):
             parameter_name=self.name,
             name=self.name,
             full_name=self.full_name,
-            channel_name=self._week_profile_dp.target_channel_name(self._channel_key),
+            channel_name=self._week_profile_dp.target_channel_name(channel_key=self._channel_key),
         )
 
     # ---- value / actions ----

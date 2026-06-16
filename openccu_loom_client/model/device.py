@@ -211,7 +211,7 @@ class Device:
 
     # ---- mutation hooks (called by the store) ----
 
-    def _update_summary(self, summary: DeviceSummary) -> None:
+    def _update_summary(self, *, summary: DeviceSummary) -> None:
         """Replace the wire summary in place when the daemon's view advances."""
         self._summary = summary
 

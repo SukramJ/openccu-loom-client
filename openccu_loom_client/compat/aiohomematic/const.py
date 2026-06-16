@@ -186,9 +186,11 @@ class SystemInformation:
         # ``system_information.ccu_type == CCUType.OPENCCU`` (release-notes
         # URL); the loom daemon always fronts an OpenCCU-class central.
         if ccu_type is None:
-            from aiohomematic.const import CCUType  # noqa: PLC0415
+            # aiohomematic's CCUType (distinct from the openccu_loom_types enum
+            # re-exported above) is the one that carries ``OPENCCU``.
+            from aiohomematic.const import CCUType as _AiohCCUType  # noqa: PLC0415
 
-            ccu_type = CCUType.OPENCCU
+            ccu_type = _AiohCCUType.OPENCCU
         self.ccu_type = ccu_type
 
 

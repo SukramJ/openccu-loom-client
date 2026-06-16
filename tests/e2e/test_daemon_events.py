@@ -77,24 +77,17 @@ async def test_store_reflects_value_change(client_with_ccu: LoomClient) -> None:
         refreshed = client_with_ccu.store.get_data_point(
             address=dp.device_address, channel=dp.channel_number, parameter="STATE"
         )
-        if (
-            refreshed is not None
-            and refreshed.value is not None
-            and bool(refreshed.value) == target
-        ):
+        if refreshed is not None and refreshed.value is not None and bool(refreshed.value) == target:
             return
         await asyncio.sleep(0.1)
     pytest.fail(f"store did not reflect STATE={target} within {_EVENT_TIMEOUT_S}s")
 
 
 @pytest.mark.xfail(
-    reason="needs the daemon's interface_id for FireEvent; wire it up once "
-    "the test can resolve it from the snapshot",
+    reason="needs the daemon's interface_id for FireEvent; wire it up once the test can resolve it from the snapshot",
     strict=False,
 )
-async def test_device_trigger_pushed_over_ws(
-    client_with_ccu: LoomClient, godevccu: GodevccuDriver
-) -> None:
+async def test_device_trigger_pushed_over_ws(client_with_ccu: LoomClient, godevccu: GodevccuDriver) -> None:
     await client_with_ccu.bootstrap()
 
     seen = asyncio.Event()
@@ -108,9 +101,7 @@ async def test_device_trigger_pushed_over_ws(
 
     # A keypress is a non-state event: fire it directly on the simulator.
     # interface_id resolution is the open piece — see xfail reason.
-    godevccu.fire_event(
-        interface_id="HmIP-RF", address="<keypress-channel>", value_key="PRESS_SHORT", value=True
-    )
+    godevccu.fire_event(interface_id="HmIP-RF", address="<keypress-channel>", value_key="PRESS_SHORT", value=True)
 
     await asyncio.wait_for(seen.wait(), timeout=_EVENT_TIMEOUT_S)
 
@@ -120,9 +111,7 @@ async def test_device_trigger_pushed_over_ws(
     "model a non-confirming DP in the harness to drive this deterministically",
     strict=False,
 )
-async def test_optimistic_rollback_pushed_over_ws(
-    client_with_ccu: LoomClient, godevccu: GodevccuDriver
-) -> None:
+async def test_optimistic_rollback_pushed_over_ws(client_with_ccu: LoomClient, godevccu: GodevccuDriver) -> None:
     await client_with_ccu.bootstrap()
     dp = find_writable_bool_dp(client_with_ccu)
 
@@ -131,9 +120,7 @@ async def test_optimistic_rollback_pushed_over_ws(
     async def on_rollback(_event: DataPointOptimisticRolledBackEvent) -> None:
         seen.set()
 
-    client_with_ccu.events.subscribe(
-        event_type=DataPointOptimisticRolledBackEvent, handler=on_rollback
-    )
+    client_with_ccu.events.subscribe(event_type=DataPointOptimisticRolledBackEvent, handler=on_rollback)
     await client_with_ccu.start_events()
     await asyncio.sleep(_WS_SETTLE_S)
 

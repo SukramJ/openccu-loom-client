@@ -27,13 +27,7 @@ import pytest
 
 from openccu_loom_client import BasicAuth, LoomClient, LoomConfig
 from openccu_loom_client.model import DataPoint
-from tests.helpers.daemon_process import (
-    DaemonHandle,
-    free_port,
-    start_daemon,
-    stop_daemon,
-    wait_for_devices,
-)
+from tests.helpers.daemon_process import DaemonHandle, free_port, start_daemon, stop_daemon, wait_for_devices
 from tests.helpers.godevccu_driver import GodevccuDriver, start_godevccu
 
 ADMIN_USER = "admin"
@@ -183,9 +177,7 @@ def godevccu(godevccu_binary: Path) -> Iterator[GodevccuDriver]:
 
 
 @pytest.fixture
-def daemon_with_ccu(
-    daemon_binary: Path, godevccu: GodevccuDriver, tmp_path: Path
-) -> Iterator[DaemonHandle]:
+def daemon_with_ccu(daemon_binary: Path, godevccu: GodevccuDriver, tmp_path: Path) -> Iterator[DaemonHandle]:
     """Boot the daemon pointed at the running godevccu simulator."""
     rest, ui = free_port(), free_port()
     centrals = (

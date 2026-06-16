@@ -39,9 +39,7 @@ def sysvar_unique_id(*, serial_suffix: str, name: str) -> str:
     CCU legacy name, ``hub_slug`` is python-slugify (the contract's slug
     rule), and the serial suffix fills the central-id slot.
     """
-    return canonical_unique_id(
-        serial_suffix=serial_suffix, address=SYSVAR_ADDRESS, parameter=hub_slug(name)
-    )
+    return canonical_unique_id(serial_suffix=serial_suffix, address=SYSVAR_ADDRESS, parameter=hub_slug(name=name))
 
 
 def program_unique_id(*, serial_suffix: str, name: str) -> str:
@@ -51,9 +49,7 @@ def program_unique_id(*, serial_suffix: str, name: str) -> str:
     Keyed on ``hub_slug(legacy_name)`` (not the program id), with the
     serial suffix in the central-id slot — ``loom_<serial>_program_<slug>``.
     """
-    return canonical_unique_id(
-        serial_suffix=serial_suffix, address=PROGRAM_ADDRESS, parameter=hub_slug(name)
-    )
+    return canonical_unique_id(serial_suffix=serial_suffix, address=PROGRAM_ADDRESS, parameter=hub_slug(name=name))
 
 
 # ---- sysvars ----
@@ -98,7 +94,7 @@ class _SysvarEntitySurface(_HubEntitySurface, _SysvarProtocolSurface):
                 return value_list[idx]
         return raw
 
-    async def send_variable(self, value: Any) -> None:
+    async def send_variable(self, *, value: Any) -> None:
         """Write a new value back to the sysvar."""
         await self.set_value(value)  # type: ignore[attr-defined]
 
@@ -205,9 +201,7 @@ _SYSVAR_EXTENDED_BY_TYPE: dict[str, type[Sysvar]] = {
 }
 
 
-def resolve_sysvar_class(
-    *, value_type: str | None, has_value_list: bool, extended: bool = False
-) -> type[Sysvar]:
+def resolve_sysvar_class(*, value_type: str | None, has_value_list: bool, extended: bool = False) -> type[Sysvar]:
     """
     Pick the ``SysvarDp*`` class from the sysvar's value type.
 
@@ -231,7 +225,7 @@ def make_sysvar_data_point(*, summary: Any, store: Any, enabled_default: bool = 
         extended=bool(getattr(summary, "is_extended", False)),
     )
     dp: Any = cls(summary=summary, store=store)
-    dp.set_enabled_default(enabled_default)
+    dp.set_enabled_default(enabled=enabled_default)
     return cast("Sysvar", dp)
 
 
@@ -246,9 +240,9 @@ def make_program_data_points(
     canonical key; HA unique_ids are scoped per platform.
     """
     button = ProgramDpButton(summary=summary, store=store)
-    button.set_enabled_default(enabled_default)
+    button.set_enabled_default(enabled=enabled_default)
     switch = ProgramDpSwitch(summary=summary, store=store)
-    switch.set_enabled_default(enabled_default)
+    switch.set_enabled_default(enabled=enabled_default)
     return (button, switch)
 
 
@@ -258,15 +252,21 @@ def make_program_data_point(*, summary: Any, store: Any) -> Program:
 
 
 __all__ = [
+    # General
+    "DataPointCategory",
     "HmUpdate",
+    "Program",
     "ProgramDpButton",
     "ProgramDpSwitch",
+    "Sysvar",
     "SysvarDpBinarySensor",
     "SysvarDpNumber",
     "SysvarDpSelect",
     "SysvarDpSensor",
     "SysvarDpSwitch",
     "SysvarDpText",
+    "canonical_unique_id",
+    "hub_slug",
     "make_program_data_point",
     "make_program_data_points",
     "make_sysvar_data_point",

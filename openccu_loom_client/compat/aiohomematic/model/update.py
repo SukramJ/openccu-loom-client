@@ -15,10 +15,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, ClassVar, Final
 
-from aiohomematic.const import (
-    HMIP_FIRMWARE_UPDATE_IN_PROGRESS_STATES,
-    HMIP_FIRMWARE_UPDATE_READY_STATES,
-)
+from aiohomematic.const import HMIP_FIRMWARE_UPDATE_IN_PROGRESS_STATES, HMIP_FIRMWARE_UPDATE_READY_STATES
 from openccu_loom_types.enums import DataPointCategory
 
 from openccu_loom_client.canonical import canonical_unique_id

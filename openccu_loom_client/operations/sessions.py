@@ -29,20 +29,16 @@ class SessionsOperations(_OperationsBase):
         body: dict[str, Any] = {"key": key}
         if subject is not None:
             body["subject"] = subject
-        payload = await self._transport.request(
-            "POST", "/sessions/edit", json_body=body, allow_retry=False
-        )
+        payload = await self._transport.request(method="POST", path="/sessions/edit", json_body=body, allow_retry=False)
         return dict(payload or {})
 
     async def release(self) -> None:
         """Release the current edit lock. Wire: ``DELETE /sessions/edit``."""
-        await self._transport.request("DELETE", "/sessions/edit")
+        await self._transport.request(method="DELETE", path="/sessions/edit")
 
     async def heartbeat(self) -> dict[str, Any]:
         """Refresh the edit lock's TTL. Wire: ``POST /sessions/edit/heartbeat``."""
-        payload = await self._transport.request(
-            "POST", "/sessions/edit/heartbeat", allow_retry=False
-        )
+        payload = await self._transport.request(method="POST", path="/sessions/edit/heartbeat", allow_retry=False)
         return dict(payload or {})
 
     async def take_over(self, *, key: str) -> None:
@@ -52,8 +48,8 @@ class SessionsOperations(_OperationsBase):
         Wire: ``POST /sessions/edit/take-over``.
         """
         await self._transport.request(
-            "POST",
-            "/sessions/edit/take-over",
+            method="POST",
+            path="/sessions/edit/take-over",
             json_body={"key": key},
             allow_retry=False,
         )

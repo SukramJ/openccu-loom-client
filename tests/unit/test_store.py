@@ -14,19 +14,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from openccu_loom_types.rest import (
-    ChannelSummary,
-    DataPointSummary,
-    DeviceDetail,
-    DeviceSummary,
-    Operations,
-    Snapshot,
-)
-from openccu_loom_types.ws import (
-    DataPointValueChangedPayload,
-    DeviceCreatedPayload,
-    DeviceRemovedPayload,
-)
+from openccu_loom_types.rest import ChannelSummary, DataPointSummary, DeviceDetail, DeviceSummary, Operations, Snapshot
+from openccu_loom_types.ws import DataPointValueChangedPayload, DeviceCreatedPayload, DeviceRemovedPayload
 import pytest
 
 from openccu_loom_client.store import LoomStore
@@ -102,13 +91,13 @@ class _FakeTransport:
 class TestLoadSnapshot:
     def test_empty_snapshot_leaves_store_empty(self) -> None:
         store = LoomStore()
-        store.load_snapshot(_snapshot(devices=[]))
+        store.load_snapshot(snapshot=_snapshot(devices=[]))
         assert list(store.devices) == []
 
     def test_devices_land_with_summary_only(self) -> None:
         store = LoomStore()
         store.load_snapshot(
-            _snapshot(
+            snapshot=_snapshot(
                 devices=[
                     _device_summary(address="VCU0001", name="A"),
                     _device_summary(address="VCU0002", name="B"),
@@ -121,13 +110,13 @@ class TestLoadSnapshot:
 
     def test_reloading_snapshot_updates_summary_in_place(self) -> None:
         store = LoomStore()
-        store.load_snapshot(_snapshot(devices=[_device_summary(name="A")]))
+        store.load_snapshot(snapshot=_snapshot(devices=[_device_summary(name="A")]))
         original = store.get_device(address="VCU0001")
         assert original is not None
 
         # Same address, different name → in-place update of the existing
         # Device wrapper, so HA-side entity refs stay valid.
-        store.load_snapshot(_snapshot(devices=[_device_summary(name="A-renamed")]))
+        store.load_snapshot(snapshot=_snapshot(devices=[_device_summary(name="A-renamed")]))
         same = store.get_device(address="VCU0001")
         assert same is original
         assert same.name == "A-renamed"
@@ -139,7 +128,7 @@ class TestLoadSnapshot:
 class TestAttachDetailAndDataPoints:
     def test_detail_adds_channels_and_metadata(self) -> None:
         store = LoomStore()
-        store.load_snapshot(_snapshot(devices=[_device_summary()]))
+        store.load_snapshot(snapshot=_snapshot(devices=[_device_summary()]))
         detail = DeviceDetail.model_validate(
             {
                 **_device_summary().model_dump(),
@@ -149,43 +138,39 @@ class TestAttachDetailAndDataPoints:
                 ],
             }
         )
-        store.attach_device_detail(detail)
+        store.attach_device_detail(detail=detail)
         device = store.get_device(address="VCU0001")
         assert device is not None
         assert {c.number for c in device.channels} == {1, 2}
 
     def test_detail_garbage_collects_vanished_channels(self) -> None:
         store = LoomStore()
-        store.load_snapshot(_snapshot(devices=[_device_summary()]))
+        store.load_snapshot(snapshot=_snapshot(devices=[_device_summary()]))
         # First detail: channels 1, 2, 3.
         first = DeviceDetail.model_validate(
             {
                 **_device_summary().model_dump(),
-                "channels": [
-                    _channel_summary(address="VCU0001", number=n).model_dump() for n in (1, 2, 3)
-                ],
+                "channels": [_channel_summary(address="VCU0001", number=n).model_dump() for n in (1, 2, 3)],
             }
         )
-        store.attach_device_detail(first)
+        store.attach_device_detail(detail=first)
         # Second detail: channel 2 vanished.
         second = DeviceDetail.model_validate(
             {
                 **_device_summary().model_dump(),
-                "channels": [
-                    _channel_summary(address="VCU0001", number=n).model_dump() for n in (1, 3)
-                ],
+                "channels": [_channel_summary(address="VCU0001", number=n).model_dump() for n in (1, 3)],
             }
         )
-        store.attach_device_detail(second)
+        store.attach_device_detail(detail=second)
         device = store.get_device(address="VCU0001")
         assert device is not None
         assert {c.number for c in device.channels} == {1, 3}
 
     def test_attach_data_points_populates_lookup(self) -> None:
         store = LoomStore()
-        store.load_snapshot(_snapshot(devices=[_device_summary()]))
+        store.load_snapshot(snapshot=_snapshot(devices=[_device_summary()]))
         store.attach_device_detail(
-            DeviceDetail.model_validate(
+            detail=DeviceDetail.model_validate(
                 {
                     **_device_summary().model_dump(),
                     "channels": [_channel_summary(address="VCU0001", number=1).model_dump()],
@@ -207,9 +192,9 @@ class TestAttachDetailAndDataPoints:
 
     def test_re_attach_replaces_data_points_wholesale(self) -> None:
         store = LoomStore()
-        store.load_snapshot(_snapshot(devices=[_device_summary()]))
+        store.load_snapshot(snapshot=_snapshot(devices=[_device_summary()]))
         store.attach_device_detail(
-            DeviceDetail.model_validate(
+            detail=DeviceDetail.model_validate(
                 {
                     **_device_summary().model_dump(),
                     "channels": [_channel_summary(address="VCU0001", number=1).model_dump()],
@@ -238,9 +223,9 @@ class TestLiveUpdates:
     @pytest.fixture
     def populated(self) -> LoomStore:
         store = LoomStore()
-        store.load_snapshot(_snapshot(devices=[_device_summary()]))
+        store.load_snapshot(snapshot=_snapshot(devices=[_device_summary()]))
         store.attach_device_detail(
-            DeviceDetail.model_validate(
+            detail=DeviceDetail.model_validate(
                 {
                     **_device_summary().model_dump(),
                     "channels": [_channel_summary(address="VCU0001", number=1).model_dump()],
@@ -266,7 +251,7 @@ class TestLiveUpdates:
                 "modified_at": "2026-05-24T08:42:13Z",
             }
         )
-        populated.apply_value_changed(payload)
+        populated.apply_value_changed(payload=payload)
         dp = populated.get_data_point(address="VCU0001", channel=1, parameter="LEVEL")
         assert dp is not None
         assert dp.value == 0.8
@@ -284,7 +269,7 @@ class TestLiveUpdates:
                 "modified_at": "2026-05-24T08:42:13Z",
             }
         )
-        populated.apply_value_changed(payload)
+        populated.apply_value_changed(payload=payload)
         # No crash, no addition.
         assert populated.get_device(address="VCU9999") is None
 
@@ -298,7 +283,7 @@ class TestLiveUpdates:
                 "model": "HmIP-eTRV-2",
             }
         )
-        store.apply_device_created(payload)
+        store.apply_device_created(payload=payload)
         new_dev = store.get_device(address="VCU_NEW")
         assert new_dev is not None
         assert new_dev.model == "HmIP-eTRV-2"
@@ -307,7 +292,7 @@ class TestLiveUpdates:
 
     def test_apply_device_created_is_idempotent(self) -> None:
         store = LoomStore()
-        store.load_snapshot(_snapshot(devices=[_device_summary(name="original")]))
+        store.load_snapshot(snapshot=_snapshot(devices=[_device_summary(name="original")]))
         payload = DeviceCreatedPayload.model_validate(
             {
                 "central": "home",
@@ -317,7 +302,7 @@ class TestLiveUpdates:
             }
         )
         # Existing device → no overwrite (snapshot has the canonical info).
-        store.apply_device_created(payload)
+        store.apply_device_created(payload=payload)
         assert store.get_device(address="VCU0001").name == "original"
 
     def test_apply_device_removed_clears_device_and_children(self, populated: LoomStore) -> None:
@@ -328,7 +313,7 @@ class TestLiveUpdates:
                 "device_address": "VCU0001",
             }
         )
-        populated.apply_device_removed(payload)
+        populated.apply_device_removed(payload=payload)
         assert populated.get_device(address="VCU0001") is None
         assert populated.get_channel(address="VCU0001", number=1) is None
         assert populated.get_data_point(address="VCU0001", channel=1, parameter="LEVEL") is None
@@ -341,9 +326,9 @@ class TestSetValue:
     async def test_send_value_round_trips_to_transport(self) -> None:
         transport = _FakeTransport()
         store = LoomStore(transport=transport)  # type: ignore[arg-type]
-        store.load_snapshot(_snapshot(devices=[_device_summary()]))
+        store.load_snapshot(snapshot=_snapshot(devices=[_device_summary()]))
         store.attach_device_detail(
-            DeviceDetail.model_validate(
+            detail=DeviceDetail.model_validate(
                 {
                     **_device_summary().model_dump(),
                     "channels": [_channel_summary(address="VCU0001", number=1).model_dump()],
@@ -357,7 +342,7 @@ class TestSetValue:
         )
         dp = store.get_data_point(address="VCU0001", channel=1, parameter="STATE")
         assert dp is not None
-        await dp.send_value(True)
+        await dp.send_value(value=True)
 
         assert len(transport.calls) == 1
         method, path, body = transport.calls[0]
@@ -368,9 +353,9 @@ class TestSetValue:
     async def test_send_value_passes_priority(self) -> None:
         transport = _FakeTransport()
         store = LoomStore(transport=transport)  # type: ignore[arg-type]
-        store.load_snapshot(_snapshot(devices=[_device_summary()]))
+        store.load_snapshot(snapshot=_snapshot(devices=[_device_summary()]))
         store.attach_device_detail(
-            DeviceDetail.model_validate(
+            detail=DeviceDetail.model_validate(
                 {
                     **_device_summary().model_dump(),
                     "channels": [_channel_summary(address="VCU0001", number=1).model_dump()],
@@ -384,7 +369,7 @@ class TestSetValue:
         )
         dp = store.get_data_point(address="VCU0001", channel=1, parameter="LEVEL")
         assert dp is not None
-        await dp.send_value(0.5, priority="high")
+        await dp.send_value(value=0.5, priority="high")
         body = transport.calls[0][2]
         assert body == {"value": 0.5, "priority": "high"}
 
@@ -400,9 +385,9 @@ class TestSetValue:
 class TestModelNavigation:
     def test_channel_resolves_back_to_device(self) -> None:
         store = LoomStore()
-        store.load_snapshot(_snapshot(devices=[_device_summary()]))
+        store.load_snapshot(snapshot=_snapshot(devices=[_device_summary()]))
         store.attach_device_detail(
-            DeviceDetail.model_validate(
+            detail=DeviceDetail.model_validate(
                 {
                     **_device_summary().model_dump(),
                     "channels": [_channel_summary(address="VCU0001", number=1).model_dump()],
@@ -415,9 +400,9 @@ class TestModelNavigation:
 
     def test_data_point_resolves_back_to_channel_and_device(self) -> None:
         store = LoomStore()
-        store.load_snapshot(_snapshot(devices=[_device_summary()]))
+        store.load_snapshot(snapshot=_snapshot(devices=[_device_summary()]))
         store.attach_device_detail(
-            DeviceDetail.model_validate(
+            detail=DeviceDetail.model_validate(
                 {
                     **_device_summary().model_dump(),
                     "channels": [_channel_summary(address="VCU0001", number=1).model_dump()],

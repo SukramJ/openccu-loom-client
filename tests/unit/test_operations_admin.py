@@ -48,7 +48,7 @@ _INFO = {
 
 @pytest.fixture
 async def http(mock_daemon: MockDaemon) -> AsyncIterator[tuple[HttpTransport, MockDaemon]]:
-    t = HttpTransport(mock_daemon.config, backoff_sequence=(0.0,))
+    t = HttpTransport(config=mock_daemon.config, backoff_sequence=(0.0,))
     mock_daemon.get("/api/v1/info", payload=_INFO)
     await t.connect()
     yield t, mock_daemon
@@ -69,9 +69,7 @@ class TestAuthOperations:
             "/api/v1/auth/tokens/v2",
             payload={"token": "secret-xyz", "fingerprint": "ab12"},
         )
-        created = await AuthOperations(transport=t).create_token_v2(
-            token=TokenCreate(subject="ha", role="operator")
-        )
+        created = await AuthOperations(transport=t).create_token_v2(token=TokenCreate(subject="ha", role="operator"))
         assert created.token == "secret-xyz"
         assert created.fingerprint == "ab12"
 
@@ -129,9 +127,7 @@ class TestConfigOperations:
             "/api/v1/config/sections/north",
             payload={"section": "north", "version": 3, "restart_required": False},
         )
-        ack = await ConfigOperations(transport=t).put_section(
-            section="north", values={"port": 9090}
-        )
+        ack = await ConfigOperations(transport=t).put_section(section="north", values={"port": 9090})
         assert ack["version"] == 3
 
 

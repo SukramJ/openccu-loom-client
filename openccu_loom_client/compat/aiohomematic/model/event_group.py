@@ -61,7 +61,7 @@ _TRIGGER_SHORT: dict[DeviceTriggerEventType, str] = {
 }
 
 
-def _trigger_type(parameter: str) -> DeviceTriggerEventType | None:
+def _trigger_type(*, parameter: str) -> DeviceTriggerEventType | None:
     if parameter in _CLICK_PARAMS:
         return DeviceTriggerEventType.Keypress
     if parameter in _IMPULSE_PARAMS:
@@ -111,9 +111,7 @@ class ChannelEventGroup:
         for the same channel, and both entries may run in one HA
         instance.
         """
-        channel_uid = generate_channel_unique_id(
-            central_id=self._central_id, address=self._channel.address
-        )
+        channel_uid = generate_channel_unique_id(central_id=self._central_id, address=self._channel.address)
         return f"{LOOM_NAMESPACE}_event_group_{_TRIGGER_SHORT[self._event_type]}_{channel_uid}"
 
     @property
@@ -237,7 +235,7 @@ def build_event_groups(
                     continue
                 if getattr(dp.summary, "usage", None) in _SUPPRESSED_USAGES:
                     continue
-                resolved = _trigger_type(dp.parameter)
+                resolved = _trigger_type(parameter=dp.parameter)
                 if resolved is None:
                     continue
                 by_type.setdefault(resolved, []).append(dp)

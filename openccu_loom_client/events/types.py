@@ -51,9 +51,7 @@ from openccu_loom_client.canonical import canonical_unique_id
 _LOGGER: Final = logging.getLogger(__name__)
 
 
-def data_point_event_key(
-    *, serial_suffix: str, device_address: str, channel: int | str, parameter: str
-) -> str:
+def data_point_event_key(*, serial_suffix: str, device_address: str, channel: int | str, parameter: str) -> str:
     """
     Rebuild a generic data point's canonical HA routing key.
 
@@ -410,7 +408,7 @@ def known_event_types() -> frozenset[str]:
     return frozenset(_EVENT_REGISTRY)
 
 
-def event_from_envelope(envelope: WsEnvelope) -> LoomEvent:
+def event_from_envelope(*, envelope: WsEnvelope) -> LoomEvent:
     """
     Convert a wire-level ``WsEnvelope`` into a typed event.
 

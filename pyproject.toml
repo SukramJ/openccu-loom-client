@@ -13,7 +13,7 @@ requires-python = ">=3.14"
 dependencies = [
     "aiohomematic>=2026.6.2",
     "aiohttp>=3.9",
-    "openccu-loom-types==0.1.20",
+    "openccu-loom-types==0.1.21",
     "pydantic>=2.6",
     "python-slugify>=8.0.0",
 ]
@@ -35,12 +35,13 @@ Homepage = "https://github.com/SukramJ/openccu-loom-client"
 
 [project.optional-dependencies]
 dev = [
-    "aiohomematic>=2026.6.1",
+    "aiohomematic>=2026.6.2",
     "pytest>=7.4",
     "pytest-asyncio>=0.23",
     "aioresponses>=0.7.6",
     "ruff>=0.6",
     "mypy>=1.10",
+    "pylint>=3.2",
 ]
 
 [tool.setuptools.dynamic]
@@ -125,6 +126,14 @@ disable = [
     "wrong-import-order", # Enforced by Ruff/isort; allow non-standard ordering here
     #"consider-using-f-string",
     "consider-using-namedtuple-or-dataclass", # Too opinionated; dataclasses/namedtuples by dev choice
+    "consider-using-assignment-expr", # R6103: decision to use := is better left to devs
+    "unnecessary-ellipsis", # W2301: `...` is idiomatic in Protocol/stub method bodies
+    "protected-access", # W0212: store mutates domain wrappers via their private `_replace_*`/
+                        # `_upsert_*`/`_attach_*` methods by design (see CLAUDE.md); ruff `SLF001`
+                        # already guards this precisely per-file.
+    "attribute-defined-outside-init", # W0201: registration mixins set `_registered`/`_enabled_default`
+                                      # lazily and read them via `getattr(self, ..., False)`; they do
+                                      # not own the host class's __init__.
 
     # Handled by ruff
     # Ref: <https://github.com/astral-sh/ruff/issues/970>
@@ -361,11 +370,11 @@ overgeneral-exceptions = [
 runtime-typing = false
 
 [tool.pylint.CODE_STYLE]
-max-line-length-suggestions = 100
+max-line-length-suggestions = 120
 
 [tool.ruff]
 target-version = "py314" # Target Python version for Ruff
-line-length = 100 # Maximum line length for linting and formatting guidance
+line-length = 120 # Maximum line length for linting and formatting guidance
 
 # Honor excludes even when files are passed explicitly (pre-commit passes paths)
 force-exclude = true
@@ -528,6 +537,10 @@ fixture-parentheses = false # Don't require parentheses for fixtures without par
     "SLF001", # private access allowed in dev scripts
 ]
 ".github/scripts/*" = ["T20", "BLE001", "S110", "C901"] # CI utility scripts; not production code
+# The project's own `lint-all-exports` hook enforces grouped, header-commented
+# __all__ lists in every public package __init__.py (group + alphabetical-within-
+# group). RUF022 (global alphabetical sort) would destroy that group structure.
+"openccu_loom_client/**/__init__.py" = ["RUF022"]
 # The store mutates live domain wrappers through their private
 # `_replace_*` / `_update_*` / `_attach_*` / `_upsert_*` methods by
 # design (see CLAUDE.md conventions) — that coupling is the point.

@@ -67,14 +67,10 @@ def _channel(
 def _store_with(device: DeviceSummary, channels: list[ChannelSummary]) -> LoomStore:
     store = LoomStore()
     store.load_snapshot(
-        Snapshot.model_validate(
-            {"generated_at": "2026-06-12T08:00:00Z", "devices": [device.model_dump()]}
-        )
+        snapshot=Snapshot.model_validate({"generated_at": "2026-06-12T08:00:00Z", "devices": [device.model_dump()]})
     )
-    detail = DeviceDetail.model_validate(
-        {**device.model_dump(), "channels": [c.model_dump() for c in channels]}
-    )
-    store.attach_device_detail(detail)
+    detail = DeviceDetail.model_validate({**device.model_dump(), "channels": [c.model_dump() for c in channels]})
+    store.attach_device_detail(detail=detail)
     return store
 
 

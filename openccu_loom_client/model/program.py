@@ -64,7 +64,7 @@ class Program:
         """
         await self._store.execute_program(program_id=self.id)
 
-    def _replace_summary(self, summary: ProgramSummary) -> None:
+    def _replace_summary(self, *, summary: ProgramSummary) -> None:
         self._summary = summary
 
     def __repr__(self) -> str:

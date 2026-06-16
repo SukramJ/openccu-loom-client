@@ -98,6 +98,7 @@ class CallParameterCollector:
         exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
+        /,
     ) -> None:
         """Flush staged writes on clean exit; propagate on error."""
         # Only flush on clean exit; on error, let the failure propagate.
