@@ -37,4 +37,8 @@ class InterfaceConfig:
     remote_path: str | None = None
 
 
-__all__: Final = ["InterfaceConfig"]
+__all__: Final = [
+    # General
+    "Interface",
+    "InterfaceConfig",
+]

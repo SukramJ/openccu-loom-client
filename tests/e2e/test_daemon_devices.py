@@ -47,9 +47,7 @@ async def test_device_detail_and_channels_agree(client_with_ccu: LoomClient) -> 
 async def test_list_data_points_has_state(client_with_ccu: LoomClient) -> None:
     await client_with_ccu.bootstrap()
     dp = find_writable_bool_dp(client_with_ccu)
-    data_points = await client_with_ccu.devices.list_data_points(
-        address=dp.device_address, channel=dp.channel_number
-    )
+    data_points = await client_with_ccu.devices.list_data_points(address=dp.device_address, channel=dp.channel_number)
     assert "STATE" in {d.parameter for d in data_points}
 
 
@@ -89,9 +87,7 @@ async def test_list_custom_data_points(client_with_ccu: LoomClient) -> None:
 async def test_build_configurable_devices(client_with_ccu: LoomClient) -> None:
     import dataclasses
 
-    from openccu_loom_client.compat.aiohomematic.central.configurable_devices import (
-        build_configurable_devices,
-    )
+    from openccu_loom_client.compat.aiohomematic.central.configurable_devices import build_configurable_devices
 
     await client_with_ccu.bootstrap()
     devices = build_configurable_devices(client_with_ccu.store)
@@ -111,9 +107,7 @@ async def test_build_event_groups(client_with_ccu: LoomClient) -> None:
     from openccu_loom_client.compat.aiohomematic.model.event_group import build_event_groups
 
     await client_with_ccu.bootstrap()
-    groups = build_event_groups(
-        store=client_with_ccu.store, central_id=client_with_ccu.store.serial_suffix
-    )
+    groups = build_event_groups(store=client_with_ccu.store, central_id=client_with_ccu.store.serial_suffix)
     # The seeded HmIP-BSM exposes KEY_TRANSCEIVER channels with PRESS_* params.
     assert groups, "expected device-trigger event groups from the seeded devices"
     group = groups[0]

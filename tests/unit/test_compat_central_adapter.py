@@ -25,9 +25,7 @@ from openccu_loom_client.compat.aiohomematic.central.adapter import _JsonRpcClie
 from tests.helpers import MockDaemon
 
 
-def _dp_summary(
-    *, parameter: str, type_: str, read: bool, write: bool, value: object = None
-) -> DataPointSummary:
+def _dp_summary(*, parameter: str, type_: str, read: bool, write: bool, value: object = None) -> DataPointSummary:
     return DataPointSummary.model_validate(
         {
             "parameter": parameter,
@@ -75,9 +73,7 @@ class TestCentralConfigAuthResolution:
         assert isinstance(central._client.config.auth, BearerAuth)
 
     async def test_username_password_becomes_basic(self) -> None:
-        central = await _make_config(
-            token=None, username="admin", password="secret"
-        ).create_central()
+        central = await _make_config(token=None, username="admin", password="secret").create_central()
         assert isinstance(central._client.config.auth, BasicAuth)
 
     def test_no_credentials_raises(self) -> None:
@@ -128,9 +124,7 @@ class TestSystemInformation:
         mock.get(f"{_BASE}/system/ccu", payload=[])
         mock.get(
             f"{_BASE}/interfaces",
-            payload=[
-                {"id": "home:HmIP-RF", "name": "HmIP-RF", "connected": True, "interface": "HmIP-RF"}
-            ],
+            payload=[{"id": "home:HmIP-RF", "name": "HmIP-RF", "connected": True, "interface": "HmIP-RF"}],
         )
         info = await central.validate_config_and_get_system_information()
         assert info.version == "1.2.3"
@@ -163,9 +157,7 @@ class TestSerialInjection:
         return suffix
 
     async def test_injected_serial_wins_over_daemon(self, mock_daemon: MockDaemon) -> None:
-        assert (
-            await self._refresh(mock_daemon=mock_daemon, serial="3014F711A0001234") == "11a0001234"
-        )
+        assert await self._refresh(mock_daemon=mock_daemon, serial="3014F711A0001234") == "11a0001234"
 
     async def test_daemon_serial_used_without_injection(self, mock_daemon: MockDaemon) -> None:
         assert await self._refresh(mock_daemon=mock_daemon, serial=None) == "daemon1234"
@@ -175,7 +167,7 @@ class TestActionCoordinators:
     async def test_device_coordinator_get_device(self, connected) -> None:
         central, _ = connected
         central._client.store.load_snapshot(
-            Snapshot.model_validate(
+            snapshot=Snapshot.model_validate(
                 {
                     "generated_at": "2026-05-24T08:00:00Z",
                     "devices": [
@@ -204,9 +196,7 @@ class TestActionCoordinators:
         central, mock = connected
         mock.get(
             f"{_BASE}/interfaces",
-            payload=[
-                {"id": "home:HmIP-RF", "name": "HmIP-RF", "connected": True, "interface": "HmIP-RF"}
-            ],
+            payload=[{"id": "home:HmIP-RF", "name": "HmIP-RF", "connected": True, "interface": "HmIP-RF"}],
         )
         await central.client_coordinator.refresh()
         assert central.client_coordinator.has_client(interface_id="home:HmIP-RF") is True
@@ -230,7 +220,7 @@ class TestGenericDataPointModel:
     async def _populate(self, central) -> None:
         store = central._client.store
         store.load_snapshot(
-            Snapshot.model_validate(
+            snapshot=Snapshot.model_validate(
                 {
                     "generated_at": "2026-05-24T08:00:00Z",
                     "devices": [
@@ -273,29 +263,19 @@ class TestGenericDataPointModel:
     async def test_registered_filter(self) -> None:
         central = await _make_config().create_central()
         await self._populate(central)
-        unreg = central.query_facade.get_data_points(
-            category=DataPointCategory.Switch, registered=False
-        )
+        unreg = central.query_facade.get_data_points(category=DataPointCategory.Switch, registered=False)
         assert len(unreg) == 1
         unreg[0].register()
-        assert (
-            central.query_facade.get_data_points(
-                category=DataPointCategory.Switch, registered=False
-            )
-            == ()
-        )
+        assert central.query_facade.get_data_points(category=DataPointCategory.Switch, registered=False) == ()
 
 
 class TestHubDataPointModel:
     async def test_sysvar_and_program_categorised(self) -> None:
-        from openccu_loom_client.compat.aiohomematic.model.hub import (
-            ProgramDpButton,
-            SysvarDpBinarySensor,
-        )
+        from openccu_loom_client.compat.aiohomematic.model.hub import ProgramDpButton, SysvarDpBinarySensor
 
         central = await _make_config().create_central()
         central._client.store.load_snapshot(
-            Snapshot.model_validate(
+            snapshot=Snapshot.model_validate(
                 {
                     "generated_at": "2026-05-24T08:00:00Z",
                     "interfaces": [
@@ -323,12 +303,10 @@ class TestHubDataPointModel:
         # The serial fills the central-id slot of hub keys; the adapter
         # sets it from /system/ccu at start(), but this test drives the
         # store directly, so set it explicitly.
-        central._client.store.set_serial("3014F711A0001234")  # → 11a0001234
+        central._client.store.set_serial(serial="3014F711A0001234")  # → 11a0001234
         # aiohomematic default mapping: LOGIC/ALARM read as binary
         # sensors (writable variants need the extended sysvar marker).
-        binaries = central.hub_coordinator.get_hub_data_points(
-            category=SysvarDpBinarySensor.default_category()
-        )
+        binaries = central.hub_coordinator.get_hub_data_points(category=SysvarDpBinarySensor.default_category())
         assert len(binaries) == 1
         assert isinstance(binaries[0], SysvarDpBinarySensor)
         # canonical sysvar key: loom_<serial>_sysvar_<hub_slug(name)>.
@@ -342,9 +320,7 @@ class TestHubDataPointModel:
         # registered bookkeeping persists across scans (cached instances)
         buttons[0].register()
         assert (
-            central.hub_coordinator.get_hub_data_points(
-                category=ProgramDpButton.default_category(), registered=False
-            )
+            central.hub_coordinator.get_hub_data_points(category=ProgramDpButton.default_category(), registered=False)
             == ()
         )
 
@@ -355,7 +331,7 @@ class TestInternalSysvarInclusion:
 
         central = await _make_config().create_central()
         central._client.store.load_snapshot(
-            Snapshot.model_validate(
+            snapshot=Snapshot.model_validate(
                 {
                     "generated_at": "2026-05-24T08:00:00Z",
                     "devices": [],
@@ -390,10 +366,8 @@ class TestInternalSysvarInclusion:
                 }
             )
         )
-        central._client.store.set_serial("3014F711A0001234")
-        sensors = central.hub_coordinator.get_hub_data_points(
-            category=SysvarDpSensor.default_category()
-        )
+        central._client.store.set_serial(serial="3014F711A0001234")
+        sensors = central.hub_coordinator.get_hub_data_points(category=SysvarDpSensor.default_category())
         names = sorted(dp.name for dp in sensors)
         assert names == ["Temperatur Garten", "svEnergyCounter_14179"]
         assert all(dp.enabled_default is False for dp in sensors)
@@ -405,7 +379,7 @@ class TestInternalSysvarInclusion:
 
         central = await _make_config().create_central()
         central._client.store.load_snapshot(
-            Snapshot.model_validate(
+            snapshot=Snapshot.model_validate(
                 {
                     "generated_at": "2026-05-24T08:00:00Z",
                     "devices": [],
@@ -429,12 +403,10 @@ class TestInternalSysvarInclusion:
                 }
             )
         )
-        central._client.store.set_serial("3014F711A0001234")
+        central._client.store.set_serial(serial="3014F711A0001234")
         sensors = {
             dp.name: dp
-            for dp in central.hub_coordinator.get_hub_data_points(
-                category=SysvarDpSensor.default_category()
-            )
+            for dp in central.hub_coordinator.get_hub_data_points(category=SysvarDpSensor.default_category())
         }
         assert sensors["Marked"].enabled_default is True
         assert sensors["Unmarked"].enabled_default is False
@@ -444,7 +416,7 @@ class TestInternalSysvarInclusion:
 
         central = await _make_config().create_central()
         central._client.store.load_snapshot(
-            Snapshot.model_validate(
+            snapshot=Snapshot.model_validate(
                 {
                     "generated_at": "2026-05-24T08:00:00Z",
                     "devices": [],
@@ -496,10 +468,8 @@ class TestInternalSysvarInclusion:
                 }
             )
         )
-        central._client.store.set_serial("3014F711A0001234")
-        sensors = central.hub_coordinator.get_hub_data_points(
-            category=SysvarDpSensor.default_category()
-        )
+        central._client.store.set_serial(serial="3014F711A0001234")
+        sensors = central.hub_coordinator.get_hub_data_points(category=SysvarDpSensor.default_category())
         assert [dp.name for dp in sensors] == ["svEnergyCounter_14179"]
 
 
@@ -517,9 +487,7 @@ class TestEventGroupsAndInstallMode:
 
 class TestRenameDeviceByIseId:
     @staticmethod
-    def _fake_client(
-        devices: list[SimpleNamespace], calls: list[tuple[str, str]]
-    ) -> SimpleNamespace:
+    def _fake_client(devices: list[SimpleNamespace], calls: list[tuple[str, str]]) -> SimpleNamespace:
         async def patch_device(*, address: str, name: str) -> None:
             calls.append((address, name))
 
@@ -537,13 +505,13 @@ class TestRenameDeviceByIseId:
             ],
             calls,
         )
-        await _JsonRpcClient(client).rename_device(ise_id=4712, name="Kitchen")
+        await _JsonRpcClient(client=client).rename_device(ise_id=4712, name="Kitchen")
         assert calls == [("VCU0000002", "Kitchen")]
 
     async def test_unknown_ise_id_raises(self) -> None:
         client = self._fake_client([SimpleNamespace(ise_id=1, address="VCU1")], [])
         with pytest.raises(ValueError, match="ise_id 9999"):
-            await _JsonRpcClient(client).rename_device(ise_id=9999, name="x")
+            await _JsonRpcClient(client=client).rename_device(ise_id=9999, name="x")
 
 
 class TestCheckConfig:

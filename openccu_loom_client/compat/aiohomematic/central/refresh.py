@@ -90,13 +90,11 @@ def install_refresh_bridge(
     ``group`` so the caller tears them down with a single ``group.cancel()``.
     """
     _wire_value_events(group=group, store=store, ha_bus=ha_bus)
-    _wire_trigger_and_rollback(
-        group=group, store=store, ha_bus=ha_bus, event_group_resolver=event_group_resolver
-    )
+    _wire_trigger_and_rollback(group=group, store=store, ha_bus=ha_bus, event_group_resolver=event_group_resolver)
     _wire_central_and_lifecycle(group=group, ha_bus=ha_bus, central_name=central_name)
 
 
-def _device_attrs(store: LoomStore, address: str) -> tuple[str, str, str | None]:
+def _device_attrs(*, store: LoomStore, address: str) -> tuple[str, str, str | None]:
     """Return ``(interface_id, model, name)`` for a device, with safe fallbacks."""
     device = store.get_device(address=address)
     if device is None:
@@ -104,7 +102,7 @@ def _device_attrs(store: LoomStore, address: str) -> tuple[str, str, str | None]
     return device.interface_id or "", device.model or "", device.name
 
 
-def _trigger_type(token: str) -> DeviceTriggerEventType:
+def _trigger_type(*, token: str) -> DeviceTriggerEventType:
     """Map the daemon's short token (``keypress``) to the aiohomematic member."""
     for member in DeviceTriggerEventType:
         if token in (member.short, member.value):
@@ -116,9 +114,7 @@ def _wire_value_events(*, group: SubscriptionGroup, store: LoomStore, ha_bus: Ai
     """Bridge daemon value/custom/sysvar changes to ``DataPointStateChangedEvent``."""
 
     async def _emit(*, ts: Any, event_key: str, value: Any = None) -> None:
-        await ha_bus.publish(
-            event=DataPointStateChangedEvent(timestamp=ts, unique_id=event_key, new_value=value)
-        )
+        await ha_bus.publish(event=DataPointStateChangedEvent(timestamp=ts, unique_id=event_key, new_value=value))
 
     async def on_value(event: DataPointValueChangedEvent) -> None:
         await _emit(
@@ -187,11 +183,11 @@ def _wire_trigger_and_rollback(
 
     async def on_trigger(event: LoomDeviceTriggerEvent) -> None:
         p = event.payload
-        interface_id, model, device_name = _device_attrs(store, p.device_address)
+        interface_id, model, device_name = _device_attrs(store=store, address=p.device_address)
         await ha_bus.publish(
             event=DeviceTriggerEvent(
                 timestamp=datetime.now(tz=UTC),
-                trigger_type=_trigger_type(p.event_type),
+                trigger_type=_trigger_type(token=p.event_type),
                 model=model,
                 interface_id=p.interface_id or interface_id,
                 device_address=p.device_address,
@@ -211,7 +207,7 @@ def _wire_trigger_and_rollback(
             eg := event_group_resolver(
                 device_address=p.device_address,
                 channel_no=p.channel,
-                event_type=_trigger_type(p.event_type),
+                event_type=_trigger_type(token=p.event_type),
             )
         ):
             eg.record_trigger(parameter=p.parameter, value=p.value)
@@ -227,7 +223,7 @@ def _wire_trigger_and_rollback(
         # Translate the raw daemon broadcast into the public aiohomematic event
         # HA subscribes to (raw ``sent``/``present`` map to rolled_back/restored).
         p = event.payload
-        interface_id, _model, device_name = _device_attrs(store, p.device_address)
+        interface_id, _model, device_name = _device_attrs(store=store, address=p.device_address)
         await ha_bus.publish(
             event=OptimisticRollbackEvent(
                 timestamp=datetime.now(tz=UTC),
@@ -248,9 +244,7 @@ def _wire_trigger_and_rollback(
     group.subscribe(event_type=DataPointOptimisticRolledBackEvent, handler=on_rollback)
 
 
-def _wire_central_and_lifecycle(
-    *, group: SubscriptionGroup, ha_bus: AioEventBus, central_name: str
-) -> None:
+def _wire_central_and_lifecycle(*, group: SubscriptionGroup, ha_bus: AioEventBus, central_name: str) -> None:
     """Bridge central-state transitions and device create/remove to lifecycle events."""
 
     async def on_central_state(event: LoomCentralStateChangedEvent) -> None:
@@ -265,9 +259,7 @@ def _wire_central_and_lifecycle(
             )
         )
 
-    async def _emit_lifecycle(
-        *, event_type: DeviceLifecycleEventType, device_address: str, interface_id: str
-    ) -> None:
+    async def _emit_lifecycle(*, event_type: DeviceLifecycleEventType, device_address: str, interface_id: str) -> None:
         await ha_bus.publish(
             event=DeviceLifecycleEvent(
                 timestamp=datetime.now(tz=UTC),

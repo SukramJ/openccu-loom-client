@@ -41,8 +41,8 @@ class LinksOperations(_OperationsBase):
         Wire: ``GET /devices/{addr}/links?locale=``.
         """
         payload = await self._transport.request(
-            "GET",
-            f"/devices/{address}/links",
+            method="GET",
+            path=f"/devices/{address}/links",
             params={"locale": locale},
         )
         return [Link.model_validate(link) for link in (payload or [])]
@@ -70,8 +70,8 @@ class LinksOperations(_OperationsBase):
             description=description,
         )
         await self._transport.request(
-            "POST",
-            f"/devices/{address}/links",
+            method="POST",
+            path=f"/devices/{address}/links",
             json_body=body.model_dump(mode="json", exclude_none=True),
             allow_retry=False,
         )
@@ -84,8 +84,8 @@ class LinksOperations(_OperationsBase):
         Idempotent — removing an absent link is a no-op.
         """
         await self._transport.request(
-            "DELETE",
-            f"/devices/{address}/links",
+            method="DELETE",
+            path=f"/devices/{address}/links",
             params={"sender": sender, "receiver": receiver},
             allow_retry=True,
         )
@@ -97,8 +97,8 @@ class LinksOperations(_OperationsBase):
         Wire: ``GET /devices/{addr}/link-ps/{peer}``.
         """
         payload = await self._transport.request(
-            "GET",
-            f"/devices/{address}/link-ps/{peer}",
+            method="GET",
+            path=f"/devices/{address}/link-ps/{peer}",
         )
         return dict(payload or {})
 
@@ -109,8 +109,8 @@ class LinksOperations(_OperationsBase):
         Wire: ``PUT /devices/{addr}/link-ps/{peer}``.
         """
         await self._transport.request(
-            "PUT",
-            f"/devices/{address}/link-ps/{peer}",
+            method="PUT",
+            path=f"/devices/{address}/link-ps/{peer}",
             json_body=values,
             allow_retry=True,
         )
@@ -131,8 +131,8 @@ class LinksOperations(_OperationsBase):
         ``role`` is ``sender`` or ``receiver``.
         """
         return await self._transport.request(
-            "GET",
-            f"/devices/{address}/channels/{channel}/linkable-channels",
+            method="GET",
+            path=f"/devices/{address}/channels/{channel}/linkable-channels",
             params={"role": role, "interface": interface, "locale": locale},
         )
 
@@ -145,8 +145,8 @@ class LinksOperations(_OperationsBase):
         Wire: ``GET /devices/{addr}/central-links``.
         """
         payload = await self._transport.request(
-            "GET",
-            f"/devices/{address}/central-links",
+            method="GET",
+            path=f"/devices/{address}/central-links",
         )
         return CentralLinksStatus.model_validate(payload)
 
@@ -159,8 +159,8 @@ class LinksOperations(_OperationsBase):
         central (HA) trigger events.
         """
         await self._transport.request(
-            "POST",
-            f"/devices/{address}/central-links",
+            method="POST",
+            path=f"/devices/{address}/central-links",
             allow_retry=False,
         )
 
@@ -171,7 +171,7 @@ class LinksOperations(_OperationsBase):
         Wire: ``DELETE /devices/{addr}/central-links``. Idempotent.
         """
         await self._transport.request(
-            "DELETE",
-            f"/devices/{address}/central-links",
+            method="DELETE",
+            path=f"/devices/{address}/central-links",
             allow_retry=True,
         )

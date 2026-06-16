@@ -32,7 +32,7 @@ class TestAuthMethods:
     def test_basic_auth_header(self) -> None:
         auth = BasicAuth(username="admin", password="secret")
         headers: dict[str, str] = {}
-        auth.apply_to_headers(headers)
+        auth.apply_to_headers(headers=headers)
         # base64("admin:secret") == "YWRtaW46c2VjcmV0"
         assert headers["Authorization"] == "Basic YWRtaW46c2VjcmV0"
         # Identity hint never includes the password.
@@ -42,7 +42,7 @@ class TestAuthMethods:
     def test_bearer_auth_header_and_identity_hint(self) -> None:
         auth = BearerAuth(token="abcdef123456", label="ha")
         headers: dict[str, str] = {}
-        auth.apply_to_headers(headers)
+        auth.apply_to_headers(headers=headers)
         assert headers["Authorization"] == "Bearer abcdef123456"
         # Only the last 6 chars leak into logs.
         assert auth.identity_hint == "bearer:ha:…123456"
@@ -56,13 +56,13 @@ class TestAuthMethods:
     def test_session_auth_cookie_header(self) -> None:
         auth = SessionAuth(cookie_value="sess123")
         headers: dict[str, str] = {}
-        auth.apply_to_headers(headers)
+        auth.apply_to_headers(headers=headers)
         assert headers["Cookie"] == "openccu_loom_session=sess123"
 
     def test_session_auth_preserves_existing_cookie(self) -> None:
         auth = SessionAuth(cookie_value="sess123")
         headers = {"Cookie": "csrf=xyz"}
-        auth.apply_to_headers(headers)
+        auth.apply_to_headers(headers=headers)
         assert "csrf=xyz" in headers["Cookie"]
         assert "openccu_loom_session=sess123" in headers["Cookie"]
 
@@ -79,5 +79,5 @@ def test_all_auths_produce_authorization_header(
     expected_prefix: str,
 ) -> None:
     headers: dict[str, str] = {}
-    auth.apply_to_headers(headers)
+    auth.apply_to_headers(headers=headers)
     assert headers["Authorization"].startswith(expected_prefix)

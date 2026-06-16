@@ -24,4 +24,12 @@ from openccu_loom_client.model.device import Device
 from openccu_loom_client.model.program import Program
 from openccu_loom_client.model.sysvar import Sysvar
 
-__all__ = ["Channel", "CustomDataPoint", "DataPoint", "Device", "Program", "Sysvar"]
+__all__ = [
+    # General
+    "Channel",
+    "CustomDataPoint",
+    "DataPoint",
+    "Device",
+    "Program",
+    "Sysvar",
+]

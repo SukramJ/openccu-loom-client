@@ -47,14 +47,14 @@ class TestParseProblem:
             "title": "Device not found",
             "status": 404,
         }
-        problem = parse_problem(payload)
+        problem = parse_problem(payload=payload)
         assert problem is not None
         assert problem.type.value.endswith("/not_found")
 
     def test_returns_none_for_non_dict(self) -> None:
-        assert parse_problem("not a dict") is None
-        assert parse_problem(None) is None
-        assert parse_problem([1, 2, 3]) is None
+        assert parse_problem(payload="not a dict") is None
+        assert parse_problem(payload=None) is None
+        assert parse_problem(payload=[1, 2, 3]) is None
 
 
 class TestErrorMapping:

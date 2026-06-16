@@ -34,8 +34,8 @@ class SchedulesOperations(_OperationsBase):
         404 when the channel has no attached week profile.
         """
         payload = await self._transport.request(
-            "GET",
-            f"/devices/{address}/channels/{channel}/week_profile",
+            method="GET",
+            path=f"/devices/{address}/channels/{channel}/week_profile",
         )
         return WeekProfileResponse.model_validate(payload)
 
@@ -48,8 +48,8 @@ class SchedulesOperations(_OperationsBase):
         (``simple_entries``).
         """
         payload = await self._transport.request(
-            "GET",
-            f"/devices/{address}/channels/{channel}/schedule",
+            method="GET",
+            path=f"/devices/{address}/channels/{channel}/schedule",
         )
         return Schedule.model_validate(payload)
 
@@ -62,8 +62,8 @@ class SchedulesOperations(_OperationsBase):
         Idempotent — replacing with the same body is a no-op on the CCU.
         """
         await self._transport.request(
-            "PUT",
-            f"/devices/{address}/channels/{channel}/schedule",
+            method="PUT",
+            path=f"/devices/{address}/channels/{channel}/schedule",
             json_body=schedule.model_dump(mode="json", exclude_none=True),
             allow_retry=True,
         )
@@ -76,15 +76,13 @@ class SchedulesOperations(_OperationsBase):
         """
         body = SetActiveProfileRequest(profile=profile)
         await self._transport.request(
-            "POST",
-            f"/devices/{address}/channels/{channel}/schedule/active-profile",
+            method="POST",
+            path=f"/devices/{address}/channels/{channel}/schedule/active-profile",
             json_body=body.model_dump(mode="json"),
             allow_retry=False,
         )
 
-    async def set_channel_lock(
-        self, *, address: str, channel: int, key: str, enabled: bool
-    ) -> None:
+    async def set_channel_lock(self, *, address: str, channel: int, key: str, enabled: bool) -> None:
         """
         Enable/disable one target channel's week-program participation.
 
@@ -94,8 +92,8 @@ class SchedulesOperations(_OperationsBase):
         Idempotent — re-applying the same flag is a no-op on the CCU.
         """
         await self._transport.request(
-            "PUT",
-            f"/devices/{address}/channels/{channel}/week_profile/channel-locks/{key}",
+            method="PUT",
+            path=f"/devices/{address}/channels/{channel}/week_profile/channel-locks/{key}",
             json_body={"enabled": enabled},
             allow_retry=True,
         )
@@ -109,8 +107,8 @@ class SchedulesOperations(_OperationsBase):
         Wire: ``GET /devices/{addr}/schedule``.
         """
         payload = await self._transport.request(
-            "GET",
-            f"/devices/{address}/schedule",
+            method="GET",
+            path=f"/devices/{address}/schedule",
         )
         return Schedule.model_validate(payload)
 
@@ -121,8 +119,8 @@ class SchedulesOperations(_OperationsBase):
         Wire: ``PUT /devices/{addr}/schedule``.
         """
         await self._transport.request(
-            "PUT",
-            f"/devices/{address}/schedule",
+            method="PUT",
+            path=f"/devices/{address}/schedule",
             json_body=schedule.model_dump(mode="json", exclude_none=True),
             allow_retry=True,
         )
@@ -135,8 +133,8 @@ class SchedulesOperations(_OperationsBase):
         """
         body = SetActiveProfileRequest(profile=profile)
         await self._transport.request(
-            "POST",
-            f"/devices/{address}/schedule/active-profile",
+            method="POST",
+            path=f"/devices/{address}/schedule/active-profile",
             json_body=body.model_dump(mode="json"),
             allow_retry=False,
         )

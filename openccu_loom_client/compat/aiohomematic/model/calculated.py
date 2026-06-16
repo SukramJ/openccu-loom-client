@@ -74,7 +74,7 @@ class CalculatedDpBinarySensor(_CalculatedKeyMixin, DpBinarySensor):
     """Daemon-calculated binary sensor (window open, alarms, …)."""
 
 
-def synthesize_summary(calc: CalculatedDPSummary) -> DataPointSummary:
+def synthesize_summary(*, calc: CalculatedDPSummary) -> DataPointSummary:
     """
     Project a calculated-DP wire record onto the generic summary shape.
 
@@ -106,18 +106,16 @@ def make_calculated_data_point(
     store: LoomStore,
 ) -> DataPoint:
     """Build the categorised calculated data point for one wire record."""
-    cls: type[DataPoint] = (
-        CalculatedDpBinarySensor if calc_is_binary(summary) else CalculatedDpSensor
-    )
+    cls: type[DataPoint] = CalculatedDpBinarySensor if calc_is_binary(summary=summary) else CalculatedDpSensor
     return cls(
-        summary=synthesize_summary(summary),
+        summary=synthesize_summary(calc=summary),
         device_address=device_address,
         channel_number=channel_number,
         store=store,
     )
 
 
-def calc_is_binary(summary: CalculatedDPSummary) -> bool:
+def calc_is_binary(*, summary: CalculatedDPSummary) -> bool:
     """Return whether the calculated DP reads as a binary sensor."""
     return summary.category == "binary_sensor"
 

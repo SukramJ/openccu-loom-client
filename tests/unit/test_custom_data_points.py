@@ -86,7 +86,7 @@ class TestStateUpdates:
                 "state": {"on": True, "level": 1.0},
             }
         )
-        store.apply_custom_data_point_state_changed(payload)
+        store.apply_custom_data_point_state_changed(payload=payload)
         assert cdp.state == {"on": True, "level": 1.0}
 
         # Second push replaces the dict wholesale.
@@ -100,7 +100,7 @@ class TestStateUpdates:
                 "state": {"on": False},
             }
         )
-        store.apply_custom_data_point_state_changed(payload2)
+        store.apply_custom_data_point_state_changed(payload=payload2)
         assert cdp.state == {"on": False}
 
     def test_state_property_is_defensive_copy(self) -> None:
@@ -108,7 +108,7 @@ class TestStateUpdates:
         store = LoomStore()
         store.attach_custom_data_points(device_address="VCU0001", cdps=[_cdp_summary()])
         store.apply_custom_data_point_state_changed(
-            CustomDataPointStateChangedPayload.model_validate(
+            payload=CustomDataPointStateChangedPayload.model_validate(
                 {
                     "central": "home",
                     "device_address": "VCU0001",
@@ -127,7 +127,7 @@ class TestStateUpdates:
     def test_apply_for_unknown_cdp_is_noop(self) -> None:
         store = LoomStore()
         store.apply_custom_data_point_state_changed(
-            CustomDataPointStateChangedPayload.model_validate(
+            payload=CustomDataPointStateChangedPayload.model_validate(
                 {
                     "central": "home",
                     "device_address": "UNKNOWN",
@@ -146,7 +146,7 @@ class TestInvoke:
         store.attach_custom_data_points(device_address="VCU0001", cdps=[_cdp_summary(name="main")])
         cdp = store.get_custom_data_point(address="VCU0001", name="main")
         assert cdp is not None
-        await cdp.invoke("turn_on", params={"level": 0.5}, priority="high")
+        await cdp.invoke(operation="turn_on", params={"level": 0.5}, priority="high")
 
         assert len(transport.calls) == 1
         method, path, body = transport.calls[0]
@@ -160,7 +160,7 @@ class TestInvoke:
         store.attach_custom_data_points(device_address="VCU0001", cdps=[_cdp_summary()])
         cdp = store.get_custom_data_point(address="VCU0001", name="main")
         assert cdp is not None
-        await cdp.invoke("turn_off")
+        await cdp.invoke(operation="turn_off")
         body = transport.calls[0][2]
         # No params + no priority still POSTs {} — the daemon parses the
         # body strictly and rejects an absent payload with 400.
@@ -177,7 +177,7 @@ class TestDeviceRemovalCleansUpCdps:
         store = LoomStore()
         store.attach_custom_data_points(device_address="VCU0001", cdps=[_cdp_summary(name="main")])
         store.apply_device_removed(
-            DeviceRemovedPayload.model_validate(
+            payload=DeviceRemovedPayload.model_validate(
                 {
                     "central": "home",
                     "interface_id": "home:HmIP-RF",

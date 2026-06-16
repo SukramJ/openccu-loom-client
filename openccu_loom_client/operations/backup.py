@@ -22,17 +22,17 @@ class BackupOperations(_OperationsBase):
 
     async def trigger_backup(self) -> dict[str, Any]:
         """Trigger a CCU backup. Wire: ``POST /backups``."""
-        payload = await self._transport.request("POST", "/backups", allow_retry=False)
+        payload = await self._transport.request(method="POST", path="/backups", allow_retry=False)
         return dict(payload or {})
 
     async def list_backups(self) -> dict[str, Any]:
         """List locally stored backups. Wire: ``GET /backups``."""
-        payload = await self._transport.request("GET", "/backups")
+        payload = await self._transport.request(method="GET", path="/backups")
         return dict(payload or {})
 
     async def download_backup(self, *, backup_id: str) -> bytes:
         """Stream a backup ``.sbk`` file. Wire: ``GET /backups/{id}/download``."""
-        return await self._transport.request_bytes("GET", f"/backups/{backup_id}/download")
+        return await self._transport.request_bytes(method="GET", path=f"/backups/{backup_id}/download")
 
     async def restore_backup(self, *, backup_id: str) -> None:
         """
@@ -41,4 +41,4 @@ class BackupOperations(_OperationsBase):
         Wire: ``POST /backups/{id}/restore``. Not retried — a restore is
         a destructive, non-idempotent CCU operation.
         """
-        await self._transport.request("POST", f"/backups/{backup_id}/restore", allow_retry=False)
+        await self._transport.request(method="POST", path=f"/backups/{backup_id}/restore", allow_retry=False)

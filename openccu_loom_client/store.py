@@ -115,7 +115,7 @@ class LoomStore:
         """The daemon central *name* (for event scoping, not key prefixing)."""
         return self._central_id
 
-    def set_central_id(self, central_id: str | None) -> None:
+    def set_central_id(self, *, central_id: str | None) -> None:
         """Record the daemon central name (from the bootstrap snapshot)."""
         self._central_id = central_id or ""
 
@@ -124,7 +124,7 @@ class LoomStore:
         """The HA-facing central name (adapter name), falling back to the daemon id."""
         return self._central_name or self._central_id
 
-    def set_central_name(self, central_name: str | None) -> None:
+    def set_central_name(self, *, central_name: str | None) -> None:
         """Record the HA-facing central name (the integration's instance name)."""
         self._central_name = central_name or ""
 
@@ -133,7 +133,7 @@ class LoomStore:
         """The HA-facing locale (drives translated schedule names)."""
         return self._locale
 
-    def set_locale(self, locale: str | None) -> None:
+    def set_locale(self, *, locale: str | None) -> None:
         """Record the HA-facing locale (the integration's UI language)."""
         self._locale = locale or "en"
 
@@ -142,18 +142,18 @@ class LoomStore:
         """CCU serial suffix — the central-id slot of canonical HA keys."""
         return self._serial_suffix
 
-    def set_serial(self, serial: str | None) -> None:
+    def set_serial(self, *, serial: str | None) -> None:
         """
         Record the CCU serial; stored as its canonical suffix.
 
         The serial comes from ``GET /system/ccu`` (``SystemCCUEntry.serial``)
         or is injected by the integration (HA's ``entry.unique_id``).
         """
-        self._serial_suffix = canonical_serial_suffix(serial) if serial else ""
+        self._serial_suffix = canonical_serial_suffix(serial=serial) if serial else ""
 
     # ---- transport wiring ----
 
-    def set_transport(self, transport: HttpTransport) -> None:
+    def set_transport(self, *, transport: HttpTransport) -> None:
         """
         Attach a transport to the store.
 
@@ -162,7 +162,7 @@ class LoomStore:
         """
         self._transport = transport
 
-    def set_data_point_factory(self, factory: Callable[..., DataPoint] | None) -> None:
+    def set_data_point_factory(self, *, factory: Callable[..., DataPoint] | None) -> None:
         """
         Install a factory that builds (subclasses of) :class:`DataPoint`.
 
@@ -174,9 +174,7 @@ class LoomStore:
         """
         self._data_point_factory = factory
 
-    def _build_data_point(
-        self, *, summary: DataPointSummary, device_address: str, channel_number: int
-    ) -> DataPoint:
+    def _build_data_point(self, *, summary: DataPointSummary, device_address: str, channel_number: int) -> DataPoint:
         if self._data_point_factory is not None:
             return self._data_point_factory(
                 summary=summary,
@@ -191,7 +189,7 @@ class LoomStore:
             store=self,
         )
 
-    def set_custom_data_point_factory(self, factory: Callable[..., CustomDataPoint] | None) -> None:
+    def set_custom_data_point_factory(self, *, factory: Callable[..., CustomDataPoint] | None) -> None:
         """Install a factory that builds (subclasses of) :class:`CustomDataPoint`."""
         self._cdp_factory = factory
 
@@ -225,12 +223,12 @@ class LoomStore:
         """
         if self._transport is None:
             return
-        payload = await self._transport.request("GET", f"/devices/{address}/cdps/{name}")
+        payload = await self._transport.request(method="GET", path=f"/devices/{address}/cdps/{name}")
         cdp = self._cdps.get((address, name))
         if cdp is not None and isinstance(payload, dict):
             state = payload.get("state")
             if isinstance(state, dict):
-                cdp._replace_state(state)
+                cdp._replace_state(state=state)
 
     async def refresh_data_point(self, *, address: str, channel: int, parameter: str) -> None:
         """
@@ -243,12 +241,12 @@ class LoomStore:
         if self._transport is None:
             return
         payload = await self._transport.request(
-            "GET", f"/devices/{address}/channels/{channel}/data-points/{parameter}"
+            method="GET", path=f"/devices/{address}/channels/{channel}/data-points/{parameter}"
         )
         summary = DataPointSummary.model_validate(payload)
         dp = self._data_points.get((address, channel, parameter))
         if dp is not None:
-            dp._replace_summary(summary)
+            dp._replace_summary(summary=summary)
 
     # ---- read access ----
 
@@ -306,9 +304,7 @@ class LoomStore:
             key=lambda c: c.name,
         )
 
-    def get_custom_data_point_by_channel(
-        self, *, address: str, channel_no: int
-    ) -> CustomDataPoint | None:
+    def get_custom_data_point_by_channel(self, *, address: str, channel_no: int) -> CustomDataPoint | None:
         """Return the CDP whose primary channel is ``channel_no``, or ``None``."""
         for (cdp_address, _name), cdp in self._cdps.items():
             if cdp_address == address and cdp.summary.channel_no == channel_no:
@@ -384,7 +380,7 @@ class LoomStore:
 
     # ---- bulk load (bootstrap) ----
 
-    def load_snapshot(self, snapshot: Snapshot) -> None:
+    def load_snapshot(self, *, snapshot: Snapshot) -> None:
         """
         Populate the device-level graph from a fresh ``/snapshot``.
 
@@ -401,15 +397,15 @@ class LoomStore:
         :meth:`set_central_id`.
         """
         if not self._central_id:
-            self.set_central_id(self._infer_central_id(snapshot))
+            self.set_central_id(central_id=self._infer_central_id(snapshot=snapshot))
         for summary in snapshot.devices:
-            self._upsert_device_summary(summary)
+            self._upsert_device_summary(summary=summary)
         for prog in snapshot.programs or ():
-            self._upsert_program(prog)
+            self._upsert_program(summary=prog)
         for sysvar in snapshot.sysvars or ():
-            self._upsert_sysvar(sysvar)
+            self._upsert_sysvar(summary=sysvar)
 
-    def _infer_central_id(self, snapshot: Snapshot) -> str | None:
+    def _infer_central_id(self, *, snapshot: Snapshot) -> str | None:
         """
         Derive this central's id from the snapshot's interface list.
 
@@ -446,7 +442,7 @@ class LoomStore:
             )
         return None
 
-    def attach_device_detail(self, detail: DeviceDetail) -> None:
+    def attach_device_detail(self, *, detail: DeviceDetail) -> None:
         """
         Apply a full ``GET /devices/{addr}`` detail record.
 
@@ -457,7 +453,7 @@ class LoomStore:
         """
         # DeviceDetail extends DeviceSummary, so we can pass it through
         # the upsert path that handles the common case.
-        device = self._upsert_device_summary(detail)
+        device = self._upsert_device_summary(summary=detail)
         device._attach_detail(
             firmware=detail.firmware,
             availability=detail.availability,
@@ -465,15 +461,13 @@ class LoomStore:
 
         new_numbers: set[int] = set()
         for channel_summary in detail.channels or ():
-            self._upsert_channel(channel_summary)
+            self._upsert_channel(summary=channel_summary)
             new_numbers.add(channel_summary.number)
 
         # Garbage-collect channels (and their DPs) that vanished.
-        stale_keys = [
-            k for k in self._channels if k[0] == detail.address and k[1] not in new_numbers
-        ]
+        stale_keys = [k for k in self._channels if k[0] == detail.address and k[1] not in new_numbers]
         for stale in stale_keys:
-            self._drop_channel(stale)
+            self._drop_channel(key=stale)
 
     def attach_channel_data_points(
         self,
@@ -503,7 +497,7 @@ class LoomStore:
 
     # ---- live updates ----
 
-    def apply_value_changed(self, payload: DataPointValueChangedPayload) -> None:
+    def apply_value_changed(self, *, payload: DataPointValueChangedPayload) -> None:
         """
         Update one data-point's value from a ``datapoint.value_changed`` push.
 
@@ -517,8 +511,7 @@ class LoomStore:
         dp = self._data_points.get(key)
         if dp is None:
             _LOGGER.debug(
-                "value_changed for unknown data-point %s — ignoring "
-                "(catalogue out of sync; resync via /devices/%s)",
+                "value_changed for unknown data-point %s — ignoring (catalogue out of sync; resync via /devices/%s)",
                 ".".join(map(str, key)),
                 payload.device_address,
             )
@@ -532,13 +525,13 @@ class LoomStore:
                 "last_seen_at": payload.modified_at,
             }
         )
-        dp._replace_summary(new_summary)
+        dp._replace_summary(summary=new_summary)
         # A fresh daemon value supersedes any optimistic value HA wrote
         # (the compat data-point layer overlays ``_value_override``).
         if hasattr(dp, "_value_override"):
             del dp._value_override
 
-    def apply_device_created(self, payload: DeviceCreatedPayload) -> None:
+    def apply_device_created(self, *, payload: DeviceCreatedPayload) -> None:
         """
         Register a freshly-paired device as a stub entry.
 
@@ -561,19 +554,19 @@ class LoomStore:
         )
         self._devices[payload.device_address] = Device(summary=stub, store=self)
 
-    def apply_device_removed(self, payload: DeviceRemovedPayload) -> None:
+    def apply_device_removed(self, *, payload: DeviceRemovedPayload) -> None:
         """Drop a device and everything that hung off it."""
         addr = payload.device_address
         self._devices.pop(addr, None)
         stale_channels = [k for k in self._channels if k[0] == addr]
         for k in stale_channels:
-            self._drop_channel(k)
+            self._drop_channel(key=k)
         # CDPs are device-scoped, not channel-scoped — drop them too.
         stale_cdps = [cdp_key for cdp_key in self._cdps if cdp_key[0] == addr]
         for cdp_key in stale_cdps:
             del self._cdps[cdp_key]
 
-    def apply_sysvar_changed(self, payload: SysvarChangedPayload) -> None:
+    def apply_sysvar_changed(self, *, payload: SysvarChangedPayload) -> None:
         """
         Replace one sysvar's value from a ``hub.sysvar_changed`` push.
 
@@ -585,9 +578,9 @@ class LoomStore:
             _LOGGER.debug("sysvar_changed for unknown sysvar %r — ignoring", payload.name)
             return
         new_summary = sysvar.summary.model_copy(update={"value": payload.value, "observed": True})
-        sysvar._replace_summary(new_summary)
+        sysvar._replace_summary(summary=new_summary)
 
-    def apply_program_executed(self, payload: ProgramExecutedPayload) -> None:
+    def apply_program_executed(self, *, payload: ProgramExecutedPayload) -> None:
         """
         Acknowledge a program execution event.
 
@@ -601,9 +594,7 @@ class LoomStore:
             payload.success,
         )
 
-    def apply_custom_data_point_state_changed(
-        self, payload: CustomDataPointStateChangedPayload
-    ) -> None:
+    def apply_custom_data_point_state_changed(self, *, payload: CustomDataPointStateChangedPayload) -> None:
         """
         Replace one CDP's state dict from a ``custom_data_point.state_changed`` push.
 
@@ -621,7 +612,7 @@ class LoomStore:
                 payload.name,
             )
             return
-        cdp._replace_state(payload.state or {})
+        cdp._replace_state(state=payload.state or {})
 
     # ---- write-back ----
 
@@ -637,8 +628,7 @@ class LoomStore:
         """Translate a domain ``send_value`` into a daemon REST call."""
         if self._transport is None:
             msg = (
-                "LoomStore has no transport bound — set one via "
-                "set_transport() or construct the store with transport=…"
+                "LoomStore has no transport bound — set one via set_transport() or construct the store with transport=…"
             )
             raise RuntimeError(msg)
         body: dict[str, Any] = {"value": value}
@@ -646,8 +636,8 @@ class LoomStore:
             body["priority"] = priority
         path = f"/devices/{address}/channels/{channel}/data-points/{parameter}/value"
         await self._transport.request(
-            "PUT",
-            path,
+            method="PUT",
+            path=path,
             json_body=body,
             allow_retry=True,  # PUT here is idempotent — the daemon serializes the write.
         )
@@ -662,8 +652,8 @@ class LoomStore:
             msg = "LoomStore has no transport bound — set one via set_transport()"
             raise RuntimeError(msg)
         await self._transport.request(
-            "PUT",
-            f"/sysvars/{name}",
+            method="PUT",
+            path=f"/sysvars/{name}",
             json_body={"value": value},
             allow_retry=True,
         )
@@ -680,8 +670,8 @@ class LoomStore:
             msg = "LoomStore has no transport bound — set one via set_transport()"
             raise RuntimeError(msg)
         await self._transport.request(
-            "POST",
-            f"/programs/{program_id}/execute",
+            method="POST",
+            path=f"/programs/{program_id}/execute",
             allow_retry=False,
         )
 
@@ -697,8 +687,7 @@ class LoomStore:
         """Translate a domain ``CustomDataPoint.invoke`` into a CDP-invoke REST call."""
         if self._transport is None:
             msg = (
-                "LoomStore has no transport bound — set one via "
-                "set_transport() or construct the store with transport=…"
+                "LoomStore has no transport bound — set one via set_transport() or construct the store with transport=…"
             )
             raise RuntimeError(msg)
         body: dict[str, Any] = {}
@@ -710,21 +699,21 @@ class LoomStore:
         # rejects an empty payload with 400 "Invalid JSON: EOF", so a bare
         # operation (turn_on without params) must POST ``{}``.
         await self._transport.request(
-            "POST",
-            f"/devices/{address}/cdps/{name}/{operation}",
+            method="POST",
+            path=f"/devices/{address}/cdps/{name}/{operation}",
             json_body=body,
             allow_retry=False,  # CDP operations may not be idempotent (e.g. cover open).
         )
 
     # ---- internals ----
 
-    def _upsert_device_summary(self, summary: DeviceSummary) -> Device:
+    def _upsert_device_summary(self, *, summary: DeviceSummary) -> Device:
         device = self._devices.get(summary.address)
         if device is None:
             device = Device(summary=summary, store=self)
             self._devices[summary.address] = device
         else:
-            device._update_summary(summary)
+            device._update_summary(summary=summary)
         return device
 
     def attach_channel_calculated_data_points(
@@ -752,7 +741,7 @@ class LoomStore:
                 store=self,
             )
 
-    def set_calculated_data_point_factory(self, factory: Callable[..., DataPoint] | None) -> None:
+    def set_calculated_data_point_factory(self, *, factory: Callable[..., DataPoint] | None) -> None:
         """Install the categorised calculated-DP factory (compat layer)."""
         self._calculated_factory = factory
 
@@ -761,7 +750,7 @@ class LoomStore:
         if self._transport is None:
             return
         payload = await self._transport.request(
-            "GET", f"/devices/{address}/channels/{channel}/calc-dps/{name}"
+            method="GET", path=f"/devices/{address}/channels/{channel}/calc-dps/{name}"
         )
         dp = self._data_points.get((address, channel, name))
         if dp is not None and isinstance(payload, dict):
@@ -773,7 +762,7 @@ class LoomStore:
                     "modified_at": calc.modified_at,
                 }
             )
-            dp._replace_summary(new_summary)
+            dp._replace_summary(summary=new_summary)
 
     async def refresh_device(self, *, address: str) -> None:
         """
@@ -784,8 +773,8 @@ class LoomStore:
         """
         if self._transport is None:
             return
-        payload = await self._transport.request("GET", f"/devices/{address}")
-        self.attach_device_detail(DeviceDetail.model_validate(payload))
+        payload = await self._transport.request(method="GET", path=f"/devices/{address}")
+        self.attach_device_detail(detail=DeviceDetail.model_validate(payload))
 
     async def update_device_firmware(self, *, address: str) -> None:
         """
@@ -798,8 +787,8 @@ class LoomStore:
             msg = "LoomStore has no transport bound — set one via set_transport()"
             raise RuntimeError(msg)
         await self._transport.request(
-            "POST",
-            f"/devices/{address}/firmware/update",
+            method="POST",
+            path=f"/devices/{address}/firmware/update",
             allow_retry=False,
         )
 
@@ -819,30 +808,30 @@ class LoomStore:
         and merge them here.
         """
         for sysvar in sysvars or ():
-            self._upsert_sysvar(sysvar)
+            self._upsert_sysvar(summary=sysvar)
         for program in programs or ():
-            self._upsert_program(program)
+            self._upsert_program(summary=program)
 
-    def _upsert_program(self, summary: ProgramSummary) -> None:
+    def _upsert_program(self, *, summary: ProgramSummary) -> None:
         existing = self._programs.get(summary.id)
         if existing is None:
             self._programs[summary.id] = Program(summary=summary, store=self)
         else:
-            existing._replace_summary(summary)
+            existing._replace_summary(summary=summary)
 
-    def _upsert_sysvar(self, summary: SysvarSummary) -> None:
+    def _upsert_sysvar(self, *, summary: SysvarSummary) -> None:
         existing = self._sysvars.get(summary.name)
         if existing is None:
             self._sysvars[summary.name] = Sysvar(summary=summary, store=self)
         else:
-            existing._replace_summary(summary)
+            existing._replace_summary(summary=summary)
 
-    def _upsert_channel(self, summary: ChannelSummary) -> None:
+    def _upsert_channel(self, *, summary: ChannelSummary) -> None:
         device_address = summary.address.split(":", 1)[0]
         key = (device_address, summary.number)
         self._channels[key] = Channel(summary=summary, store=self)
 
-    def _drop_channel(self, key: tuple[str, int]) -> None:
+    def _drop_channel(self, *, key: tuple[str, int]) -> None:
         self._channels.pop(key, None)
         # Drop any DPs hanging off this channel.
         stale_dps = [k for k in self._data_points if k[0] == key[0] and k[1] == key[1]]

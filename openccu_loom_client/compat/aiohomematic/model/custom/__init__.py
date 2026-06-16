@@ -36,10 +36,7 @@ from aiohomematic.model.custom import ClimateMode, ClimateProfile
 from openccu_loom_types.enums import DataPointCategory
 
 from openccu_loom_client.canonical import canonical_unique_id
-from openccu_loom_client.compat.aiohomematic.model._protocol_surface import (
-    _CustomProtocolSurface,
-    _NameData,
-)
+from openccu_loom_client.compat.aiohomematic.model._protocol_surface import _CustomProtocolSurface, _NameData
 from openccu_loom_client.compat.aiohomematic.model.naming import custom_name_parts
 from openccu_loom_client.model import CustomDataPoint
 
@@ -62,9 +59,7 @@ def custom_unique_id(*, serial_suffix: str, device_address: str, channel_no: int
     ``loom_<address>`` — a normal device carries no serial prefix, so the
     canonical key is e.g. ``loom_vcu1234567_1``.
     """
-    return canonical_unique_id(
-        serial_suffix=serial_suffix, address=f"{device_address}:{channel_no}"
-    )
+    return canonical_unique_id(serial_suffix=serial_suffix, address=f"{device_address}:{channel_no}")
 
 
 # HA-side capability names whose daemon flag is named differently —
@@ -91,25 +86,25 @@ class _Capabilities:
 
     __slots__ = ("_flags",)
 
-    def __init__(self, flags: dict[str, bool] | None) -> None:
+    def __init__(self, *, flags: dict[str, bool] | None) -> None:
         self._flags = flags or {}
 
-    def __getattr__(self, name: str) -> bool:
+    def __getattr__(self, name: str, /) -> bool:
         if name in self._flags:
             return bool(self._flags[name])
         if (alias := _CAPABILITY_ALIASES.get(name)) is not None:
             return bool(self._flags.get(alias, False))
         return False
 
-    def __contains__(self, name: str) -> bool:
+    def __contains__(self, name: str, /) -> bool:
         return name in self._flags
 
 
-def _as_float(value: Any) -> float | None:
+def _as_float(*, value: Any) -> float | None:
     return float(value) if isinstance(value, (int, float)) else None
 
 
-def _as_int(value: Any) -> int | None:
+def _as_int(*, value: Any) -> int | None:
     return int(value) if isinstance(value, (int, float)) else None
 
 
@@ -185,14 +180,14 @@ class _CustomEntitySurface(_CustomProtocolSurface, CustomDataPoint):
     @property
     def capabilities(self) -> _Capabilities:
         """Return an attribute-access view over the summary's capability flags."""
-        return _Capabilities(self._summary.capabilities)
+        return _Capabilities(flags=self._summary.capabilities)
 
-    def _config_value(self, key: str) -> Any:
+    def _config_value(self, *, key: str) -> Any:
         """Return one entry from the CDP's static ``config`` block, or ``None``."""
         config = getattr(self._summary, "config", None) or {}
         return config.get(key)
 
-    def _generic_channel_value(self, parameter: str) -> Any:
+    def _generic_channel_value(self, *, parameter: str) -> Any:
         """Return the CDP channel's generic DP value (``None`` when absent/unobserved)."""
         dp = self._store.get_data_point(
             address=self._device_address,
@@ -285,7 +280,7 @@ class CustomDpSwitch(_CustomEntitySurface):
         val = self._state.get("is_on")
         if val is not None:
             return bool(val)
-        generic = self._generic_channel_value("STATE")
+        generic = self._generic_channel_value(parameter="STATE")
         return bool(generic) if generic is not None else None
 
     @property
@@ -302,15 +297,15 @@ class CustomDpSwitch(_CustomEntitySurface):
 
     async def turn_on(self, **_kwargs: Any) -> None:
         """Turn the switch on."""
-        await self.invoke("turn_on")
+        await self.invoke(operation="turn_on")
 
     async def turn_off(self, **_kwargs: Any) -> None:
         """Turn the switch off."""
-        await self.invoke("turn_off")
+        await self.invoke(operation="turn_off")
 
     async def set_timer_on_time(self, *, on_time: float) -> None:
         """Turn on for a fixed duration (daemon ``turn_on_for``)."""
-        await self.invoke("turn_on_for", params={"seconds": float(on_time)})
+        await self.invoke(operation="turn_on_for", params={"seconds": float(on_time)})
 
 
 # ---- light ----
@@ -329,7 +324,7 @@ class CustomDpDimmer(_CustomEntitySurface):
     @property
     def brightness(self) -> int | None:
         """Return the brightness (0-255) from the ``brightness`` state key, or ``None``."""
-        return _as_int(self._state.get("brightness"))
+        return _as_int(value=self._state.get("brightness"))
 
     @property
     def group_brightness(self) -> int | None:
@@ -357,13 +352,13 @@ class CustomDpDimmer(_CustomEntitySurface):
     @property
     def color_temp_kelvin(self) -> int | None:
         """Return the colour temperature in kelvin, or ``None`` if not surfaced."""
-        return _as_int(self._state.get("color_temp_kelvin"))
+        return _as_int(value=self._state.get("color_temp_kelvin"))
 
     @property
     def hs_color(self) -> tuple[float, float] | None:
         """Return the ``(hue, saturation)`` colour, or ``None`` if either is unknown."""
-        hue = _as_float(self._state.get("hue"))
-        sat = _as_float(self._state.get("saturation"))
+        hue = _as_float(value=self._state.get("hue"))
+        sat = _as_float(value=self._state.get("saturation"))
         return (hue, sat) if hue is not None and sat is not None else None
 
     @property
@@ -381,7 +376,7 @@ class CustomDpDimmer(_CustomEntitySurface):
     @property
     def last_level(self) -> int:
         """Return the last known brightness (0-255), defaulting to 0."""
-        return _as_int(self._state.get("brightness")) or 0
+        return _as_int(value=self._state.get("brightness")) or 0
 
     @staticmethod
     def level_to_brightness(level: float) -> int:
@@ -393,14 +388,14 @@ class CustomDpDimmer(_CustomEntitySurface):
         """Convert a brightness value (0-255) to a level (0.0-1.0)."""
         return brightness / 255.0
 
-    def set_last_level(self, value: int) -> None:
+    def set_last_level(self, *, value: int) -> None:
         """Store the last brightness for HA-side restore; performs no daemon write."""
         # Last-brightness restore is HA-side bookkeeping; no daemon write.
         self._state["brightness"] = value
 
     async def set_timer_on_time(self, *, on_time: float) -> None:
         """Turn on for a fixed duration in seconds."""
-        await self.invoke("set_timer_on_time", params={"seconds": float(on_time)})
+        await self.invoke(operation="set_timer_on_time", params={"seconds": float(on_time)})
 
     async def turn_on(
         self,
@@ -413,23 +408,26 @@ class CustomDpDimmer(_CustomEntitySurface):
     ) -> None:
         """Turn the light on, optionally setting brightness, colour, kelvin, or effect."""
         if hs_color is not None:
-            await self.invoke("set_color", params={"hue": hs_color[0], "saturation": hs_color[1]})
+            await self.invoke(
+                operation="set_color",
+                params={"hue": hs_color[0], "saturation": hs_color[1]},
+            )
         if color_temp_kelvin is not None:
-            await self.invoke("set_kelvin", params={"kelvin": int(color_temp_kelvin)})
+            await self.invoke(operation="set_kelvin", params={"kelvin": int(color_temp_kelvin)})
         if effect is not None:
-            await self.invoke("set_effect", params={"effect": effect})
+            await self.invoke(operation="set_effect", params={"effect": effect})
         if brightness is not None:
-            await self.invoke("set_level", params={"brightness": int(brightness)})
+            await self.invoke(operation="set_level", params={"brightness": int(brightness)})
         elif hs_color is None and color_temp_kelvin is None and effect is None:
-            await self.invoke("turn_on")
+            await self.invoke(operation="turn_on")
 
     async def turn_off(self, **_kwargs: Any) -> None:
         """Turn the light off."""
-        await self.invoke("turn_off")
+        await self.invoke(operation="turn_off")
 
-    async def set_brightness(self, brightness: int) -> None:
+    async def set_brightness(self, *, brightness: int) -> None:
         """Set the light brightness (0-255)."""
-        await self.invoke("set_level", params={"brightness": int(brightness)})
+        await self.invoke(operation="set_level", params={"brightness": int(brightness)})
 
 
 class CustomDpIpFixedColorLight(CustomDpDimmer):
@@ -479,7 +477,7 @@ class CustomDpCover(_CustomEntitySurface):
     @property
     def current_position(self) -> int | None:
         """Return the current position (0-100) from ``current_position``, or ``None``."""
-        return _as_int(self._state.get("current_position"))
+        return _as_int(value=self._state.get("current_position"))
 
     @property
     def current_channel_position(self) -> int | None:
@@ -515,25 +513,26 @@ class CustomDpCover(_CustomEntitySurface):
 
     async def open(self) -> None:
         """Open the cover fully."""
-        await self.invoke("open")
+        await self.invoke(operation="open")
 
     async def close(self) -> None:
         """Close the cover fully."""
-        await self.invoke("close")
+        await self.invoke(operation="close")
 
     async def stop(self) -> None:
         """Stop cover movement."""
-        await self.invoke("stop")
+        await self.invoke(operation="stop")
 
     async def set_position(
         self,
+        *,
         position: int,
         tilt_position: int | None = None,
         collector: Any = None,
         **_kwargs: Any,
     ) -> None:
         """Move the cover to the given position (0-100)."""
-        await self.invoke("set_position", params={"position": position / 100.0})
+        await self.invoke(operation="set_position", params={"position": position / 100.0})
 
 
 class CustomDpBlind(CustomDpCover):
@@ -542,7 +541,7 @@ class CustomDpBlind(CustomDpCover):
     @property
     def current_tilt_position(self) -> int | None:
         """Return the current tilt position (0-100) from ``current_tilt_position``, or ``None``."""
-        return _as_int(self._state.get("current_tilt_position"))
+        return _as_int(value=self._state.get("current_tilt_position"))
 
     @property
     def current_channel_tilt_position(self) -> int | None:
@@ -551,31 +550,32 @@ class CustomDpBlind(CustomDpCover):
 
     async def set_position(
         self,
+        *,
         position: int,
         tilt_position: int | None = None,
         collector: Any = None,
         **_kwargs: Any,
     ) -> None:
         """Move the cover to the given position (0-100) and optional tilt position (0-100)."""
-        await self.invoke("set_position", params={"position": position / 100.0})
+        await self.invoke(operation="set_position", params={"position": position / 100.0})
         if tilt_position is not None:
-            await self.invoke("set_tilt", params={"tilt": tilt_position / 100.0})
+            await self.invoke(operation="set_tilt", params={"tilt": tilt_position / 100.0})
 
-    async def set_tilt_position(self, tilt_position: int) -> None:
+    async def set_tilt_position(self, *, tilt_position: int) -> None:
         """Set the tilt position (0-100)."""
-        await self.invoke("set_tilt", params={"tilt": tilt_position / 100.0})
+        await self.invoke(operation="set_tilt", params={"tilt": tilt_position / 100.0})
 
     async def open_tilt(self) -> None:
         """Open the tilt fully."""
-        await self.invoke("open_tilt")
+        await self.invoke(operation="open_tilt")
 
     async def close_tilt(self) -> None:
         """Close the tilt fully."""
-        await self.invoke("close_tilt")
+        await self.invoke(operation="close_tilt")
 
     async def stop_tilt(self) -> None:
         """Stop tilt movement."""
-        await self.invoke("stop_tilt")
+        await self.invoke(operation="stop_tilt")
 
 
 class CustomDpIpBlind(CustomDpBlind):
@@ -593,7 +593,7 @@ class CustomDpGarage(CustomDpCover):
 
     async def ventilate(self) -> None:
         """Move the garage door to its ventilation position."""
-        await self.invoke("ventilate")
+        await self.invoke(operation="ventilate")
 
 
 # ---- climate ----
@@ -635,7 +635,7 @@ class BaseCustomDpClimate(_CustomEntitySurface):
         val = self._state.get("current_temperature")
         if isinstance(val, (int, float)):
             return float(val)
-        return _as_float(self._generic_channel_value("ACTUAL_TEMPERATURE"))
+        return _as_float(value=self._generic_channel_value(parameter="ACTUAL_TEMPERATURE"))
 
     @property
     def target_temperature(self) -> float | None:
@@ -643,15 +643,15 @@ class BaseCustomDpClimate(_CustomEntitySurface):
         val = self._state.get("set_temperature", self._state.get("target_temperature"))
         if isinstance(val, (int, float)):
             return float(val)
-        return _as_float(self._generic_channel_value("SET_POINT_TEMPERATURE"))
+        return _as_float(value=self._generic_channel_value(parameter="SET_POINT_TEMPERATURE"))
 
     @property
     def current_humidity(self) -> int | None:
         """Return the measured humidity (state key, else ``HUMIDITY`` DP)."""
-        val = _as_int(self._state.get("current_humidity"))
+        val = _as_int(value=self._state.get("current_humidity"))
         if val is not None:
             return val
-        return _as_int(self._generic_channel_value("HUMIDITY"))
+        return _as_int(value=self._generic_channel_value(parameter="HUMIDITY"))
 
     @property
     def temperature_offset(self) -> str | None:
@@ -663,26 +663,22 @@ class BaseCustomDpClimate(_CustomEntitySurface):
     def min_temp(self) -> float:
         """Return the device's minimum settable temperature (config), defaulting to 4.5."""
         return (
-            _as_float(self._config_value("min_temp"))
-            or _as_float(self._state.get("min_temp"))
-            or 4.5
+            _as_float(value=self._config_value(key="min_temp")) or _as_float(value=self._state.get("min_temp")) or 4.5
         )
 
     @property
     def max_temp(self) -> float:
         """Return the device's maximum settable temperature (config), defaulting to 30.5."""
         return (
-            _as_float(self._config_value("max_temp"))
-            or _as_float(self._state.get("max_temp"))
-            or 30.5
+            _as_float(value=self._config_value(key="max_temp")) or _as_float(value=self._state.get("max_temp")) or 30.5
         )
 
     @property
     def target_temperature_step(self) -> float:
         """Return the temperature step (config), defaulting to 0.5."""
         return (
-            _as_float(self._config_value("temp_step"))
-            or _as_float(self._state.get("target_temperature_step"))
+            _as_float(value=self._config_value(key="temp_step"))
+            or _as_float(value=self._state.get("target_temperature_step"))
             or 0.5
         )
 
@@ -699,7 +695,7 @@ class BaseCustomDpClimate(_CustomEntitySurface):
     @property
     def modes(self) -> tuple[ClimateMode, ...]:
         """Return the available HVAC modes (config ``hvac_modes``) as enums."""
-        raw = self._config_value("hvac_modes") or self._state.get("hvac_modes") or ()
+        raw = self._config_value(key="hvac_modes") or self._state.get("hvac_modes") or ()
         modes = tuple(ClimateMode(str(m)) for m in raw if str(m) in _CLIMATE_MODE_VALUES)
         # aiohomematic guarantees at least HEAT so HA renders a usable
         # climate card even when the device reports nothing.
@@ -739,7 +735,7 @@ class BaseCustomDpClimate(_CustomEntitySurface):
         the week-program names. The daemon's list omits it, so it is
         inserted here.
         """
-        raw = self._config_value("preset_modes") or self._state.get("available_profiles") or ()
+        raw = self._config_value(key="preset_modes") or self._state.get("available_profiles") or ()
         profiles = [ClimateProfile(str(p)) for p in raw if str(p) in _CLIMATE_PROFILE_VALUES]
         if ClimateProfile.NONE not in profiles:
             control_block = {
@@ -754,34 +750,35 @@ class BaseCustomDpClimate(_CustomEntitySurface):
             profiles.insert(insert_at, ClimateProfile.NONE)
         return tuple(profiles)
 
-    async def set_temperature(self, temperature: float) -> None:
+    async def set_temperature(self, *, temperature: float) -> None:
         """Set the target temperature."""
-        await self.invoke("set_temperature", params={"temperature": float(temperature)})
+        await self.invoke(operation="set_temperature", params={"temperature": float(temperature)})
 
-    async def set_mode(self, mode: str) -> None:
+    async def set_mode(self, *, mode: str) -> None:
         """Set the HVAC mode."""
-        await self.invoke("set_mode", params={"mode": str(mode)})
+        await self.invoke(operation="set_mode", params={"mode": str(mode)})
 
-    async def set_profile(self, profile: str) -> None:
+    async def set_profile(self, *, profile: str) -> None:
         """Set the active profile."""
-        await self.invoke("set_profile", params={"profile": str(profile)})
+        await self.invoke(operation="set_profile", params={"profile": str(profile)})
 
-    async def enable_away_mode_by_duration(self, hours: int, away_temperature: float) -> None:
+    async def enable_away_mode_by_duration(self, *, hours: int, away_temperature: float) -> None:
         """Enable away mode for a number of hours at the given temperature."""
-        await self.invoke("enable_away", params={"hours": hours, "temperature": away_temperature})
+        await self.invoke(
+            operation="enable_away",
+            params={"hours": hours, "temperature": away_temperature},
+        )
 
-    async def enable_away_mode_by_calendar(
-        self, start: Any, end: Any, away_temperature: float
-    ) -> None:
+    async def enable_away_mode_by_calendar(self, *, start: Any, end: Any, away_temperature: float) -> None:
         """Enable away mode between the given start and end at the given temperature."""
         await self.invoke(
-            "enable_away",
+            operation="enable_away",
             params={"start": start, "end": end, "temperature": away_temperature},
         )
 
     async def disable_away_mode(self) -> None:
         """Disable away mode."""
-        await self.invoke("disable_away")
+        await self.invoke(operation="disable_away")
 
 
 class CustomDpIpThermostat(BaseCustomDpClimate):
@@ -842,15 +839,15 @@ class BaseCustomDpLock(_CustomEntitySurface):
 
     async def lock(self) -> None:
         """Lock the device."""
-        await self.invoke("lock")
+        await self.invoke(operation="lock")
 
     async def unlock(self) -> None:
         """Unlock the device."""
-        await self.invoke("unlock")
+        await self.invoke(operation="unlock")
 
     async def open(self) -> None:
         """Open (release) the lock latch."""
-        await self.invoke("open")
+        await self.invoke(operation="open")
 
 
 # ---- siren ----
@@ -887,20 +884,20 @@ class BaseCustomDpSiren(_CustomEntitySurface):
     @property
     def available_tones(self) -> Any:
         """Return the available tones (config ``available_tones``)."""
-        return self._config_value("available_tones") or self._state.get("available_tones") or ()
+        return self._config_value(key="available_tones") or self._state.get("available_tones") or ()
 
     @property
     def available_lights(self) -> Any:
         """Return the available light patterns (config ``available_lights``)."""
-        return self._config_value("available_lights") or self._state.get("available_lights") or ()
+        return self._config_value(key="available_lights") or self._state.get("available_lights") or ()
 
     async def turn_on(self, **params: Any) -> None:
         """Turn the siren on, passing through any tone/light/duration params."""
-        await self.invoke("turn_on", params=params or None)
+        await self.invoke(operation="turn_on", params=params or None)
 
     async def turn_off(self) -> None:
         """Turn the siren off."""
-        await self.invoke("turn_off")
+        await self.invoke(operation="turn_off")
 
 
 class CustomDpSoundPlayer(BaseCustomDpSiren):
@@ -919,11 +916,11 @@ class CustomDpSoundPlayer(BaseCustomDpSiren):
 
     async def play_sound(self, **params: Any) -> None:
         """Play a sound, passing through any sound/duration params."""
-        await self.invoke("turn_on", params=params or None)
+        await self.invoke(operation="turn_on", params=params or None)
 
     async def stop_sound(self) -> None:
         """Stop sound playback."""
-        await self.invoke("turn_off")
+        await self.invoke(operation="turn_off")
 
 
 # ---- valve ----
@@ -951,15 +948,15 @@ class CustomDpIpIrrigationValve(_CustomEntitySurface):
 
     async def open(self) -> None:
         """Open the valve."""
-        await self.invoke("open")
+        await self.invoke(operation="open")
 
     async def close(self) -> None:
         """Close the valve."""
-        await self.invoke("close")
+        await self.invoke(operation="close")
 
     async def set_timer_on_time(self, *, on_time: float) -> None:
         """Open the valve for a fixed duration in seconds."""
-        await self.invoke("open", params={"duration": float(on_time)})
+        await self.invoke(operation="open", params={"duration": float(on_time)})
 
 
 # ---- text display ----
@@ -1015,11 +1012,11 @@ class CustomDpTextDisplay(_CustomEntitySurface):
 
     async def write(self, **params: Any) -> None:
         """Write text to the display, passing through line/content params."""
-        await self.invoke("write", params=params or None)
+        await self.invoke(operation="write", params=params or None)
 
     async def clear(self) -> None:
         """Clear the display."""
-        await self.invoke("clear")
+        await self.invoke(operation="clear")
 
 
 # ---- factory ----
@@ -1086,9 +1083,11 @@ def make_custom_data_point(
 
 
 __all__ = [
+    # General
     "BaseCustomDpClimate",
     "BaseCustomDpLock",
     "BaseCustomDpSiren",
+    "CustomDataPoint",
     "CustomDpBlind",
     "CustomDpCover",
     "CustomDpDimmer",
@@ -1101,9 +1100,12 @@ __all__ = [
     "CustomDpSoundPlayerLed",
     "CustomDpSwitch",
     "CustomDpTextDisplay",
+    "DataPointCategory",
     "LockState",
     "PlaySoundArgs",
     "SirenOnArgs",
+    "canonical_unique_id",
+    "custom_name_parts",
     "custom_unique_id",
     "make_custom_data_point",
     "resolve_custom_class",

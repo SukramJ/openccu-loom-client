@@ -40,8 +40,8 @@ class AuthOperations(_OperationsBase):
         Wire: ``POST /auth/login``. Not retried.
         """
         payload = await self._transport.request(
-            "POST",
-            "/auth/login",
+            method="POST",
+            path="/auth/login",
             json_body={"username": username, "password": password},
             allow_retry=False,
         )
@@ -49,23 +49,23 @@ class AuthOperations(_OperationsBase):
 
     async def logout(self) -> None:
         """Revoke the current session. Wire: ``POST /auth/logout``."""
-        await self._transport.request("POST", "/auth/logout", allow_retry=False)
+        await self._transport.request(method="POST", path="/auth/logout", allow_retry=False)
 
     async def me(self) -> Identity:
         """Return the current authenticated identity. Wire: ``GET /auth/me``."""
-        payload = await self._transport.request("GET", "/auth/me")
+        payload = await self._transport.request(method="GET", path="/auth/me")
         return Identity.model_validate(payload)
 
     async def list_users(self) -> list[UserListEntry]:
         """List configured Basic-auth users. Wire: ``GET /auth/users``."""
-        payload = await self._transport.request("GET", "/auth/users")
+        payload = await self._transport.request(method="GET", path="/auth/users")
         return [UserListEntry.model_validate(u) for u in (payload or [])]
 
     # ---- API tokens (legacy) ----
 
     async def list_tokens(self) -> list[TokenListEntry]:
         """List API tokens. Wire: ``GET /auth/tokens``."""
-        payload = await self._transport.request("GET", "/auth/tokens")
+        payload = await self._transport.request(method="GET", path="/auth/tokens")
         return [TokenListEntry.model_validate(tok) for tok in (payload or [])]
 
     async def create_token(self, *, subject: str, role: str) -> CreateTokenResponse:
@@ -76,8 +76,8 @@ class AuthOperations(_OperationsBase):
         once, here, and never again — store it immediately.
         """
         payload = await self._transport.request(
-            "POST",
-            "/auth/tokens",
+            method="POST",
+            path="/auth/tokens",
             json_body={"subject": subject, "role": role},
             allow_retry=False,
         )
@@ -85,7 +85,7 @@ class AuthOperations(_OperationsBase):
 
     async def delete_token(self, *, token_id: str) -> None:
         """Revoke an API token by id. Wire: ``DELETE /auth/tokens/{id}``."""
-        await self._transport.request("DELETE", f"/auth/tokens/{token_id}")
+        await self._transport.request(method="DELETE", path=f"/auth/tokens/{token_id}")
 
     # ---- API tokens (v2, fingerprint-based) ----
 
@@ -95,14 +95,14 @@ class AuthOperations(_OperationsBase):
 
         Wire: ``GET /auth/tokens/v2``.
         """
-        payload = await self._transport.request("GET", "/auth/tokens/v2")
+        payload = await self._transport.request(method="GET", path="/auth/tokens/v2")
         return [TokenSummary.model_validate(tok) for tok in (payload or [])]
 
     async def create_token_v2(self, *, token: TokenCreate) -> TokenCreated:
         """Issue a new bearer token (v2). Wire: ``POST /auth/tokens/v2``."""
         payload = await self._transport.request(
-            "POST",
-            "/auth/tokens/v2",
+            method="POST",
+            path="/auth/tokens/v2",
             json_body=token.model_dump(mode="json", exclude_none=True),
             allow_retry=False,
         )
@@ -114,4 +114,4 @@ class AuthOperations(_OperationsBase):
 
         Wire: ``DELETE /auth/tokens/v2/{fingerprint}``.
         """
-        await self._transport.request("DELETE", f"/auth/tokens/v2/{fingerprint}")
+        await self._transport.request(method="DELETE", path=f"/auth/tokens/v2/{fingerprint}")

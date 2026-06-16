@@ -23,11 +23,7 @@ from openccu_loom_client.compat.aiohomematic.model.custom import (
     CustomDpIpThermostat,
     make_custom_data_point,
 )
-from openccu_loom_client.compat.aiohomematic.model.generic import (
-    DpBinarySensor,
-    DpSensor,
-    make_generic_data_point,
-)
+from openccu_loom_client.compat.aiohomematic.model.generic import DpBinarySensor, DpSensor, make_generic_data_point
 from openccu_loom_client.compat.aiohomematic.model.hub import (
     SysvarDpBinarySensor,
     SysvarDpNumber,
@@ -295,9 +291,7 @@ class TestChannelGroupWireNames:
         assert sorted(c.summary.channel_no for c in cdps) == [4, 5, 6]
 
     def test_button_lock_postfix_strips_channel_suffix(self) -> None:
-        cdp = _make_cdp(
-            _cdp_summary(name="BUTTON_LOCK@0", category="lock", kind="lock", channel_no=0)
-        )
+        cdp = _make_cdp(_cdp_summary(name="BUTTON_LOCK@0", category="lock", kind="lock", channel_no=0))
         assert cdp.data_point_name_postfix == "BUTTON_LOCK"
 
 
@@ -308,9 +302,9 @@ class TestCustomTranslatedName:
         from openccu_loom_types.rest import DeviceDetail, Snapshot
 
         store = LoomStore()
-        store.set_custom_data_point_factory(make_custom_data_point)
+        store.set_custom_data_point_factory(factory=make_custom_data_point)
         store.load_snapshot(
-            Snapshot.model_validate(
+            snapshot=Snapshot.model_validate(
                 {
                     "generated_at": "2026-06-11T08:00:00Z",
                     "devices": [
@@ -327,7 +321,7 @@ class TestCustomTranslatedName:
             )
         )
         store.attach_device_detail(
-            DeviceDetail.model_validate(
+            detail=DeviceDetail.model_validate(
                 {
                     "address": "VCU1",
                     "interface": "home:HmIP-RF",
@@ -392,7 +386,7 @@ class TestUpdateDataPoint:
         from openccu_loom_types.rest import DeviceDetail, Snapshot
 
         store.load_snapshot(
-            Snapshot.model_validate(
+            snapshot=Snapshot.model_validate(
                 {
                     "generated_at": "2026-06-11T08:00:00Z",
                     "devices": [
@@ -420,14 +414,14 @@ class TestUpdateDataPoint:
         }
         if firmware is not None:
             detail["firmware"] = firmware
-        store.attach_device_detail(DeviceDetail.model_validate(detail))
+        store.attach_device_detail(detail=DeviceDetail.model_validate(detail))
         return store.get_device(address="VCU9")
 
     def test_unique_id_and_versions(self) -> None:
         from openccu_loom_client.compat.aiohomematic.model.update import make_update_data_point
 
         store = LoomStore()
-        store.set_serial("3014F711A0001234")
+        store.set_serial(serial="3014F711A0001234")
         device = self._device(
             store,
             firmware={"Current": "1.2.3", "Available": "1.3.0", "UpdateState": "READY_FOR_UPDATE"},
@@ -447,7 +441,7 @@ class TestUpdateDataPoint:
         from openccu_loom_client.compat.aiohomematic.model.update import make_update_data_point
 
         store = LoomStore()
-        store.set_serial("3014F711A0001234")
+        store.set_serial(serial="3014F711A0001234")
         device = self._device(store, firmware={"Current": "1.2.3", "UpdateState": "UP_TO_DATE"})
         dp = make_update_data_point(device=device, store=store)
         assert dp.latest_firmware == "1.2.3"
@@ -457,21 +451,17 @@ class TestCalculatedDataPoints:
     """Daemon-calculated DPs spawn as sensors with the calculated key prefix."""
 
     def _store(self) -> LoomStore:
-        from openccu_loom_client.compat.aiohomematic.model.calculated import (
-            make_calculated_data_point,
-        )
+        from openccu_loom_client.compat.aiohomematic.model.calculated import make_calculated_data_point
 
         store = LoomStore()
-        store.set_serial("3014F711A0001234")
-        store.set_calculated_data_point_factory(make_calculated_data_point)
+        store.set_serial(serial="3014F711A0001234")
+        store.set_calculated_data_point_factory(factory=make_calculated_data_point)
         return store
 
     def test_binary_calculated(self) -> None:
         from openccu_loom_types.rest import CalculatedDPSummary
 
-        from openccu_loom_client.compat.aiohomematic.model.calculated import (
-            CalculatedDpBinarySensor,
-        )
+        from openccu_loom_client.compat.aiohomematic.model.calculated import CalculatedDpBinarySensor
 
         store = self._store()
         store.attach_channel_calculated_data_points(
@@ -534,7 +524,7 @@ class TestCalculatedDataPoints:
             ],
         )
         store.apply_value_changed(
-            DataPointValueChangedPayload.model_validate(
+            payload=DataPointValueChangedPayload.model_validate(
                 {
                     "central": "home",
                     "device_address": "VCU7",
@@ -555,9 +545,7 @@ class TestUsageVerdictFilter:
 
     @staticmethod
     def _dp_with_usage(usage: str | None) -> Any:
-        summary = _dp_summary(
-            parameter="PRESS_SHORT", type="ACTION", category="button", usage=usage
-        )
+        summary = _dp_summary(parameter="PRESS_SHORT", type="ACTION", category="button", usage=usage)
 
         class _Dp:
             def __init__(self) -> None:
@@ -566,18 +554,18 @@ class TestUsageVerdictFilter:
         return _Dp()
 
     def test_event_usage_is_not_creatable(self) -> None:
-        assert _is_creatable(self._dp_with_usage("event")) is False
+        assert _is_creatable(dp=self._dp_with_usage("event")) is False
 
     def test_no_create_and_ignored_are_not_creatable(self) -> None:
-        assert _is_creatable(self._dp_with_usage("no_create")) is False
-        assert _is_creatable(self._dp_with_usage("ignored")) is False
+        assert _is_creatable(dp=self._dp_with_usage("no_create")) is False
+        assert _is_creatable(dp=self._dp_with_usage("ignored")) is False
 
     def test_data_point_and_ce_verdicts_are_creatable(self) -> None:
-        assert _is_creatable(self._dp_with_usage("data_point")) is True
-        assert _is_creatable(self._dp_with_usage("ce_visible")) is True
+        assert _is_creatable(dp=self._dp_with_usage("data_point")) is True
+        assert _is_creatable(dp=self._dp_with_usage("ce_visible")) is True
 
     def test_missing_usage_defaults_to_creatable(self) -> None:
-        assert _is_creatable(self._dp_with_usage(None)) is True
+        assert _is_creatable(dp=self._dp_with_usage(None)) is True
 
 
 def _sysvar_summary(**overrides: Any) -> SysvarSummary:
@@ -596,32 +584,16 @@ class TestSysvarExtendedClasses:
     """Extended description marker unlocks the writable entity flavour."""
 
     def test_default_mapping_is_read_only(self) -> None:
-        assert (
-            resolve_sysvar_class(value_type="ALARM", has_value_list=False) is SysvarDpBinarySensor
-        )
-        assert (
-            resolve_sysvar_class(value_type="LOGIC", has_value_list=False) is SysvarDpBinarySensor
-        )
+        assert resolve_sysvar_class(value_type="ALARM", has_value_list=False) is SysvarDpBinarySensor
+        assert resolve_sysvar_class(value_type="LOGIC", has_value_list=False) is SysvarDpBinarySensor
         assert resolve_sysvar_class(value_type="FLOAT", has_value_list=False) is SysvarDpSensor
         assert resolve_sysvar_class(value_type="LIST", has_value_list=True) is SysvarDpSensor
 
     def test_extended_mapping_is_writable(self) -> None:
-        assert (
-            resolve_sysvar_class(value_type="ALARM", has_value_list=False, extended=True)
-            is SysvarDpSwitch
-        )
-        assert (
-            resolve_sysvar_class(value_type="LIST", has_value_list=True, extended=True)
-            is SysvarDpSelect
-        )
-        assert (
-            resolve_sysvar_class(value_type="FLOAT", has_value_list=False, extended=True)
-            is SysvarDpNumber
-        )
-        assert (
-            resolve_sysvar_class(value_type="STRING", has_value_list=False, extended=True)
-            is SysvarDpText
-        )
+        assert resolve_sysvar_class(value_type="ALARM", has_value_list=False, extended=True) is SysvarDpSwitch
+        assert resolve_sysvar_class(value_type="LIST", has_value_list=True, extended=True) is SysvarDpSelect
+        assert resolve_sysvar_class(value_type="FLOAT", has_value_list=False, extended=True) is SysvarDpNumber
+        assert resolve_sysvar_class(value_type="STRING", has_value_list=False, extended=True) is SysvarDpText
 
     def test_factory_honours_is_extended_from_summary(self) -> None:
         dp = make_sysvar_data_point(

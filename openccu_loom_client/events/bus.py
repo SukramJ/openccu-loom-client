@@ -54,7 +54,7 @@ class _Subscription:
     cancelled: bool = False
 
 
-def _event_key_of(event: LoomEvent) -> str | None:
+def _event_key_of(*, event: LoomEvent) -> str | None:
     """
     Return the routing key for an event, if it has one.
 
@@ -118,7 +118,7 @@ class EventBus:
 
         return _unsubscribe
 
-    async def publish(self, event: LoomEvent) -> None:
+    async def publish(self, *, event: LoomEvent) -> None:
         """
         Fan ``event`` out to all matching subscribers.
 
@@ -129,7 +129,7 @@ class EventBus:
         bucket = self._subs.get(type(event))
         if not bucket:
             return
-        evt_key = _event_key_of(event)
+        evt_key = _event_key_of(event=event)
         # Snapshot the list so a handler that unsubscribes mid-fanout
         # doesn't reshape what we're iterating.
         for sub in list(bucket):
@@ -152,7 +152,7 @@ class EventBus:
 
     # Test / introspection helpers.
 
-    def subscription_count(self, event_type: type[LoomEvent] | None = None) -> int:
+    def subscription_count(self, *, event_type: type[LoomEvent] | None = None) -> int:
         """Total number of active subscriptions, optionally per type."""
         if event_type is None:
             return sum(len(b) for b in self._subs.values())

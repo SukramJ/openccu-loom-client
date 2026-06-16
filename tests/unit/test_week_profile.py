@@ -9,10 +9,7 @@ from typing import Any
 
 from openccu_loom_types.rest import DeviceSummary, Schedule, WeekProfileResponse
 
-from openccu_loom_client.compat.aiohomematic.model.week_profile import (
-    ScheduleChannelSwitch,
-    WeekProfileDp,
-)
+from openccu_loom_client.compat.aiohomematic.model.week_profile import ScheduleChannelSwitch, WeekProfileDp
 from openccu_loom_client.model import Device
 from openccu_loom_client.store import LoomStore
 
@@ -21,8 +18,8 @@ _ADDRESS = "VCU0000001"
 
 def _store_with_device() -> tuple[LoomStore, Device]:
     store = LoomStore()
-    store.set_serial("ABC1234567")
-    store.set_central_name("home")
+    store.set_serial(serial="ABC1234567")
+    store.set_central_name(central_name="home")
     summary = DeviceSummary.model_validate(
         {
             "address": _ADDRESS,
@@ -34,7 +31,7 @@ def _store_with_device() -> tuple[LoomStore, Device]:
             "channels_count": 1,
         }
     )
-    device = store._upsert_device_summary(summary)
+    device = store._upsert_device_summary(summary=summary)
     return store, device
 
 
@@ -102,9 +99,7 @@ class _FakeSchedulesOps:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
 
-    async def set_channel_lock(
-        self, *, address: str, channel: int, key: str, enabled: bool
-    ) -> None:
+    async def set_channel_lock(self, *, address: str, channel: int, key: str, enabled: bool) -> None:
         self.calls.append({"address": address, "channel": channel, "key": key, "enabled": enabled})
 
 
@@ -172,9 +167,7 @@ class TestScheduleChannelSwitch:
             store=store,
             device=device,
             channel_no=1,
-            week_profile=_week_profile(
-                schedule_type="default", schedule_enabled={"1_1": True, "1_2": False}
-            ),
+            week_profile=_week_profile(schedule_type="default", schedule_enabled={"1_1": True, "1_2": False}),
         )
         ops = _FakeSchedulesOps()
         switch = ScheduleChannelSwitch(
@@ -189,9 +182,7 @@ class TestScheduleChannelSwitch:
 
     def test_unique_id(self) -> None:
         switch, _wp_dp, _ops = self._build()
-        assert (
-            switch.unique_id == "loom_schedule_channel_switch_vcu0000001_schedule_channel_lock_1_1"
-        )
+        assert switch.unique_id == "loom_schedule_channel_switch_vcu0000001_schedule_channel_lock_1_1"
 
     def test_value_reads_schedule_enabled(self) -> None:
         switch, _wp_dp, _ops = self._build()
@@ -235,9 +226,9 @@ class TestScheduleChannelSwitch:
         )
         # The HA switch composes "<Schedule> <channel_name>" from this.
         assert switch.name_data.channel_name == "SHUTTER_VIRTUAL_RECEIVER"
-        assert wp_dp.target_channel_name("1_1") == "SHUTTER_VIRTUAL_RECEIVER"
+        assert wp_dp.target_channel_name(channel_key="1_1") == "SHUTTER_VIRTUAL_RECEIVER"
         # Unknown key (older daemon / no mapping) -> bare schedule name fallback.
-        assert wp_dp.target_channel_name("9_9") is None
+        assert wp_dp.target_channel_name(channel_key="9_9") is None
 
     def test_enabled_default_is_false(self) -> None:
         switch, wp_dp, _ops = self._build()

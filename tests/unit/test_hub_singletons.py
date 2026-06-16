@@ -26,8 +26,8 @@ from openccu_loom_client.store import LoomStore
 
 def _store() -> LoomStore:
     store = LoomStore()
-    store.set_serial("ABC1234567")
-    store.set_central_name("home")
+    store.set_serial(serial="ABC1234567")
+    store.set_central_name(central_name="home")
     return store
 
 
@@ -67,9 +67,7 @@ class _FakeHubOps:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
 
-    async def set_install_mode_interface(
-        self, *, interface: str, active: bool, seconds: int = 60
-    ) -> None:
+    async def set_install_mode_interface(self, *, interface: str, active: bool, seconds: int = 60) -> None:
         self.calls.append({"interface": interface, "active": active, "seconds": seconds})
 
 
@@ -77,15 +75,10 @@ class TestUniqueIds:
     def test_hub_singleton_unique_ids(self) -> None:
         store = _store()
         assert AlarmMessagesSensor(store=store).unique_id == "loom_abc1234567_hub_alarm-messages"
-        assert (
-            ServiceMessagesSensor(store=store).unique_id == "loom_abc1234567_hub_service-messages"
-        )
+        assert ServiceMessagesSensor(store=store).unique_id == "loom_abc1234567_hub_service-messages"
         assert InboxSensor(store=store).unique_id == "loom_abc1234567_hub_inbox"
         assert SystemHealthSensor(store=store).unique_id == "loom_abc1234567_hub_system-health"
-        assert (
-            ConnectionLatencySensor(store=store).unique_id
-            == "loom_abc1234567_hub_connection-latency"
-        )
+        assert ConnectionLatencySensor(store=store).unique_id == "loom_abc1234567_hub_connection-latency"
         assert LastEventAgeSensor(store=store).unique_id == "loom_abc1234567_hub_last-event-age"
         assert (
             SystemUpdateDp(store=store, system_ops=_FakeSystemOps()).unique_id  # type: ignore[arg-type]

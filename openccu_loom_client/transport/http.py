@@ -81,8 +81,8 @@ class HttpTransport:
 
     def __init__(
         self,
-        config: LoomConfig,
         *,
+        config: LoomConfig,
         session: aiohttp.ClientSession | None = None,
         backoff_sequence: tuple[float, ...] = _DEFAULT_BACKOFF_SEQUENCE,
     ) -> None:
@@ -105,6 +105,7 @@ class HttpTransport:
         exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
+        /,
     ) -> None:
         """Close the session on context exit."""
         await self.close()
@@ -126,7 +127,7 @@ class HttpTransport:
                 timeout=aiohttp.ClientTimeout(total=self._config.request_timeout_seconds),
             )
 
-        info_payload = await self.request("GET", "/info")
+        info_payload = await self.request(method="GET", path="/info")
         self._info = Info.model_validate(info_payload)
 
         missing = [c for c in required_capabilities if c not in (self._info.capabilities or [])]
@@ -137,7 +138,7 @@ class HttpTransport:
             )
             raise LoomTransportError(msg)
 
-        self._check_schema_digest(info_payload)
+        self._check_schema_digest(info_payload=info_payload)
 
         _LOGGER.info(
             "connected to openccu-loom %s at %s (api_version=%s)",
@@ -147,7 +148,7 @@ class HttpTransport:
         )
         return self._info
 
-    def _check_schema_digest(self, info_payload: Any) -> None:
+    def _check_schema_digest(self, *, info_payload: Any) -> None:
         """
         Compare the daemon's ``schema_digest`` with the installed types package.
 
@@ -159,9 +160,7 @@ class HttpTransport:
         Silently skipped when either side predates the digest (old
         daemon or unstamped types package).
         """
-        daemon_digest = (
-            info_payload.get("schema_digest", "") if isinstance(info_payload, dict) else ""
-        )
+        daemon_digest = info_payload.get("schema_digest", "") if isinstance(info_payload, dict) else ""
         types_digest = getattr(openccu_loom_types, "SCHEMA_DIGEST", "")
         if not daemon_digest or not types_digest:
             return
@@ -196,9 +195,9 @@ class HttpTransport:
 
     async def request(
         self,
+        *,
         method: str,
         path: str,
-        *,
         params: dict[str, Any] | None = None,
         json_body: Any | None = None,
         headers: dict[str, str] | None = None,
@@ -222,7 +221,7 @@ class HttpTransport:
             raise LoomTransportError(msg)
 
         url = self._config.http_base_url + path
-        merged_headers = self._build_headers(headers)
+        merged_headers = self._build_headers(extra=headers)
         retry = allow_retry if allow_retry is not None else method.upper() in _RETRY_SAFE_METHODS
 
         attempt_delays = (0.0, *self._backoff_sequence) if retry else (0.0,)
@@ -252,9 +251,9 @@ class HttpTransport:
 
     async def request_bytes(
         self,
+        *,
         method: str,
         path: str,
-        *,
         params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
     ) -> bytes:
@@ -271,7 +270,7 @@ class HttpTransport:
             msg = "HttpTransport not connected — call connect() first"
             raise LoomTransportError(msg)
         url = self._config.http_base_url + path
-        merged = self._build_headers(headers)
+        merged = self._build_headers(extra=headers)
         merged.setdefault("Accept", "application/octet-stream")
         assert self._session is not None  # noqa: S101 — narrowed by the connected-state guard above
         try:
@@ -280,7 +279,7 @@ class HttpTransport:
                 if HTTPStatus.OK <= resp.status < HTTPStatus.MULTIPLE_CHOICES:
                     return raw
                 payload = self._decode_json(raw) if raw else None
-                problem = parse_problem(payload) if payload is not None else None
+                problem = parse_problem(payload=payload) if payload is not None else None
                 raise http_error_from_problem(
                     status=resp.status,
                     problem=problem,
@@ -297,7 +296,7 @@ class HttpTransport:
 
     # ---- internals ----
 
-    def _build_headers(self, extra: dict[str, str] | None) -> dict[str, str]:
+    def _build_headers(self, *, extra: dict[str, str] | None) -> dict[str, str]:
         headers: dict[str, str] = {
             "Accept": "application/json",
             "User-Agent": self._config.user_agent,
@@ -305,7 +304,7 @@ class HttpTransport:
         }
         if extra:
             headers.update(extra)
-        self._config.auth.apply_to_headers(headers)
+        self._config.auth.apply_to_headers(headers=headers)
         return headers
 
     async def _do_once(
@@ -333,7 +332,7 @@ class HttpTransport:
                     return self._decode_json(raw) if raw else None
                 # Error path — try problem+json first.
                 payload = self._decode_json(raw) if raw else None
-                problem = parse_problem(payload) if payload is not None else None
+                problem = parse_problem(payload=payload) if payload is not None else None
                 raise http_error_from_problem(
                     status=resp.status,
                     problem=problem,

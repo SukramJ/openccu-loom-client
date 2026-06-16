@@ -83,8 +83,8 @@ class WsTransport:
 
     def __init__(
         self,
-        config: LoomConfig,
         *,
+        config: LoomConfig,
         initial_subscriptions: list[str] | None = None,
         on_replay_lost: ReplayLostHandler | None = None,
         session: aiohttp.ClientSession | None = None,
@@ -116,6 +116,7 @@ class WsTransport:
         exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
+        /,
     ) -> None:
         """Stop the connection on context exit."""
         await self.stop()
@@ -167,7 +168,7 @@ class WsTransport:
         """Current subscription patterns (defensive copy)."""
         return frozenset(self._subscriptions)
 
-    async def subscribe(self, topics: list[str]) -> None:
+    async def subscribe(self, *, topics: list[str]) -> None:
         """
         Add topic patterns to the active subscription set.
 
@@ -180,16 +181,16 @@ class WsTransport:
             return
         self._subscriptions.update(new)
         if self._ws is not None and not self._ws.closed:
-            await self._send({"op": "subscribe", "topics": new})
+            await self._send(frame={"op": "subscribe", "topics": new})
 
-    async def unsubscribe(self, topics: list[str]) -> None:
+    async def unsubscribe(self, *, topics: list[str]) -> None:
         """Drop topic patterns from the subscription set."""
         gone = [t for t in topics if t in self._subscriptions]
         if not gone:
             return
         self._subscriptions.difference_update(gone)
         if self._ws is not None and not self._ws.closed:
-            await self._send({"op": "unsubscribe", "topics": gone})
+            await self._send(frame={"op": "unsubscribe", "topics": gone})
 
     async def events(self) -> AsyncIterator[WsEnvelope]:
         """
@@ -244,7 +245,7 @@ class WsTransport:
         assert self._session is not None  # noqa: S101 — invariant: session opened in connect()
 
         headers: dict[str, str] = {"User-Agent": self._config.user_agent}
-        self._config.auth.apply_to_headers(headers)
+        self._config.auth.apply_to_headers(headers=headers)
 
         async with self._session.ws_connect(
             self._config.ws_url,
@@ -254,7 +255,7 @@ class WsTransport:
             self._ws = ws
             await self._send_initial_subscribe()
             try:
-                await self._read_loop(ws)
+                await self._read_loop(ws=ws)
             finally:
                 self._ws = None
 
@@ -267,9 +268,9 @@ class WsTransport:
         }
         if self._last_seq is not None:
             frame["since"] = self._last_seq
-        await self._send(frame)
+        await self._send(frame=frame)
 
-    async def _read_loop(self, ws: aiohttp.ClientWebSocketResponse) -> None:
+    async def _read_loop(self, *, ws: aiohttp.ClientWebSocketResponse) -> None:
         while not self._closing:
             try:
                 msg = await asyncio.wait_for(
@@ -277,14 +278,11 @@ class WsTransport:
                     timeout=_INBOUND_PING_DEADLINE_SECONDS,
                 )
             except TimeoutError as exc:
-                msg_text = (
-                    f"no daemon ping in {_INBOUND_PING_DEADLINE_SECONDS}s "
-                    "— treating connection as dead"
-                )
+                msg_text = f"no daemon ping in {_INBOUND_PING_DEADLINE_SECONDS}s — treating connection as dead"
                 raise LoomTransportError(msg_text) from exc
 
             if msg.type == aiohttp.WSMsgType.TEXT:
-                await self._handle_text(msg.data)
+                await self._handle_text(raw=msg.data)
             elif msg.type == aiohttp.WSMsgType.CLOSE:
                 _LOGGER.info("daemon initiated WS close: %s", msg.data)
                 return
@@ -297,7 +295,7 @@ class WsTransport:
             # in-band {"op":"ping"} arrives as a TEXT frame and is handled
             # in _handle_text below.
 
-    async def _handle_text(self, raw: str) -> None:
+    async def _handle_text(self, *, raw: str) -> None:
         try:
             frame = json.loads(raw)
         except json.JSONDecodeError:
@@ -310,7 +308,7 @@ class WsTransport:
         # Control frames carry "op"; broadcast envelopes carry "type" + "topic".
         op = frame.get("op")
         if op is not None:
-            await self._handle_control(op, frame)
+            await self._handle_control(op=op, frame=frame)
             return
 
         envelope = self._parse_envelope(frame)
@@ -321,9 +319,9 @@ class WsTransport:
             self._last_seq = envelope.seq
         await self._envelope_queue.put(envelope)
 
-    async def _handle_control(self, op: str, frame: dict[str, object]) -> None:
+    async def _handle_control(self, *, op: str, frame: dict[str, object]) -> None:
         if op == "ping":
-            await self._send({"op": "pong"})
+            await self._send(frame={"op": "pong"})
         elif op == "replay_done":
             seq = frame.get("seq")
             _LOGGER.debug("replay_done at seq=%s", seq)
@@ -353,7 +351,7 @@ class WsTransport:
             _LOGGER.warning("dropping malformed WS envelope: %s | frame=%r", exc, frame)
             return None
 
-    async def _send(self, frame: dict[str, object]) -> None:
+    async def _send(self, *, frame: dict[str, object]) -> None:
         if self._ws is None or self._ws.closed:
             msg = "cannot send on closed WS"
             raise LoomTransportError(msg)
@@ -361,7 +359,7 @@ class WsTransport:
 
     # ---- in-band auth refresh (per topic-hierarchy.md) ----
 
-    async def reauth(self, token: str) -> None:
+    async def reauth(self, *, token: str) -> None:
         """
         Swap the connection's bearer token without a reconnect.
 
@@ -369,4 +367,4 @@ class WsTransport:
         ``DELETE /auth/tokens/{id}`` and the client wants to present
         a freshly-issued one without losing its subscription state.
         """
-        await self._send({"op": "reauth", "token": token})
+        await self._send(frame={"op": "reauth", "token": token})

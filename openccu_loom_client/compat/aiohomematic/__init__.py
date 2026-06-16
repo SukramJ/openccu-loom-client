@@ -24,4 +24,8 @@ from __future__ import annotations
 from openccu_loom_client._version import __version__
 from openccu_loom_client.compat.aiohomematic import ccu_translations
 
-__all__ = ["__version__", "ccu_translations"]
+__all__ = [
+    # General
+    "__version__",
+    "ccu_translations",
+]

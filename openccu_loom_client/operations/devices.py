@@ -41,8 +41,8 @@ class DevicesOperations(_OperationsBase):
         page through without parsing.
         """
         payload = await self._transport.request(
-            "GET",
-            "/devices",
+            method="GET",
+            path="/devices",
             params={"page": page, "per_page": per_page},
         )
         return DeviceList.model_validate(payload)
@@ -71,7 +71,7 @@ class DevicesOperations(_OperationsBase):
 
         Wire: ``GET /devices/{addr}``.
         """
-        payload = await self._transport.request("GET", f"/devices/{address}")
+        payload = await self._transport.request(method="GET", path=f"/devices/{address}")
         return DeviceDetail.model_validate(payload)
 
     async def list_channels(self, *, address: str) -> list[ChannelSummary]:
@@ -80,7 +80,7 @@ class DevicesOperations(_OperationsBase):
 
         Wire: ``GET /devices/{addr}/channels``.
         """
-        payload = await self._transport.request("GET", f"/devices/{address}/channels")
+        payload = await self._transport.request(method="GET", path=f"/devices/{address}/channels")
         return [ChannelSummary.model_validate(c) for c in (payload or [])]
 
     async def list_data_points(
@@ -95,8 +95,8 @@ class DevicesOperations(_OperationsBase):
         Wire: ``GET /devices/{addr}/channels/{n}/data-points``.
         """
         payload = await self._transport.request(
-            "GET",
-            f"/devices/{address}/channels/{channel}/data-points",
+            method="GET",
+            path=f"/devices/{address}/channels/{channel}/data-points",
         )
         return [DataPointSummary.model_validate(dp) for dp in (payload or [])]
 
@@ -113,38 +113,34 @@ class DevicesOperations(_OperationsBase):
         Wire: ``GET /devices/{addr}/channels/{n}/data-points/{param}``.
         """
         payload = await self._transport.request(
-            "GET",
-            f"/devices/{address}/channels/{channel}/data-points/{parameter}",
+            method="GET",
+            path=f"/devices/{address}/channels/{channel}/data-points/{parameter}",
         )
         return DataPointSummary.model_validate(payload)
 
     # ---- calculated data points ----
 
-    async def list_calculated_data_points(
-        self, *, address: str, channel: int
-    ) -> list[CalculatedDPSummary]:
+    async def list_calculated_data_points(self, *, address: str, channel: int) -> list[CalculatedDPSummary]:
         """
         All calculated (derived) data-points on a channel.
 
         Wire: ``GET /devices/{addr}/channels/{n}/calc-dps``.
         """
         payload = await self._transport.request(
-            "GET",
-            f"/devices/{address}/channels/{channel}/calc-dps",
+            method="GET",
+            path=f"/devices/{address}/channels/{channel}/calc-dps",
         )
         return [CalculatedDPSummary.model_validate(c) for c in (payload or [])]
 
-    async def get_calculated_data_point(
-        self, *, address: str, channel: int, name: str
-    ) -> CalculatedDPDetail:
+    async def get_calculated_data_point(self, *, address: str, channel: int, name: str) -> CalculatedDPDetail:
         """
         One calculated data-point by name (incl. ``depends_on``).
 
         Wire: ``GET /devices/{addr}/channels/{n}/calc-dps/{name}``.
         """
         payload = await self._transport.request(
-            "GET",
-            f"/devices/{address}/channels/{channel}/calc-dps/{name}",
+            method="GET",
+            path=f"/devices/{address}/channels/{channel}/calc-dps/{name}",
         )
         return CalculatedDPDetail.model_validate(payload)
 
@@ -157,7 +153,7 @@ class DevicesOperations(_OperationsBase):
         Wire: ``POST /devices/refresh``. Async on the daemon side;
         the call returns 202.
         """
-        await self._transport.request("POST", "/devices/refresh")
+        await self._transport.request(method="POST", path="/devices/refresh")
 
     async def patch_device(self, *, address: str, name: str) -> None:
         """
@@ -166,8 +162,8 @@ class DevicesOperations(_OperationsBase):
         Wire: ``PATCH /devices/{addr}``.
         """
         await self._transport.request(
-            "PATCH",
-            f"/devices/{address}",
+            method="PATCH",
+            path=f"/devices/{address}",
             json_body={"name": name},
             allow_retry=False,
         )
@@ -178,7 +174,7 @@ class DevicesOperations(_OperationsBase):
 
         Wire: ``DELETE /devices/{addr}``.
         """
-        await self._transport.request("DELETE", f"/devices/{address}")
+        await self._transport.request(method="DELETE", path=f"/devices/{address}")
 
     async def update_firmware(self, *, address: str) -> None:
         """
@@ -191,8 +187,8 @@ class DevicesOperations(_OperationsBase):
         should pass an ``Idempotency-Key`` header via the transport.
         """
         await self._transport.request(
-            "POST",
-            f"/devices/{address}/firmware/update",
+            method="POST",
+            path=f"/devices/{address}/firmware/update",
             allow_retry=False,
         )
 
@@ -202,7 +198,7 @@ class DevicesOperations(_OperationsBase):
 
         Wire: ``POST /devices/{addr}/accept``.
         """
-        await self._transport.request("POST", f"/devices/{address}/accept", allow_retry=False)
+        await self._transport.request(method="POST", path=f"/devices/{address}/accept", allow_retry=False)
 
     # ---- UI schema / config snapshots ----
 
@@ -227,8 +223,8 @@ class DevicesOperations(_OperationsBase):
         if expert is not None:
             params["expert"] = expert
         payload = await self._transport.request(
-            "GET",
-            f"/devices/{address}/channels/{channel}/ui-schema",
+            method="GET",
+            path=f"/devices/{address}/channels/{channel}/ui-schema",
             params=params,
         )
         return dict(payload or {})
@@ -242,23 +238,21 @@ class DevicesOperations(_OperationsBase):
         Wire: ``GET /devices/{addr}/channels/{n}/config/export``.
         """
         payload = await self._transport.request(
-            "GET",
-            f"/devices/{address}/channels/{channel}/config/export",
+            method="GET",
+            path=f"/devices/{address}/channels/{channel}/config/export",
             params={"paramset": paramset},
         )
         return ExportedConfiguration.model_validate(payload)
 
-    async def import_channel_config(
-        self, *, address: str, channel: int, configuration: ExportedConfiguration
-    ) -> None:
+    async def import_channel_config(self, *, address: str, channel: int, configuration: ExportedConfiguration) -> None:
         """
         Import a previously-exported paramset snapshot.
 
         Wire: ``POST /devices/{addr}/channels/{n}/config/import``.
         """
         await self._transport.request(
-            "POST",
-            f"/devices/{address}/channels/{channel}/config/import",
+            method="POST",
+            path=f"/devices/{address}/channels/{channel}/config/import",
             json_body=configuration.model_dump(mode="json", exclude_none=True),
             allow_retry=False,
         )

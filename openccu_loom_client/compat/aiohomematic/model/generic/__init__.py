@@ -97,7 +97,7 @@ class _GenericEntitySurface(_GenericProtocolSurface):
 
     # ---- value / state ----
 
-    def _resolve_enum(self, raw: Any) -> Any:
+    def _resolve_enum(self, *, raw: Any) -> Any:
         """Map an ENUM index to its ``value_list`` option string (mirrors aiohomematic)."""
         value_list: tuple[str, ...] = self.value_list  # type: ignore[attr-defined]
         is_enum: bool = self.type == "ENUM"  # type: ignore[attr-defined]
@@ -118,7 +118,7 @@ class _GenericEntitySurface(_GenericProtocolSurface):
         override = getattr(self, "_value_override", _UNSET)
         if override is not _UNSET:
             return override
-        return self._resolve_enum(DataPoint.value.fget(self))  # type: ignore[attr-defined]
+        return self._resolve_enum(raw=DataPoint.value.fget(self))  # type: ignore[attr-defined]
 
     @value.setter
     def value(self, new_value: Any) -> None:
@@ -128,7 +128,7 @@ class _GenericEntitySurface(_GenericProtocolSurface):
     @property
     def default(self) -> Any:
         """Return the parameter's default, ENUM-resolved (HA restores this when unset)."""
-        return self._resolve_enum(getattr(self.summary, "default", None))  # type: ignore[attr-defined]
+        return self._resolve_enum(raw=getattr(self.summary, "default", None))  # type: ignore[attr-defined]
 
     @property
     def is_valid(self) -> bool:
@@ -245,16 +245,14 @@ class DpBinarySensor(_GenericEntitySurface, DataPoint):
 
     _category: ClassVar[DataPointCategory] = DataPointCategory.BinarySensor
 
-    def _as_bool(self, raw: Any) -> bool | None:
+    def _as_bool(self, *, raw: Any) -> bool | None:
         """Convert the raw wire value to the HA ``is_on`` bool (aiohomematic parity)."""
         if raw is None:
             return None
         if isinstance(raw, bool):
             return raw
         value_list: tuple[str, ...] = self.value_list
-        if value_list and (
-            true_value := _BINARY_SENSOR_TRUE_VALUE_BY_VALUE_LIST.get(tuple(value_list))
-        ):
+        if value_list and (true_value := _BINARY_SENSOR_TRUE_VALUE_BY_VALUE_LIST.get(tuple(value_list))):
             if isinstance(raw, int) and 0 <= raw < len(value_list):
                 raw = value_list[raw]
             if isinstance(raw, str):
@@ -267,8 +265,8 @@ class DpBinarySensor(_GenericEntitySurface, DataPoint):
         """Return the binary state as ``bool`` (never the ENUM option string)."""
         override = getattr(self, "_value_override", _UNSET)
         if override is not _UNSET:
-            return self._as_bool(override)
-        return self._as_bool(DataPoint.value.fget(self))  # type: ignore[attr-defined]
+            return self._as_bool(raw=override)
+        return self._as_bool(raw=DataPoint.value.fget(self))  # type: ignore[attr-defined]
 
     @value.setter
     def value(self, new_value: Any) -> None:
@@ -278,7 +276,7 @@ class DpBinarySensor(_GenericEntitySurface, DataPoint):
     @property
     def default(self) -> bool | None:
         """Return the parameter default as ``bool`` (HA restores this when unset)."""
-        return self._as_bool(getattr(self.summary, "default", None))
+        return self._as_bool(raw=getattr(self.summary, "default", None))
 
 
 class DpSensor(_GenericEntitySurface, DataPoint):
@@ -310,7 +308,7 @@ class DpAction(_GenericEntitySurface, DataPoint):
 
     _category: ClassVar[DataPointCategory] = DataPointCategory.Action
 
-    async def send_action(self, value: Any = True) -> None:
+    async def send_action(self, *, value: Any = True) -> None:
         """Send the given value to the write-only parameter."""
         await self.send_value(value=value)
 
@@ -348,9 +346,7 @@ _WRITABLE_BY_TYPE: dict[str, type[DataPoint]] = {
 }
 
 
-def resolve_generic_class(
-    *, type_token: str | None, read: bool, write: bool, has_value_list: bool
-) -> type[DataPoint]:
+def resolve_generic_class(*, type_token: str | None, read: bool, write: bool, has_value_list: bool) -> type[DataPoint]:
     """
     Pick the ``Dp*`` class for a parameter from its type + operations.
 
@@ -425,8 +421,11 @@ def make_generic_data_point(
 
 
 __all__ = [
+    # General
     "BaseDpActionNumber",
     "BaseDpNumber",
+    "DataPoint",
+    "DataPointCategory",
     "DpAction",
     "DpActionSelect",
     "DpBinarySensor",
@@ -435,6 +434,7 @@ __all__ = [
     "DpSensor",
     "DpSwitch",
     "DpText",
+    "data_point_event_key",
     "make_generic_data_point",
     "resolve_generic_class",
 ]

@@ -106,13 +106,13 @@ def _wire_endpoints(mock_daemon: MockDaemon) -> None:
 class TestConnectAndBootstrap:
     async def test_connect_only_runs_info_handshake(self, mock_daemon: MockDaemon) -> None:
         mock_daemon.get("/api/v1/info", payload=_INFO)
-        async with LoomClient(mock_daemon.config) as client:
+        async with LoomClient(config=mock_daemon.config) as client:
             # connect() ran via __aenter__; store is still empty.
             assert list(client.store.devices) == []
 
     async def test_bootstrap_populates_full_store(self, mock_daemon: MockDaemon) -> None:
         _wire_endpoints(mock_daemon)
-        async with LoomClient(mock_daemon.config) as client:
+        async with LoomClient(config=mock_daemon.config) as client:
             await client.bootstrap()
             devices = list(client.store.devices)
             assert len(devices) == 1
@@ -130,7 +130,7 @@ class TestConnectAndBootstrap:
             captured.append(e)
 
         _wire_endpoints(mock_daemon)
-        async with LoomClient(mock_daemon.config) as client:
+        async with LoomClient(config=mock_daemon.config) as client:
             client.events.subscribe(event_type=DataPointsCreatedEvent, handler=h)
             await client.bootstrap()
 
@@ -146,7 +146,7 @@ class TestConnectAndBootstrap:
         mock_daemon.get("/api/v1/devices/VCU0001", payload=_DEVICE_DETAIL)
         # Note: /data-points endpoint NOT registered. If the
         # bootstrap calls it anyway, the mock daemon returns 404.
-        async with LoomClient(mock_daemon.config) as client:
+        async with LoomClient(config=mock_daemon.config) as client:
             await client.bootstrap(fetch_data_points=False)
             device = client.store.get_device(address="VCU0001")
             assert device is not None
@@ -168,7 +168,7 @@ class TestWsBridge:
         same code path that the dispatch loop would.
         """
         _wire_endpoints(mock_daemon)
-        async with LoomClient(mock_daemon.config) as client:
+        async with LoomClient(config=mock_daemon.config) as client:
             await client.bootstrap()
             # Manually wire the bridge (start_events would do this
             # via the WS path, but that requires a real WS server).
@@ -199,7 +199,7 @@ class TestWsBridge:
                     }
                 ),
             )
-            await client.events.publish(ev)
+            await client.events.publish(event=ev)
 
             # Store now reflects the new value.
             dp_after = client.store.get_data_point(address="VCU0001", channel=1, parameter="LEVEL")
@@ -215,8 +215,8 @@ class TestSendValueThroughClient:
             "/api/v1/devices/VCU0001/channels/1/data-points/STATE/value",
             status=202,
         )
-        async with LoomClient(mock_daemon.config) as client:
+        async with LoomClient(config=mock_daemon.config) as client:
             await client.bootstrap()
             dp = client.store.get_data_point(address="VCU0001", channel=1, parameter="STATE")
             assert dp is not None
-            await dp.send_value(True)
+            await dp.send_value(value=True)

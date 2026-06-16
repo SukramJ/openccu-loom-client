@@ -75,7 +75,7 @@ class _CentralIdProvider:
     config: _CentralIdConfig
 
 
-def _provider(central_id: str) -> ConfigProviderProtocol:
+def _provider(*, central_id: str) -> ConfigProviderProtocol:
     """Wrap a plain central id into the provider shape aiohomematic expects."""
     return cast(
         "ConfigProviderProtocol",
@@ -92,7 +92,7 @@ def generate_unique_id(
 ) -> str:
     """Build the routing key via aiohomematic's reference algorithm."""
     return _aio_generate_unique_id(
-        config_provider=_provider(central_id),
+        config_provider=_provider(central_id=central_id),
         address=address,
         parameter=parameter,
         prefix=prefix,
@@ -101,10 +101,10 @@ def generate_unique_id(
 
 def generate_channel_unique_id(*, central_id: str, address: str) -> str:
     """Build the channel-level routing key via aiohomematic's reference algorithm."""
-    return _aio_generate_channel_unique_id(config_provider=_provider(central_id), address=address)
+    return _aio_generate_channel_unique_id(config_provider=_provider(central_id=central_id), address=address)
 
 
-def serial_suffix(serial: str) -> str:
+def serial_suffix(*, serial: str) -> str:
     """
     Return the per-CCU discriminator from the CCU serial.
 
@@ -121,7 +121,8 @@ def serial_suffix(serial: str) -> str:
 
 def canonical_unique_id(
     *,
-    serial_suffix: str,
+    # param deliberately mirrors the module-level `serial_suffix` helper's name
+    serial_suffix: str,  # pylint: disable=redefined-outer-name
     address: str,
     parameter: str | None = None,
     prefix: str | None = None,
@@ -147,7 +148,7 @@ def canonical_unique_id(
     )
 
 
-def hub_slug(name: str) -> str:
+def hub_slug(*, name: str) -> str:
     """
     Slugify a hub data-point name exactly as aiohomematic does.
 

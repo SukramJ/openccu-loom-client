@@ -133,9 +133,7 @@ class Channel:
         if group_no is None:
             return None
         master = (
-            self
-            if self.number == group_no
-            else self._store.get_channel(address=self.device_address, number=group_no)
+            self if self.number == group_no else self._store.get_channel(address=self.device_address, number=group_no)
         )
         if master is None:
             return None
@@ -173,10 +171,7 @@ class Channel:
 
     def __repr__(self) -> str:
         """Return the debug representation."""
-        return (
-            f"Channel(address={self.address!r}, number={self.number}, "
-            f"paramset_key={self.paramset_key!r})"
-        )
+        return f"Channel(address={self.address!r}, number={self.number}, paramset_key={self.paramset_key!r})"
 
 
 class GroupMasterView:

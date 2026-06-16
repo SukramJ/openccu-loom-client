@@ -69,7 +69,7 @@ class TestSubscribeAndPublish:
             captured.append(e)
 
         bus.subscribe(event_type=DataPointValueChangedEvent, handler=h)
-        await bus.publish(_dpv_event())
+        await bus.publish(event=_dpv_event())
         assert len(captured) == 1
 
     async def test_handler_does_not_fire_for_other_type(self) -> None:
@@ -80,12 +80,12 @@ class TestSubscribeAndPublish:
             seen.append(e)
 
         bus.subscribe(event_type=DataPointValueChangedEvent, handler=h)
-        await bus.publish(_central_event())
+        await bus.publish(event=_central_event())
         assert seen == []
 
     async def test_publish_with_no_subscribers_is_noop(self) -> None:
         bus = EventBus()
-        await bus.publish(_dpv_event())  # must not raise
+        await bus.publish(event=_dpv_event())  # must not raise
 
     async def test_multiple_handlers_all_called_in_order(self) -> None:
         bus = EventBus()
@@ -99,7 +99,7 @@ class TestSubscribeAndPublish:
 
         bus.subscribe(event_type=DataPointValueChangedEvent, handler=h1)
         bus.subscribe(event_type=DataPointValueChangedEvent, handler=h2)
-        await bus.publish(_dpv_event())
+        await bus.publish(event=_dpv_event())
         assert order == ["h1", "h2"]
 
     async def test_handler_exception_does_not_break_fanout(self, caplog) -> None:
@@ -114,7 +114,7 @@ class TestSubscribeAndPublish:
 
         bus.subscribe(event_type=DataPointValueChangedEvent, handler=boom)
         bus.subscribe(event_type=DataPointValueChangedEvent, handler=good)
-        await bus.publish(_dpv_event())
+        await bus.publish(event=_dpv_event())
         assert survivors == ["yes"]
         assert "kaboom" in caplog.text or any("handler raised" in r.message for r in caplog.records)
 
@@ -140,10 +140,10 @@ class TestSubscribeAndPublish:
 
         unsub_h1 = bus.subscribe(event_type=DataPointValueChangedEvent, handler=h1)
         unsub_h2 = bus.subscribe(event_type=DataPointValueChangedEvent, handler=h2)
-        await bus.publish(_dpv_event())
+        await bus.publish(event=_dpv_event())
         assert survivors == ["h1"]
         survivors.clear()
-        await bus.publish(_dpv_event())
+        await bus.publish(event=_dpv_event())
         assert survivors == ["h1"]
         unsub_h1()
 
@@ -170,7 +170,7 @@ class TestEventKey:
             event_key="cabin",
             handler=cabin_h,
         )
-        await bus.publish(_central_event(central="home"))
+        await bus.publish(event=_central_event(central="home"))
         assert home == ["home"]
         assert cabin == []
 
@@ -182,8 +182,8 @@ class TestEventKey:
             any_central.append("x")
 
         bus.subscribe(event_type=CentralStateChangedEvent, handler=h)  # event_key=None
-        await bus.publish(_central_event(central="home"))
-        await bus.publish(_central_event(central="cabin"))
+        await bus.publish(event=_central_event(central="home"))
+        await bus.publish(event=_central_event(central="cabin"))
         assert len(any_central) == 2
 
 
@@ -196,9 +196,9 @@ class TestUnsubscribe:
             received.append("x")
 
         unsub = bus.subscribe(event_type=DataPointValueChangedEvent, handler=h)
-        await bus.publish(_dpv_event())
+        await bus.publish(event=_dpv_event())
         unsub()
-        await bus.publish(_dpv_event())
+        await bus.publish(event=_dpv_event())
         assert len(received) == 1
         assert bus.subscription_count() == 0
 
@@ -231,7 +231,7 @@ class TestSubscriptionGroup:
         assert group.size == 0
         assert bus.subscription_count() == 0
 
-        await bus.publish(_dpv_event())
+        await bus.publish(event=_dpv_event())
         assert received == []
 
     async def test_group_cancel_is_idempotent(self) -> None:
@@ -261,7 +261,7 @@ class TestSubscriptionGroup:
         group_b.subscribe(event_type=DataPointValueChangedEvent, handler=bh)
 
         group_a.cancel()
-        await bus.publish(_dpv_event())
+        await bus.publish(event=_dpv_event())
         assert a_received == []
         assert b_received == ["b"]
 

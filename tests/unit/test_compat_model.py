@@ -62,9 +62,7 @@ from openccu_loom_client.store import LoomStore
 
 
 async def _adapter():
-    return await CentralConfig(
-        name="home", host="loom.test", port=8080, tls=False, token="tok-1"
-    ).create_central()
+    return await CentralConfig(name="home", host="loom.test", port=8080, tls=False, token="tok-1").create_central()
 
 
 def _cdp(*, name: str, category: str, kind: str) -> CustomDPSummary:
@@ -84,7 +82,7 @@ class TestCustomDataPointModel:
         central = await _adapter()
         store = central._client.store
         store.load_snapshot(
-            Snapshot.model_validate(
+            snapshot=Snapshot.model_validate(
                 {
                     "generated_at": "2026-05-24T08:00:00Z",
                     "devices": [
@@ -105,7 +103,7 @@ class TestCustomDataPointModel:
             cdps=[_cdp(name="cover", category="cover", kind="cover_blind")],
         )
         store.apply_custom_data_point_state_changed(
-            CustomDataPointStateChangedPayload.model_validate(
+            payload=CustomDataPointStateChangedPayload.model_validate(
                 {
                     "central": "home",
                     "device_address": "VCU1",
@@ -134,7 +132,7 @@ class TestCustomDataPointModel:
             cdps=[_cdp(name="climate", category="climate", kind="climate_hmip")],
         )
         store.apply_custom_data_point_state_changed(
-            CustomDataPointStateChangedPayload.model_validate(
+            payload=CustomDataPointStateChangedPayload.model_validate(
                 {
                     "central": "home",
                     "device_address": "VCU2",
@@ -155,18 +153,14 @@ class _FakeTransport:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, object]] = []
 
-    async def request(
-        self, method, path, *, params=None, json_body=None, headers=None, allow_retry=None
-    ):
+    async def request(self, method, path, *, params=None, json_body=None, headers=None, allow_retry=None):
         self.calls.append((method, path, json_body))
 
 
-def _cdp_instance(
-    *, kind, category, capabilities=None, state=None, supported=("turn_on", "turn_off")
-):
+def _cdp_instance(*, kind, category, capabilities=None, state=None, supported=("turn_on", "turn_off")):
     transport = _FakeTransport()
     store = LoomStore(transport=transport)  # type: ignore[arg-type]
-    store.set_custom_data_point_factory(make_custom_data_point)
+    store.set_custom_data_point_factory(factory=make_custom_data_point)
     store.attach_custom_data_points(
         device_address="VCU1",
         cdps=[
@@ -184,7 +178,7 @@ def _cdp_instance(
     )
     if state is not None:
         store.apply_custom_data_point_state_changed(
-            CustomDataPointStateChangedPayload.model_validate(
+            payload=CustomDataPointStateChangedPayload.model_validate(
                 {
                     "central": "home",
                     "device_address": "VCU1",
@@ -259,7 +253,7 @@ class TestRefreshBridge:
         looper, ha_bus, seen = self._ha_setup()
         install_refresh_bridge(group=group, store=LoomStore(), ha_bus=ha_bus, central_name="home")
         await bus.publish(
-            DataPointValueChangedEvent(
+            event=DataPointValueChangedEvent(
                 seq=1,
                 kind=Kind.change,
                 ts="2026-05-24T08:00:00Z",
@@ -287,7 +281,7 @@ class TestRefreshBridge:
         looper, ha_bus, seen = self._ha_setup()
         install_refresh_bridge(group=group, store=LoomStore(), ha_bus=ha_bus, central_name="home")
         await bus.publish(
-            DataPointValueChangedEvent(
+            event=DataPointValueChangedEvent(
                 seq=1,
                 kind=Kind.change,
                 ts="2026-05-24T08:00:00Z",
@@ -312,11 +306,11 @@ class TestRefreshBridge:
         bus = EventBus()
         group = bus.create_subscription_group(name="t")
         store = LoomStore()
-        store.set_serial("3014F711A0001234")  # serial suffix → 11a0001234
+        store.set_serial(serial="3014F711A0001234")  # serial suffix → 11a0001234
         looper, ha_bus, seen = self._ha_setup()
         install_refresh_bridge(group=group, store=store, ha_bus=ha_bus, central_name="home")
         await bus.publish(
-            CustomDataPointStateChangedEvent(
+            event=CustomDataPointStateChangedEvent(
                 seq=2,
                 kind=Kind.change,
                 ts="2026-05-24T08:00:00Z",
@@ -332,13 +326,11 @@ class TestRefreshBridge:
             )
         )
         await bus.publish(
-            SysvarChangedEvent(
+            event=SysvarChangedEvent(
                 seq=3,
                 kind=Kind.change,
                 ts="2026-05-24T08:00:00Z",
-                payload=SysvarChangedPayload.model_validate(
-                    {"central": "home", "name": "My Var", "value": 1.0}
-                ),
+                payload=SysvarChangedPayload.model_validate({"central": "home", "name": "My Var", "value": 1.0}),
             )
         )
         # Rebuilt canonical keys: a custom DP keys on its primary channel
@@ -360,7 +352,7 @@ class TestRefreshBridge:
             handler=lambda *, event: seen.append(event),
         )
         await bus.publish(
-            DataPointOptimisticRolledBackEvent(
+            event=DataPointOptimisticRolledBackEvent(
                 seq=7,
                 kind=Kind.change,
                 ts="2026-05-24T08:00:00Z",
@@ -412,7 +404,7 @@ class TestEventBridge:
             handler=lambda *, event: seen.append(event),
         )
         await bus.publish(
-            LoomDeviceTriggerEvent(
+            event=LoomDeviceTriggerEvent(
                 seq=1,
                 kind=Kind.change,
                 ts="2026-05-24T08:00:00Z",
@@ -449,7 +441,7 @@ class TestEventBridge:
             handler=lambda *, event: seen.append(event),
         )
         await bus.publish(
-            LoomCentralStateChangedEvent(
+            event=LoomCentralStateChangedEvent(
                 seq=1,
                 kind=Kind.change,
                 ts="2026-05-24T08:00:00Z",
@@ -472,7 +464,7 @@ class TestEventBridge:
             handler=lambda *, event: seen.append(event),
         )
         await bus.publish(
-            DeviceCreatedEvent(
+            event=DeviceCreatedEvent(
                 seq=1,
                 kind=Kind.change,
                 ts="2026-05-24T08:00:00Z",
@@ -487,7 +479,7 @@ class TestEventBridge:
             )
         )
         await bus.publish(
-            DeviceRemovedEvent(
+            event=DeviceRemovedEvent(
                 seq=2,
                 kind=Kind.change,
                 ts="2026-05-24T08:00:00Z",

@@ -184,8 +184,8 @@ class DataPoint:
 
     async def send_value(
         self,
-        value: Any,
         *,
+        value: Any,
         priority: SetValuePriority | None = None,
     ) -> None:
         """
@@ -205,13 +205,10 @@ class DataPoint:
 
     # ---- mutation hooks (called by the store) ----
 
-    def _replace_summary(self, summary: DataPointSummary) -> None:
+    def _replace_summary(self, *, summary: DataPointSummary) -> None:
         """Replace the backing summary in place (called by the store)."""
         self._summary = summary
 
     def __repr__(self) -> str:
         """Return a debug representation including address and current value."""
-        return (
-            f"DataPoint({self._device_address}:{self._channel_number}.{self.parameter}"
-            f" = {self.value!r})"
-        )
+        return f"DataPoint({self._device_address}:{self._channel_number}.{self.parameter} = {self.value!r})"

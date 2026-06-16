@@ -32,17 +32,17 @@ class MatterOperations(_OperationsBase):
 
     async def get_status(self) -> MatterStatus:
         """Bridge runtime state. Wire: ``GET /matter/status``."""
-        payload = await self._transport.request("GET", "/matter/status")
+        payload = await self._transport.request(method="GET", path="/matter/status")
         return MatterStatus.model_validate(payload)
 
     async def list_fabrics(self) -> MatterFabricList:
         """List commissioned Matter fabrics. Wire: ``GET /matter/fabrics``."""
-        payload = await self._transport.request("GET", "/matter/fabrics")
+        payload = await self._transport.request(method="GET", path="/matter/fabrics")
         return MatterFabricList.model_validate(payload)
 
     async def delete_fabric(self, *, fabric_id: str) -> None:
         """Unpair a Matter fabric (admin). Wire: ``DELETE /matter/fabrics/{id}``."""
-        await self._transport.request("DELETE", f"/matter/fabrics/{fabric_id}")
+        await self._transport.request(method="DELETE", path=f"/matter/fabrics/{fabric_id}")
 
     async def get_exposable(self) -> MatterExposureList:
         """
@@ -50,14 +50,14 @@ class MatterOperations(_OperationsBase):
 
         Wire: ``GET /matter/exposable``.
         """
-        payload = await self._transport.request("GET", "/matter/exposable")
+        payload = await self._transport.request(method="GET", path="/matter/exposable")
         return MatterExposureList.model_validate(payload)
 
     async def update_exposable(self, *, update: MatterExposureUpdate) -> None:
         """Update one allowlist row (admin). Wire: ``PUT /matter/exposable``."""
         await self._transport.request(
-            "PUT",
-            "/matter/exposable",
+            method="PUT",
+            path="/matter/exposable",
             json_body=update.model_dump(mode="json", exclude_none=True),
             allow_retry=True,
         )
@@ -69,8 +69,8 @@ class MatterOperations(_OperationsBase):
         Wire: ``POST /matter/exposable/bulk``. Returns ``{applied: N}``.
         """
         payload = await self._transport.request(
-            "POST",
-            "/matter/exposable/bulk",
+            method="POST",
+            path="/matter/exposable/bulk",
             json_body=updates.model_dump(mode="json", exclude_none=True),
             allow_retry=False,
         )
@@ -86,8 +86,8 @@ class MatterOperations(_OperationsBase):
         """
         body = request.model_dump(mode="json", exclude_none=True) if request is not None else None
         payload = await self._transport.request(
-            "POST",
-            "/matter/commissioning/window",
+            method="POST",
+            path="/matter/commissioning/window",
             json_body=body,
             allow_retry=False,
         )
@@ -99,9 +99,7 @@ class MatterOperations(_OperationsBase):
 
         Wire: ``POST /matter/commissioning/window/close``.
         """
-        await self._transport.request(
-            "POST", "/matter/commissioning/window/close", allow_retry=False
-        )
+        await self._transport.request(method="POST", path="/matter/commissioning/window/close", allow_retry=False)
 
     async def share(
         self, *, request: MatterCommissioningWindowRequest | None = None
@@ -112,12 +110,10 @@ class MatterOperations(_OperationsBase):
         Wire: ``POST /matter/share``.
         """
         body = request.model_dump(mode="json", exclude_none=True) if request is not None else None
-        payload = await self._transport.request(
-            "POST", "/matter/share", json_body=body, allow_retry=False
-        )
+        payload = await self._transport.request(method="POST", path="/matter/share", json_body=body, allow_retry=False)
         return MatterCommissioningWindowResponse.model_validate(payload)
 
     async def get_setup_payload(self) -> MatterSetupPayload:
         """Bridge QR + manual pairing code. Wire: ``GET /matter/setup-payload``."""
-        payload = await self._transport.request("GET", "/matter/setup-payload")
+        payload = await self._transport.request(method="GET", path="/matter/setup-payload")
         return MatterSetupPayload.model_validate(payload)

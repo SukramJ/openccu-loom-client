@@ -45,9 +45,7 @@ _FACTOR_BY_UNIT: Final[dict[Any, int]] = {
 }
 
 
-def _synthesize_summary(
-    *, value_dp: DataPoint, translated_name: str | None = None
-) -> DataPointSummary:
+def _synthesize_summary(*, value_dp: DataPoint, translated_name: str | None = None) -> DataPointSummary:
     """Project the DURATION pair onto one seconds-typed summary."""
     return DataPointSummary.model_validate(
         {
@@ -78,9 +76,7 @@ class CombinedDurationDp(BaseDpNumber):
         translated_name: str | None = None,
     ) -> None:
         """Bind the combined data point to its channel's DURATION pair."""
-        value_dp = store.get_data_point(
-            address=device.address, channel=channel_no, parameter=PARAMETER_DURATION_VALUE
-        )
+        value_dp = store.get_data_point(address=device.address, channel=channel_no, parameter=PARAMETER_DURATION_VALUE)
         if value_dp is None:
             msg = f"{device.address}:{channel_no} has no {PARAMETER_DURATION_VALUE} data point"
             raise ValueError(msg)
@@ -107,9 +103,7 @@ class CombinedDurationDp(BaseDpNumber):
 
     def _source_dp(self, *, parameter: str) -> DataPoint | None:
         """Return one of the underlying DURATION data points from the store."""
-        return self._store.get_data_point(
-            address=self.device_address, channel=self.channel_number, parameter=parameter
-        )
+        return self._store.get_data_point(address=self.device_address, channel=self.channel_number, parameter=parameter)
 
     # ---- value ----
 
@@ -134,7 +128,7 @@ class CombinedDurationDp(BaseDpNumber):
         """Return whether the underlying duration value has been observed."""
         return self.value is not None
 
-    async def send_value(self, value: Any, **_kwargs: Any) -> None:
+    async def send_value(self, *, value: Any, **_kwargs: Any) -> None:
         """Write the duration in seconds: pin the unit to seconds, then the value."""
         await self._store.set_value(
             address=self.device_address,

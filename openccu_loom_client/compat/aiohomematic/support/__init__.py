@@ -22,7 +22,7 @@ def find_free_port() -> int:
         return int(s.getsockname()[1])
 
 
-def to_bool(value: object) -> bool:
+def to_bool(*, value: object) -> bool:
     """
     Coerce a CCU-typed value into a Python bool.
 
@@ -39,4 +39,8 @@ def to_bool(value: object) -> bool:
     return False
 
 
-__all__ = ["find_free_port", "to_bool"]
+__all__ = [
+    # General
+    "find_free_port",
+    "to_bool",
+]

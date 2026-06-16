@@ -239,9 +239,7 @@ class TestIdentities:
         event, keyed by unique_id, so generic, custom and hub entities all
         refresh through the same subscription contract.
         """
-        from openccu_loom_client.compat.aiohomematic.central.events import (
-            DataPointStateChangedEvent,
-        )
+        from openccu_loom_client.compat.aiohomematic.central.events import DataPointStateChangedEvent
         from openccu_loom_client.events import DataPointValueChangedEvent
 
         assert DataPointStateChangedEvent is not DataPointValueChangedEvent
@@ -286,7 +284,7 @@ class TestSupportHelpers:
     def test_to_bool(self, value: object, expected: bool) -> None:
         from openccu_loom_client.compat.aiohomematic.support import to_bool
 
-        assert to_bool(value) is expected
+        assert to_bool(value=value) is expected
 
     def test_get_device_address_strips_channel(self) -> None:
         from openccu_loom_client.compat.aiohomematic.support.address import get_device_address
@@ -322,16 +320,12 @@ class TestListCcus:
         client.close = AsyncMock()
         client.system.list_system_ccus = AsyncMock(
             return_value=[
-                SimpleNamespace(
-                    name="Home", serial="ABC123", host="ccu.local", model="CCU3", available=True
-                ),
+                SimpleNamespace(name="Home", serial="ABC123", host="ccu.local", model="CCU3", available=True),
             ]
         )
         with (
             patch("openccu_loom_client.compat.aiohomematic.central.HttpTransport"),
-            patch(
-                "openccu_loom_client.compat.aiohomematic.central.LoomClient", return_value=client
-            ),
+            patch("openccu_loom_client.compat.aiohomematic.central.LoomClient", return_value=client),
         ):
             result = await list_ccus(host="daemon.local", token="tok", port=8080, tls=False)
 
@@ -357,9 +351,7 @@ class TestListCcus:
         client.close = AsyncMock()
         with (
             patch("openccu_loom_client.compat.aiohomematic.central.HttpTransport"),
-            patch(
-                "openccu_loom_client.compat.aiohomematic.central.LoomClient", return_value=client
-            ),
+            patch("openccu_loom_client.compat.aiohomematic.central.LoomClient", return_value=client),
             pytest.raises(RuntimeError),
         ):
             await list_ccus(host="daemon.local", token="tok")
@@ -375,9 +367,7 @@ class TestCallParameterCollector:
                 self.put_paramset_calls: list[dict] = []
 
             async def put_paramset(self, *, address, paramset_key, values):  # type: ignore[no-untyped-def]
-                self.put_paramset_calls.append(
-                    {"address": address, "paramset_key": paramset_key, "values": values}
-                )
+                self.put_paramset_calls.append({"address": address, "paramset_key": paramset_key, "values": values})
 
         ops = _StubOps()
         async with CallParameterCollector(

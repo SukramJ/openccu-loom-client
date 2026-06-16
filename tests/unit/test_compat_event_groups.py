@@ -10,10 +10,7 @@ from types import SimpleNamespace
 from openccu_loom_types.enums import DeviceTriggerEventType
 import pytest
 
-from openccu_loom_client.compat.aiohomematic.model.event_group import (
-    ChannelEventGroup,
-    _trigger_type,
-)
+from openccu_loom_client.compat.aiohomematic.model.event_group import ChannelEventGroup, _trigger_type
 
 
 @pytest.mark.parametrize(
@@ -29,13 +26,11 @@ from openccu_loom_client.compat.aiohomematic.model.event_group import (
     ],
 )
 def test_trigger_classification(parameter: str, expected: DeviceTriggerEventType | None) -> None:
-    assert _trigger_type(parameter) == expected
+    assert _trigger_type(parameter=parameter) == expected
 
 
 def _group(parameter: str = "PRESS_SHORT", central_id: str = "") -> ChannelEventGroup:
-    channel = SimpleNamespace(
-        address="VCU1769958:1", device=SimpleNamespace(name="Switch", available=True)
-    )
+    channel = SimpleNamespace(address="VCU1769958:1", device=SimpleNamespace(name="Switch", available=True))
     return ChannelEventGroup(
         channel=channel,
         event_type=DeviceTriggerEventType.Keypress,

@@ -20,19 +20,19 @@ class CentralsOperations(_OperationsBase):
 
     async def list_centrals(self) -> list[CentralRow]:
         """Wire: ``GET /centrals``."""
-        payload = await self._transport.request("GET", "/centrals")
+        payload = await self._transport.request(method="GET", path="/centrals")
         return [CentralRow.model_validate(c) for c in (payload or [])]
 
     async def get_central(self, *, name: str) -> CentralRow:
         """Wire: ``GET /centrals/{name}``."""
-        payload = await self._transport.request("GET", f"/centrals/{name}")
+        payload = await self._transport.request(method="GET", path=f"/centrals/{name}")
         return CentralRow.model_validate(payload)
 
     async def create_central(self, *, central: CentralRow) -> CentralRow:
         """Create a new central. Wire: ``POST /centrals``."""
         payload = await self._transport.request(
-            "POST",
-            "/centrals",
+            method="POST",
+            path="/centrals",
             json_body=central.model_dump(mode="json", exclude_none=True),
             allow_retry=False,
         )
@@ -41,12 +41,12 @@ class CentralsOperations(_OperationsBase):
     async def replace_central(self, *, name: str, central: CentralRow) -> None:
         """Replace a central. Wire: ``PUT /centrals/{name}``."""
         await self._transport.request(
-            "PUT",
-            f"/centrals/{name}",
+            method="PUT",
+            path=f"/centrals/{name}",
             json_body=central.model_dump(mode="json", exclude_none=True),
             allow_retry=True,
         )
 
     async def delete_central(self, *, name: str) -> None:
         """Delete a central. Wire: ``DELETE /centrals/{name}``."""
-        await self._transport.request("DELETE", f"/centrals/{name}")
+        await self._transport.request(method="DELETE", path=f"/centrals/{name}")

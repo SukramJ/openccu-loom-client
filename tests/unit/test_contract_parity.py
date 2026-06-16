@@ -95,7 +95,7 @@ class TestSerialSuffix:
         ],
     )
     def test_serial_suffix(self, serial: str, expected: str) -> None:
-        assert serial_suffix(serial) == expected
+        assert serial_suffix(serial=serial) == expected
 
 
 class TestUniqueIdWrappers:
@@ -137,13 +137,13 @@ class TestUniqueIdWrappers:
     @pytest.mark.parametrize("name", ["My Var", "Außen Temperatur", "alarm", "Wert mit-Strich"])
     def test_sysvar_key_matches_canonical(self, name: str) -> None:
         assert sysvar_unique_id(serial_suffix="11a0001234", name=name) == canonical_unique_id(
-            serial_suffix="11a0001234", address=SYSVAR_ADDRESS, parameter=hub_slug(name)
+            serial_suffix="11a0001234", address=SYSVAR_ADDRESS, parameter=hub_slug(name=name)
         )
 
     @pytest.mark.parametrize("name", ["All off", "Anwesenheit Simulation"])
     def test_program_key_matches_canonical(self, name: str) -> None:
         assert program_unique_id(serial_suffix="11a0001234", name=name) == canonical_unique_id(
-            serial_suffix="11a0001234", address=PROGRAM_ADDRESS, parameter=hub_slug(name)
+            serial_suffix="11a0001234", address=PROGRAM_ADDRESS, parameter=hub_slug(name=name)
         )
 
 
@@ -183,11 +183,8 @@ class TestRoutingKeyGoldens:
 
     @pytest.mark.parametrize("case", load_golden_cases("channel_unique_id"))
     def test_channel_unique_id_reference(self, case: dict[str, Any]) -> None:
-        assert (
-            generate_channel_unique_id(central_id=case["central_id"], address=case["address"])
-            == case["expected"]
-        )
+        assert generate_channel_unique_id(central_id=case["central_id"], address=case["address"]) == case["expected"]
 
     @pytest.mark.parametrize("case", load_golden_cases("hub_slug"))
     def test_hub_slug_reference(self, case: dict[str, Any]) -> None:
-        assert hub_slug(case["name"]) == case["slug"]
+        assert hub_slug(name=case["name"]) == case["slug"]

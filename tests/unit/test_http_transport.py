@@ -40,13 +40,11 @@ _INFO_RESPONSE = {
 @pytest.fixture
 def transport(mock_daemon: MockDaemon) -> HttpTransport:
     """Return a transport pointed at the mock daemon with backoff disabled."""
-    return HttpTransport(mock_daemon.config, backoff_sequence=(0.0, 0.0))
+    return HttpTransport(config=mock_daemon.config, backoff_sequence=(0.0, 0.0))
 
 
 class TestConnect:
-    async def test_connect_reads_info_and_records_it(
-        self, mock_daemon: MockDaemon, transport: HttpTransport
-    ) -> None:
+    async def test_connect_reads_info_and_records_it(self, mock_daemon: MockDaemon, transport: HttpTransport) -> None:
         mock_daemon.get("/api/v1/info", payload=_INFO_RESPONSE)
         info = await transport.connect()
         assert info.version == "1.2.3"
@@ -54,9 +52,7 @@ class TestConnect:
         assert transport.info is not None
         await transport.close()
 
-    async def test_required_capability_missing_raises(
-        self, mock_daemon: MockDaemon, transport: HttpTransport
-    ) -> None:
+    async def test_required_capability_missing_raises(self, mock_daemon: MockDaemon, transport: HttpTransport) -> None:
         mock_daemon.get("/api/v1/info", payload=_INFO_RESPONSE)
         # matter.bridge.v1 is in the Capability enum but not in our
         # fixture response — the daemon doesn't expose it.
@@ -132,26 +128,22 @@ class TestSchemaDigestHandshake:
 
 
 class TestRequest:
-    async def test_get_2xx_returns_json(
-        self, mock_daemon: MockDaemon, transport: HttpTransport
-    ) -> None:
+    async def test_get_2xx_returns_json(self, mock_daemon: MockDaemon, transport: HttpTransport) -> None:
         mock_daemon.get("/api/v1/info", payload=_INFO_RESPONSE)
         mock_daemon.get(
             "/api/v1/devices",
             payload={"items": [], "page": 1, "per_page": 50, "total": 0},
         )
         await transport.connect()
-        result = await transport.request("GET", "/devices")
+        result = await transport.request(method="GET", path="/devices")
         assert result["total"] == 0
         await transport.close()
 
-    async def test_204_returns_none(
-        self, mock_daemon: MockDaemon, transport: HttpTransport
-    ) -> None:
+    async def test_204_returns_none(self, mock_daemon: MockDaemon, transport: HttpTransport) -> None:
         mock_daemon.get("/api/v1/info", payload=_INFO_RESPONSE)
         mock_daemon.delete("/api/v1/devices/X", status=204)
         await transport.connect()
-        result = await transport.request("DELETE", "/devices/X")
+        result = await transport.request(method="DELETE", path="/devices/X")
         assert result is None
         await transport.close()
 
@@ -170,14 +162,12 @@ class TestRequest:
         )
         await transport.connect()
         with pytest.raises(LoomNotFoundError) as ei:
-            await transport.request("GET", "/devices/UNKNOWN")
+            await transport.request(method="GET", path="/devices/UNKNOWN")
         assert ei.value.status == 404
         assert ei.value.problem is not None
         await transport.close()
 
-    async def test_401_raises_auth_error(
-        self, mock_daemon: MockDaemon, transport: HttpTransport
-    ) -> None:
+    async def test_401_raises_auth_error(self, mock_daemon: MockDaemon, transport: HttpTransport) -> None:
         mock_daemon.get("/api/v1/info", payload=_INFO_RESPONSE)
         mock_daemon.get(
             "/api/v1/devices",
@@ -190,7 +180,7 @@ class TestRequest:
         )
         await transport.connect()
         with pytest.raises(LoomAuthError):
-            await transport.request("GET", "/devices")
+            await transport.request(method="GET", path="/devices")
         await transport.close()
 
 
@@ -214,7 +204,7 @@ class TestRetry:
             payload={"items": [], "page": 1, "per_page": 50, "total": 0},
         )
         await transport.connect()
-        result = await transport.request("GET", "/devices")
+        result = await transport.request(method="GET", path="/devices")
         assert result["total"] == 0
         await transport.close()
 
@@ -234,12 +224,10 @@ class TestRetry:
         )
         await transport.connect()
         with pytest.raises(LoomUpstreamUnavailableError):
-            await transport.request("GET", "/devices")
+            await transport.request(method="GET", path="/devices")
         await transport.close()
 
-    async def test_post_does_not_retry_by_default(
-        self, mock_daemon: MockDaemon, transport: HttpTransport
-    ) -> None:
+    async def test_post_does_not_retry_by_default(self, mock_daemon: MockDaemon, transport: HttpTransport) -> None:
         mock_daemon.get("/api/v1/info", payload=_INFO_RESPONSE)
         mock_daemon.post(
             "/api/v1/programs/p1/execute",
@@ -252,19 +240,19 @@ class TestRetry:
         )
         await transport.connect()
         with pytest.raises(LoomUpstreamUnavailableError):
-            await transport.request("POST", "/programs/p1/execute")
+            await transport.request(method="POST", path="/programs/p1/execute")
         await transport.close()
 
 
 class TestLifecycle:
     async def test_request_without_connect_raises(self, transport: HttpTransport) -> None:
         with pytest.raises(LoomTransportError, match="not connected"):
-            await transport.request("GET", "/devices")
+            await transport.request(method="GET", path="/devices")
 
     async def test_context_manager_closes_session(self, mock_daemon: MockDaemon) -> None:
         mock_daemon.get("/api/v1/info", payload=_INFO_RESPONSE)
         config: LoomConfig = mock_daemon.config
-        async with HttpTransport(config, backoff_sequence=()) as t:
+        async with HttpTransport(config=config, backoff_sequence=()) as t:
             assert t.info is not None
         # After __aexit__, info should be cleared.
         assert t.info is None

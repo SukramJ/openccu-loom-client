@@ -23,7 +23,7 @@ class ConfigOperations(_OperationsBase):
 
     async def get_config(self) -> ConfigSnapshot:
         """Sanitized effective configuration. Wire: ``GET /config``."""
-        payload = await self._transport.request("GET", "/config")
+        payload = await self._transport.request(method="GET", path="/config")
         return ConfigSnapshot.model_validate(payload)
 
     async def get_schema(self) -> SchemaResponse:
@@ -32,7 +32,7 @@ class ConfigOperations(_OperationsBase):
 
         Wire: ``GET /config/schema``.
         """
-        payload = await self._transport.request("GET", "/config/schema")
+        payload = await self._transport.request(method="GET", path="/config/schema")
         return SchemaResponse.model_validate(payload)
 
     async def get_effective(self) -> ConfigSnapshotResponse:
@@ -41,12 +41,12 @@ class ConfigOperations(_OperationsBase):
 
         Wire: ``GET /config/effective``.
         """
-        payload = await self._transport.request("GET", "/config/effective")
+        payload = await self._transport.request(method="GET", path="/config/effective")
         return ConfigSnapshotResponse.model_validate(payload)
 
     async def get_section(self, *, section: str) -> dict[str, Any]:
         """Read one config section (admin). Wire: ``GET /config/sections/{section}``."""
-        payload = await self._transport.request("GET", f"/config/sections/{section}")
+        payload = await self._transport.request(method="GET", path=f"/config/sections/{section}")
         return dict(payload or {})
 
     async def put_section(self, *, section: str, values: dict[str, Any]) -> dict[str, Any]:
@@ -57,8 +57,8 @@ class ConfigOperations(_OperationsBase):
         ack (section, version, updated_at, restart_required).
         """
         payload = await self._transport.request(
-            "PUT",
-            f"/config/sections/{section}",
+            method="PUT",
+            path=f"/config/sections/{section}",
             json_body=values,
             allow_retry=True,
         )
@@ -70,4 +70,4 @@ class ConfigOperations(_OperationsBase):
 
         Wire: ``DELETE /config/sections/{section}``.
         """
-        await self._transport.request("DELETE", f"/config/sections/{section}")
+        await self._transport.request(method="DELETE", path=f"/config/sections/{section}")

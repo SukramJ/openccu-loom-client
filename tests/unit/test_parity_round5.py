@@ -34,19 +34,10 @@ from openccu_loom_client.compat.aiohomematic.central import CentralConfig
 from openccu_loom_client.compat.aiohomematic.central.adapter import LoomCentralAdapter
 from openccu_loom_client.compat.aiohomematic.central.refresh import install_refresh_bridge
 from openccu_loom_client.compat.aiohomematic.model.combined import CombinedDurationDp
-from openccu_loom_client.compat.aiohomematic.model.custom import (
-    BaseCustomDpClimate,
-    make_custom_data_point,
-)
+from openccu_loom_client.compat.aiohomematic.model.custom import BaseCustomDpClimate, make_custom_data_point
 from openccu_loom_client.compat.aiohomematic.model.generic import make_generic_data_point
-from openccu_loom_client.compat.aiohomematic.model.naming import (
-    custom_name_parts,
-    generic_translated_name,
-)
-from openccu_loom_client.compat.aiohomematic.model.week_profile import (
-    ScheduleChannelSwitch,
-    WeekProfileDp,
-)
+from openccu_loom_client.compat.aiohomematic.model.naming import custom_name_parts, generic_translated_name
+from openccu_loom_client.compat.aiohomematic.model.week_profile import ScheduleChannelSwitch, WeekProfileDp
 from openccu_loom_client.events import DataPointValueChangedEvent, EventBus
 from openccu_loom_client.store import LoomStore
 
@@ -88,12 +79,12 @@ def _store_with_device(
     channels: list[dict[str, Any]] | None = None,
 ) -> LoomStore:
     store = LoomStore()
-    store.set_serial("ABC1234567")
-    store.set_central_name("home")
-    store.set_data_point_factory(make_generic_data_point)
-    store.set_custom_data_point_factory(make_custom_data_point)
+    store.set_serial(serial="ABC1234567")
+    store.set_central_name(central_name="home")
+    store.set_data_point_factory(factory=make_generic_data_point)
+    store.set_custom_data_point_factory(factory=make_custom_data_point)
     store.load_snapshot(
-        Snapshot.model_validate(
+        snapshot=Snapshot.model_validate(
             {
                 "generated_at": "2026-06-12T08:00:00Z",
                 "devices": [
@@ -111,7 +102,7 @@ def _store_with_device(
     )
     if channels:
         store.attach_device_detail(
-            DeviceDetail.model_validate(
+            detail=DeviceDetail.model_validate(
                 {
                     "address": address,
                     "interface": "home:HmIP-RF",
@@ -126,9 +117,7 @@ def _store_with_device(
     return store
 
 
-def _channel(
-    *, address: str, number: int, name: str, channel_type: str | None = None
-) -> dict[str, Any]:
+def _channel(*, address: str, number: int, name: str, channel_type: str | None = None) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "address": f"{address}:{number}",
         "number": number,
@@ -142,9 +131,7 @@ def _channel(
 
 
 def _climate_store() -> LoomStore:
-    store = _store_with_device(
-        channels=[_channel(address="VCU1", number=1, name="Thermostat KU:1")]
-    )
+    store = _store_with_device(channels=[_channel(address="VCU1", number=1, name="Thermostat KU:1")])
     store.attach_channel_data_points(
         device_address="VCU1",
         channel_number=1,
@@ -181,7 +168,7 @@ class TestClimateGenericFallback:
     def test_state_keys_win_over_generic_dps(self) -> None:
         store = _climate_store()
         store.get_custom_data_point(address="VCU1", name="SET_POINT_TEMPERATURE@1")._replace_state(
-            {"current_temperature": 23.0, "set_temperature": 20.0, "current_humidity": 40}
+            state={"current_temperature": 23.0, "set_temperature": 20.0, "current_humidity": 40}
         )
         cdp = _climate_cdp(store)
         assert cdp.current_temperature == 23.0
@@ -189,9 +176,7 @@ class TestClimateGenericFallback:
         assert cdp.current_humidity == 40
 
     def test_unobserved_generic_dp_reads_none(self) -> None:
-        store = _store_with_device(
-            channels=[_channel(address="VCU1", number=1, name="Thermostat KU:1")]
-        )
+        store = _store_with_device(channels=[_channel(address="VCU1", number=1, name="Thermostat KU:1")])
         store.attach_channel_data_points(
             device_address="VCU1",
             channel_number=1,
@@ -265,7 +250,7 @@ class TestSwitchGenericFallback:
 
     def test_cdp_state_key_wins_over_generic_dp(self) -> None:
         store = _switch_store(state_value=False)
-        _switch_cdp(store)._replace_state({"is_on": True})
+        _switch_cdp(store)._replace_state(state={"is_on": True})
         cdp = _switch_cdp(store)
         assert cdp.value is True
         assert cdp.is_on is True
@@ -297,7 +282,7 @@ class TestRefreshBridgePingsChannelCdp:
         looper, ha_bus, seen = self._ha_setup()
         install_refresh_bridge(group=group, store=store, ha_bus=ha_bus, central_name="home")
         await bus.publish(
-            DataPointValueChangedEvent(
+            event=DataPointValueChangedEvent(
                 seq=1,
                 kind="change",  # type: ignore[arg-type]
                 ts="2026-06-12T08:00:00Z",
@@ -527,30 +512,20 @@ class TestScheduleDiscovery:
         adapter = _adapter_for(store, schedules=schedules)
         await adapter._bootstrap_schedules()
         profiles = [dp for dp in adapter._extra_data_points if isinstance(dp, WeekProfileDp)]
-        switches = [
-            dp for dp in adapter._extra_data_points if isinstance(dp, ScheduleChannelSwitch)
-        ]
+        switches = [dp for dp in adapter._extra_data_points if isinstance(dp, ScheduleChannelSwitch)]
         assert len(profiles) == 1
         assert {sw.channel_key for sw in switches} == {"1_1", "1_2"}
 
     async def test_climate_device_probes_cdp_channel_without_switches(self) -> None:
-        store = _store_with_device(
-            channels=[_channel(address="VCU1", number=1, name="Thermostat KU:1")]
-        )
+        store = _store_with_device(channels=[_channel(address="VCU1", number=1, name="Thermostat KU:1")])
         store.attach_custom_data_points(device_address="VCU1", cdps=[_cdp_summary()])
         schedules = _FakeSchedulesOps(
-            week_profiles={
-                ("VCU1", 1): _week_profile_response(
-                    address="VCU1", channel=1, schedule_type="climate"
-                )
-            }
+            week_profiles={("VCU1", 1): _week_profile_response(address="VCU1", channel=1, schedule_type="climate")}
         )
         adapter = _adapter_for(store, schedules=schedules)
         await adapter._bootstrap_schedules()
         profiles = [dp for dp in adapter._extra_data_points if isinstance(dp, WeekProfileDp)]
-        switches = [
-            dp for dp in adapter._extra_data_points if isinstance(dp, ScheduleChannelSwitch)
-        ]
+        switches = [dp for dp in adapter._extra_data_points if isinstance(dp, ScheduleChannelSwitch)]
         assert len(profiles) == 1
         assert profiles[0].unique_id == "loom_week_profile_vcu1_week_profile"
         assert switches == []
@@ -587,9 +562,7 @@ class TestScheduleDiscovery:
         adapter = _adapter_for(store, schedules=schedules)
         await adapter._bootstrap_schedules()
         profiles = [dp for dp in adapter._extra_data_points if isinstance(dp, WeekProfileDp)]
-        switches = [
-            dp for dp in adapter._extra_data_points if isinstance(dp, ScheduleChannelSwitch)
-        ]
+        switches = [dp for dp in adapter._extra_data_points if isinstance(dp, ScheduleChannelSwitch)]
         assert len(profiles) == 1
         assert {sw.channel_key for sw in switches} == {"1_1", "1_2"}
 
@@ -611,9 +584,7 @@ class TestScheduleDiscovery:
         )
         schedules = _FakeSchedulesOps(
             week_profiles={
-                ("VCU1", 49): _week_profile_response(
-                    address="VCU1", channel=49, schedule_enabled={"1_1": True}
-                )
+                ("VCU1", 49): _week_profile_response(address="VCU1", channel=49, schedule_enabled={"1_1": True})
             }
         )
         adapter = _adapter_for(store, schedules=schedules)
@@ -621,9 +592,7 @@ class TestScheduleDiscovery:
         assert adapter._extra_data_points == []
 
     async def test_climate_404_is_tolerated(self) -> None:
-        store = _store_with_device(
-            channels=[_channel(address="VCU1", number=1, name="Thermostat KU:1")]
-        )
+        store = _store_with_device(channels=[_channel(address="VCU1", number=1, name="Thermostat KU:1")])
         store.attach_custom_data_points(device_address="VCU1", cdps=[_cdp_summary()])
         adapter = _adapter_for(store, schedules=_FakeSchedulesOps())
         await adapter._bootstrap_schedules()
@@ -659,20 +628,20 @@ class TestCentralIdInference:
 
     def test_multi_central_picks_configured_name(self) -> None:
         store = LoomStore()
-        store.set_central_name("Otto-Rem")
-        store.load_snapshot(_snapshot_with_interfaces(["Kearney-Loc", "Otto-Rem"]))
+        store.set_central_name(central_name="Otto-Rem")
+        store.load_snapshot(snapshot=_snapshot_with_interfaces(["Kearney-Loc", "Otto-Rem"]))
         assert store.central_id == "Otto-Rem"
 
     def test_multi_central_without_match_stays_unset(self) -> None:
         store = LoomStore()
-        store.set_central_name("Elsewhere")
-        store.load_snapshot(_snapshot_with_interfaces(["Kearney-Loc", "Otto-Rem"]))
+        store.set_central_name(central_name="Elsewhere")
+        store.load_snapshot(snapshot=_snapshot_with_interfaces(["Kearney-Loc", "Otto-Rem"]))
         assert store.central_id == ""
 
     def test_single_central_adopts_daemon_name(self) -> None:
         store = LoomStore()
-        store.set_central_name("My HA Instance")
-        store.load_snapshot(_snapshot_with_interfaces(["Kearney-Loc", "Kearney-Loc"]))
+        store.set_central_name(central_name="My HA Instance")
+        store.load_snapshot(snapshot=_snapshot_with_interfaces(["Kearney-Loc", "Kearney-Loc"]))
         assert store.central_id == "Kearney-Loc"
 
     async def test_foreign_sysvars_do_not_spawn(self) -> None:
@@ -680,10 +649,10 @@ class TestCentralIdInference:
             name="Otto-Rem", host="loom.test", port=8080, tls=False, token="tok-1"
         ).create_central()
         store = central._client.store
-        store.load_snapshot(_snapshot_with_interfaces(["Kearney-Loc", "Otto-Rem"]))
+        store.load_snapshot(snapshot=_snapshot_with_interfaces(["Kearney-Loc", "Otto-Rem"]))
         for name, central_tag in (("svLocal", "Otto-Rem"), ("svForeign", "Kearney-Loc")):
             store._upsert_sysvar(
-                SysvarSummary.model_validate(
+                summary=SysvarSummary.model_validate(
                     {
                         "name": name,
                         "type": "FLOAT",
@@ -694,9 +663,7 @@ class TestCentralIdInference:
                     }
                 )
             )
-        names = {
-            dp.name for dp in central.hub_coordinator.get_hub_data_points() if hasattr(dp, "name")
-        }
+        names = {dp.name for dp in central.hub_coordinator.get_hub_data_points() if hasattr(dp, "name")}
         assert "svLocal" in names
         assert "svForeign" not in names
 
@@ -744,9 +711,7 @@ class TestGenericTranslatedName:
         store.attach_channel_data_points(
             device_address="VCU1",
             channel_number=0,
-            data_points=[
-                _dp_summary(parameter="DUTY_CYCLE", value=False, translated_name="Duty Cycle")
-            ],
+            data_points=[_dp_summary(parameter="DUTY_CYCLE", value=False, translated_name="Duty Cycle")],
         )
         dp = store.get_data_point(address="VCU1", channel=0, parameter="DUTY_CYCLE")
         # Channel 0 never carries the chN postfix.
@@ -799,8 +764,7 @@ class TestCustomNameParts:
         store.attach_custom_data_points(
             device_address="VCU1",
             cdps=[
-                _cdp_summary(name=f"STATE@{no}", category="switch", kind="switch", channel_no=no)
-                for no in (3, 4, 5)
+                _cdp_summary(name=f"STATE@{no}", category="switch", kind="switch", channel_no=no) for no in (3, 4, 5)
             ],
         )
         return store
@@ -828,15 +792,10 @@ class TestCustomNameParts:
         )
         store.attach_custom_data_points(
             device_address="VCU1",
-            cdps=[
-                _cdp_summary(name=f"STATE@{no}", category="switch", kind="switch", channel_no=no)
-                for no in (6, 10)
-            ],
+            cdps=[_cdp_summary(name=f"STATE@{no}", category="switch", kind="switch", channel_no=no) for no in (6, 10)],
         )
         assert store.get_custom_data_point(address="VCU1", name="STATE@6").translated_name == "ch6"
-        assert (
-            store.get_custom_data_point(address="VCU1", name="STATE@10").translated_name == "ch10"
-        )
+        assert store.get_custom_data_point(address="VCU1", name="STATE@10").translated_name == "ch10"
 
     def test_renamed_channel_keeps_custom_name_with_marker(self) -> None:
         # HmIP-BSL: switch primary 4, secondaries 5/6; channel 5 renamed
@@ -852,18 +811,10 @@ class TestCustomNameParts:
         )
         store.attach_custom_data_points(
             device_address="VCU1",
-            cdps=[
-                _cdp_summary(name=f"STATE@{no}", category="switch", kind="switch", channel_no=no)
-                for no in (4, 5)
-            ],
+            cdps=[_cdp_summary(name=f"STATE@{no}", category="switch", kind="switch", channel_no=no) for no in (4, 5)],
         )
-        assert (
-            store.get_custom_data_point(address="VCU1", name="STATE@4").translated_name == "Treppe"
-        )
-        assert (
-            store.get_custom_data_point(address="VCU1", name="STATE@5").translated_name
-            == "Treppe vch5"
-        )
+        assert store.get_custom_data_point(address="VCU1", name="STATE@4").translated_name == "Treppe"
+        assert store.get_custom_data_point(address="VCU1", name="STATE@5").translated_name == "Treppe vch5"
 
     def test_unknown_model_falls_back_to_lowest_channel_primary(self) -> None:
         store = _store_with_device(
@@ -877,18 +828,11 @@ class TestCustomNameParts:
         )
         store.attach_custom_data_points(
             device_address="VCU1",
-            cdps=[
-                _cdp_summary(name=f"STATE@{no}", category="switch", kind="switch", channel_no=no)
-                for no in (1, 2)
-            ],
+            cdps=[_cdp_summary(name=f"STATE@{no}", category="switch", kind="switch", channel_no=no) for no in (1, 2)],
         )
         device = store.get_device(address="VCU1")
-        assert custom_name_parts(
-            store=store, device=device, channel_no=1, category_token="switch"
-        ) == ("ch1", "ch1")
-        assert custom_name_parts(
-            store=store, device=device, channel_no=2, category_token="switch"
-        ) == ("vch2", "vch2")
+        assert custom_name_parts(store=store, device=device, channel_no=1, category_token="switch") == ("ch1", "ch1")
+        assert custom_name_parts(store=store, device=device, channel_no=2, category_token="switch") == ("vch2", "vch2")
 
     def test_button_lock_postfix_renders_parameter_name(self) -> None:
         store = _store_with_device(
@@ -910,15 +854,11 @@ class TestGenericNamingHelper:
     """Direct checks of the shared naming helper edge cases."""
 
     def test_multi_channel_postfix_requires_second_channel(self) -> None:
-        store = _store_with_device(
-            channels=[_channel(address="VCU1", number=1, name="Thermostat KU:1")]
-        )
+        store = _store_with_device(channels=[_channel(address="VCU1", number=1, name="Thermostat KU:1")])
         store.attach_channel_data_points(
             device_address="VCU1",
             channel_number=1,
-            data_points=[
-                _dp_summary(parameter="HUMIDITY", value=55, translated_name="Luftfeuchtigkeit")
-            ],
+            data_points=[_dp_summary(parameter="HUMIDITY", value=55, translated_name="Luftfeuchtigkeit")],
         )
         device = store.get_device(address="VCU1")
         assert (
@@ -988,7 +928,7 @@ class TestLocalePlumbing:
         store = central._client.store
         assert store.locale == "de"
         store.load_snapshot(
-            Snapshot.model_validate(
+            snapshot=Snapshot.model_validate(
                 {
                     "generated_at": "2026-06-12T08:00:00Z",
                     "devices": [
@@ -1040,7 +980,7 @@ class TestCalculatedTranslatedName:
                 "translated_name": "Taupunkt",
             }
         )
-        assert synthesize_summary(calc).translated_name == "Taupunkt"
+        assert synthesize_summary(calc=calc).translated_name == "Taupunkt"
 
     def test_calculated_name_uses_translated_label(self) -> None:
         """
@@ -1052,9 +992,7 @@ class TestCalculatedTranslatedName:
         """
         from openccu_loom_types.rest import CalculatedDPSummary
 
-        from openccu_loom_client.compat.aiohomematic.model.calculated import (
-            make_calculated_data_point,
-        )
+        from openccu_loom_client.compat.aiohomematic.model.calculated import make_calculated_data_point
         from openccu_loom_client.store import LoomStore
 
         calc = CalculatedDPSummary.model_validate(
@@ -1066,9 +1004,7 @@ class TestCalculatedTranslatedName:
                 "translated_name": "HEATING_CLIMATECONTROL_TRANSCEIVER Dew Point",
             }
         )
-        dp = make_calculated_data_point(
-            summary=calc, device_address="VCU0000001", channel_number=1, store=LoomStore()
-        )
+        dp = make_calculated_data_point(summary=calc, device_address="VCU0000001", channel_number=1, store=LoomStore())
         assert dp.name == "HEATING_CLIMATECONTROL_TRANSCEIVER Dew Point"
         assert dp.name_data.name == "HEATING_CLIMATECONTROL_TRANSCEIVER Dew Point"
 
@@ -1076,17 +1012,13 @@ class TestCalculatedTranslatedName:
         """Without a daemon label, the calc DP name falls back to the parameter."""
         from openccu_loom_types.rest import CalculatedDPSummary
 
-        from openccu_loom_client.compat.aiohomematic.model.calculated import (
-            make_calculated_data_point,
-        )
+        from openccu_loom_client.compat.aiohomematic.model.calculated import make_calculated_data_point
         from openccu_loom_client.store import LoomStore
 
         calc = CalculatedDPSummary.model_validate(
             {"name": "ENTHALPY", "category": "sensor", "value": 1.0, "observed": True}
         )
-        dp = make_calculated_data_point(
-            summary=calc, device_address="VCU0000001", channel_number=1, store=LoomStore()
-        )
+        dp = make_calculated_data_point(summary=calc, device_address="VCU0000001", channel_number=1, store=LoomStore())
         assert dp.name == "ENTHALPY"
 
     def test_combined_summary_carries_translated_name(self) -> None:

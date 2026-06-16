@@ -41,11 +41,7 @@ from openccu_loom_client.events import (
     UnknownLoomEvent,
     event_from_envelope,
 )
-from openccu_loom_client.events.types import (
-    DataPointOptimisticRolledBackEvent,
-    DeviceTriggerEvent,
-    known_event_types,
-)
+from openccu_loom_client.events.types import DataPointOptimisticRolledBackEvent, DeviceTriggerEvent, known_event_types
 
 
 def _find_wsapi() -> pathlib.Path | None:
@@ -124,7 +120,7 @@ class TestDispatch:
                 "modified_at": "2026-05-24T08:42:13Z",
             },
         )
-        ev = event_from_envelope(env)
+        ev = event_from_envelope(envelope=env)
         assert isinstance(ev, DataPointValueChangedEvent)
         assert ev.device_address == "0001"
         assert ev.parameter == "LEVEL"
@@ -141,7 +137,7 @@ class TestDispatch:
                 "model": "HmIP-eTRV-2",
             },
         )
-        ev = event_from_envelope(env)
+        ev = event_from_envelope(envelope=env)
         assert isinstance(ev, DeviceCreatedEvent)
         assert ev.payload.device_address == "00010001"
         assert ev.payload.model == "HmIP-eTRV-2"
@@ -155,7 +151,7 @@ class TestDispatch:
                 "device_address": "00010001",
             },
         )
-        ev = event_from_envelope(env)
+        ev = event_from_envelope(envelope=env)
         assert isinstance(ev, DeviceRemovedEvent)
 
     def test_sysvar_changed_lands_typed(self) -> None:
@@ -169,7 +165,7 @@ class TestDispatch:
                 "previous": 41.0,
             },
         )
-        ev = event_from_envelope(env)
+        ev = event_from_envelope(envelope=env)
         assert isinstance(ev, SysvarChangedEvent)
 
     @pytest.mark.parametrize(
@@ -241,7 +237,7 @@ class TestDispatch:
     )
     def test_other_known_types(self, type_id: str, payload: dict, expected_cls: type) -> None:
         env = self._envelope(type_=type_id, payload=payload)
-        ev = event_from_envelope(env)
+        ev = event_from_envelope(envelope=env)
         assert isinstance(ev, expected_cls)
 
     def test_device_trigger_keyed_per_data_point(self) -> None:
@@ -257,7 +253,7 @@ class TestDispatch:
                 "unique_id": "loom_event_vcu1_1_press_short",
             },
         )
-        ev = event_from_envelope(env)
+        ev = event_from_envelope(envelope=env)
         assert isinstance(ev, DeviceTriggerEvent)
         # The event keys off the daemon-supplied canonical unique_id.
         assert ev.event_key == "loom_event_vcu1_1_press_short"
@@ -275,7 +271,7 @@ class TestForwardCompatibility:
                 "payload": {"any": "shape"},
             }
         )
-        ev = event_from_envelope(env)
+        ev = event_from_envelope(envelope=env)
         assert isinstance(ev, UnknownLoomEvent)
         assert ev.raw_payload == {"any": "shape"}
         # Metadata is still typed.
@@ -294,6 +290,6 @@ class TestForwardCompatibility:
                 "payload": {"some": "garbage"},
             }
         )
-        ev = event_from_envelope(env)
+        ev = event_from_envelope(envelope=env)
         assert isinstance(ev, UnknownLoomEvent)
         assert ev.raw_payload == {"some": "garbage"}

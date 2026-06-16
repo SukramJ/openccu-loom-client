@@ -58,7 +58,7 @@ class _HubEntitySurface:
         """
         return getattr(self, "_enabled_default", False)
 
-    def set_enabled_default(self, enabled: bool) -> None:
+    def set_enabled_default(self, *, enabled: bool) -> None:
         """Record the marker-resolved enabled_default flag."""
         self._enabled_default = enabled
 

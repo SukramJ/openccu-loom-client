@@ -39,6 +39,7 @@ from openccu_loom_client.exceptions import (
 from openccu_loom_client.store import LoomStore
 
 __all__ = [
+    # General
     "BaseLoomException",
     "BasicAuth",
     "BearerAuth",

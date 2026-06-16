@@ -61,10 +61,7 @@ from openccu_loom_client.compat.aiohomematic.central.state_paths import (
 )
 from openccu_loom_client.compat.aiohomematic.const import SystemInformation
 from openccu_loom_client.compat.aiohomematic.model.calculated import make_calculated_data_point
-from openccu_loom_client.compat.aiohomematic.model.combined import (
-    CombinedDurationDp,
-    channel_has_duration_pair,
-)
+from openccu_loom_client.compat.aiohomematic.model.combined import CombinedDurationDp, channel_has_duration_pair
 from openccu_loom_client.compat.aiohomematic.model.custom import (
     BaseCustomDpSiren,
     CustomDpSoundPlayer,
@@ -72,10 +69,7 @@ from openccu_loom_client.compat.aiohomematic.model.custom import (
 )
 from openccu_loom_client.compat.aiohomematic.model.event_group import build_event_groups
 from openccu_loom_client.compat.aiohomematic.model.generic import make_generic_data_point
-from openccu_loom_client.compat.aiohomematic.model.hub import (
-    make_program_data_points,
-    make_sysvar_data_point,
-)
+from openccu_loom_client.compat.aiohomematic.model.hub import make_program_data_points, make_sysvar_data_point
 from openccu_loom_client.compat.aiohomematic.model.hub.singletons import (
     INSTALL_MODE_TOKEN_BY_INTERFACE,
     AlarmMessagesSensor,
@@ -93,10 +87,7 @@ from openccu_loom_client.compat.aiohomematic.model.hub.singletons import (
     SystemUpdateDp,
 )
 from openccu_loom_client.compat.aiohomematic.model.update import make_update_data_point
-from openccu_loom_client.compat.aiohomematic.model.week_profile import (
-    ScheduleChannelSwitch,
-    WeekProfileDp,
-)
+from openccu_loom_client.compat.aiohomematic.model.week_profile import ScheduleChannelSwitch, WeekProfileDp
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -121,7 +112,7 @@ _WEEK_PROFILE_CHANNEL_SUFFIX: Final = "WEEK_PROFILE"
 _SUPPRESSED_CALCULATED_NAMES: Final = frozenset({"DURATION"})
 
 
-def _category_for_type(data_point_type: Any) -> DataPointCategory | None:
+def _category_for_type(*, data_point_type: Any) -> DataPointCategory | None:
     """
     Map a coarse ``DataPointType`` (platform) to its custom-DP category.
 
@@ -149,7 +140,7 @@ def _category_for_type(data_point_type: Any) -> DataPointCategory | None:
 _NON_CREATABLE_USAGES: Final = frozenset({"no_create", "ignored", "event"})
 
 
-def _is_creatable(dp: Any) -> bool:
+def _is_creatable(*, dp: Any) -> bool:
     """Return whether the DP's usage verdict allows an HA entity."""
     usage = getattr(getattr(dp, "summary", None), "usage", None)
     return usage not in _NON_CREATABLE_USAGES
@@ -158,7 +149,7 @@ def _is_creatable(dp: Any) -> bool:
 class _DeviceCoordinator:
     """``central.device_coordinator`` surface."""
 
-    def __init__(self, client: LoomClient) -> None:
+    def __init__(self, *, client: LoomClient) -> None:
         self._client = client
 
     def get_device(self, *, address: str) -> Device | None:
@@ -212,8 +203,8 @@ class _HubCoordinator:
 
     def __init__(
         self,
-        client: LoomClient,
         *,
+        client: LoomClient,
         ha_bus: AioEventBus,
     ) -> None:
         self._client = client
@@ -242,15 +233,15 @@ class _HubCoordinator:
 
     async def fetch_sysvar_data(self, *, scheduled: bool = False) -> None:
         for summary in await self._client.hub.list_sysvars():
-            self._client.store._upsert_sysvar(summary)
+            self._client.store._upsert_sysvar(summary=summary)
 
     async def fetch_program_data(self, *, scheduled: bool = False) -> None:
         for summary in await self._client.hub.list_programs():
-            self._client.store._upsert_program(summary)
+            self._client.store._upsert_program(summary=summary)
 
     # ---- entity-spawn surface ----
 
-    def _matches_central(self, central: str | None) -> bool:
+    def _matches_central(self, *, central: str | None) -> bool:
         """
         Return whether a payload's central tag refers to this central.
 
@@ -261,7 +252,7 @@ class _HubCoordinator:
         store = self._client.store
         return not central or central in (store.central_name, store.central_id)
 
-    def _is_local(self, summary: Any) -> bool:
+    def _is_local(self, *, summary: Any) -> bool:
         """
         Return whether a sysvar/program belongs to this central.
 
@@ -269,7 +260,7 @@ class _HubCoordinator:
         foreign central's variables here would leak entities (with the
         wrong serial in their unique_id) into this HA entry.
         """
-        return self._matches_central(getattr(summary, "central", None))
+        return self._matches_central(central=getattr(summary, "central", None))
 
     @staticmethod
     def _is_excluded_sysvar(summary: Any) -> bool:
@@ -293,7 +284,7 @@ class _HubCoordinator:
         """Build (and cache) categorised hub data points from the store."""
         live: dict[str, Any] = {}
         for sysvar in self._client.store.sysvars:
-            if not self._is_local(sysvar.summary):
+            if not self._is_local(summary=sysvar.summary):
                 continue
             if self._is_excluded_sysvar(sysvar.summary):
                 continue
@@ -308,7 +299,7 @@ class _HubCoordinator:
             )
             live[sv_dp.unique_id] = sv_dp
         for program in self._client.store.programs:
-            if not self._is_local(program.summary):
+            if not self._is_local(summary=program.summary):
                 continue
             for pr_dp in make_program_data_points(
                 summary=program.summary,
@@ -344,7 +335,7 @@ class _HubCoordinator:
 
     def get_sysvar_data_point(self, *, state_path: str) -> Any:
         """Resolve a categorised sysvar data point from its MQTT state path."""
-        name = parse_sysvar_state_path(state_path)
+        name = parse_sysvar_state_path(state_path=state_path)
         if name is None:
             return None
         sysvar = self._client.store.get_sysvar(name=name)
@@ -430,7 +421,7 @@ class _HubCoordinator:
             _LOGGER.debug("interfaces unavailable while building hub singletons", exc_info=True)
             interfaces = []
         for state in interfaces:
-            if not self._matches_central(state.central_id):
+            if not self._matches_central(central=state.central_id):
                 continue
             self._connectivity_dps[state.id] = ConnectivityDpType(
                 interface_id=state.id,
@@ -470,9 +461,7 @@ class _HubCoordinator:
         now = datetime.now(tz=UTC)
         for dp in changed:
             await self._ha_bus.publish(
-                event=AioDataPointStateChangedEvent(
-                    timestamp=now, unique_id=dp.unique_id, new_value=dp.value
-                )
+                event=AioDataPointStateChangedEvent(timestamp=now, unique_id=dp.unique_id, new_value=dp.value)
             )
 
     async def _fetch_messages(self) -> list[Any]:
@@ -484,9 +473,7 @@ class _HubCoordinator:
             except Exception:  # noqa: BLE001 — endpoint optional, keep last value
                 _LOGGER.debug("alarm-messages fetch failed", exc_info=True)
             else:
-                local_alarms = [
-                    m for m in alarms if self._matches_central(getattr(m, "central", None))
-                ]
+                local_alarms = [m for m in alarms if self._matches_central(central=getattr(m, "central", None))]
                 if alarm_dp.update_messages(messages=local_alarms):
                     changed.append(alarm_dp)
         if (service_dp := self._service_messages_dp) is not None:
@@ -495,9 +482,7 @@ class _HubCoordinator:
             except Exception:  # noqa: BLE001 — endpoint optional, keep last value
                 _LOGGER.debug("service-messages fetch failed", exc_info=True)
             else:
-                local_services = [
-                    m for m in services if self._matches_central(getattr(m, "central", None))
-                ]
+                local_services = [m for m in services if self._matches_central(central=getattr(m, "central", None))]
                 if service_dp.update_messages(messages=local_services):
                     changed.append(service_dp)
         return changed
@@ -511,7 +496,7 @@ class _HubCoordinator:
         except Exception:  # noqa: BLE001 — endpoint optional, keep last value
             _LOGGER.debug("inbox fetch failed", exc_info=True)
             return []
-        count = sum(1 for e in entries if self._matches_central(e.get("central")))
+        count = sum(1 for e in entries if self._matches_central(central=e.get("central")))
         return [inbox_dp] if inbox_dp.update_value(value=count) else []
 
     async def _fetch_metrics(self) -> list[Any]:
@@ -523,7 +508,7 @@ class _HubCoordinator:
         except Exception:  # noqa: BLE001 — endpoint optional, keep last value
             _LOGGER.debug("hub-metrics fetch failed", exc_info=True)
             return []
-        entry = next((e for e in entries if self._matches_central(e.central)), None)
+        entry = next((e for e in entries if self._matches_central(central=e.central)), None)
         if entry is None:
             return []
         changed: list[Any] = []
@@ -545,7 +530,7 @@ class _HubCoordinator:
         except Exception:  # noqa: BLE001 — endpoint optional, keep last value
             _LOGGER.debug("system-update fetch failed", exc_info=True)
             return []
-        entry = next((e for e in entries if self._matches_central(e.central)), None)
+        entry = next((e for e in entries if self._matches_central(central=e.central)), None)
         if entry is None:
             return []
         return [update_dp] if update_dp.update_data(entry=entry) else []
@@ -561,7 +546,7 @@ class _HubCoordinator:
             return []
         changed: list[Any] = []
         for entry in entries:
-            if not self._matches_central(entry.central):
+            if not self._matches_central(central=entry.central):
                 continue
             if (pair := self._install_mode_dps.get(entry.interface)) is None:
                 continue
@@ -590,7 +575,7 @@ class _HubCoordinator:
 class _QueryFacade:
     """``central.query_facade`` surface."""
 
-    def __init__(self, client: LoomClient, *, extra_data_points: list[Any]) -> None:
+    def __init__(self, *, client: LoomClient, extra_data_points: list[Any]) -> None:
         self._client = client
         # Adapter-built data points without a store summary (week
         # profiles, schedule switches, combined numbers). The adapter
@@ -650,7 +635,7 @@ class _QueryFacade:
         ``category`` — so an unset ``category`` is derived from
         ``data_point_type``.
         """
-        target = category if category is not None else _category_for_type(data_point_type)
+        target = category if category is not None else _category_for_type(data_point_type=data_point_type)
         out: list[Any] = []
         for dp in (
             *self._client.store.data_points,
@@ -662,20 +647,18 @@ class _QueryFacade:
                 continue
             if registered is not None and getattr(dp, "is_registered", False) != registered:
                 continue
-            if exclude_no_create and not _is_creatable(dp):
+            if exclude_no_create and not _is_creatable(dp=dp):
                 continue
             out.append(dp)
         return tuple(out)
 
     def get_generic_data_point(self, *, state_path: str) -> Any:
         """Resolve a generic data point from its MQTT state path."""
-        parsed = parse_device_state_path(state_path)
+        parsed = parse_device_state_path(state_path=state_path)
         if parsed is None:
             return None
         address, channel, parameter = parsed
-        return self._client.store.get_data_point(
-            address=address, channel=channel, parameter=parameter
-        )
+        return self._client.store.get_data_point(address=address, channel=channel, parameter=parameter)
 
     def get_event_groups(
         self,
@@ -697,9 +680,7 @@ class _QueryFacade:
                 out.append(group)
         return tuple(out)
 
-    def find_event_group(
-        self, *, device_address: str, channel_no: int | None, event_type: Any
-    ) -> Any:
+    def find_event_group(self, *, device_address: str, channel_no: int | None, event_type: Any) -> Any:
         """Return the cached event group for one channel + trigger type, or ``None``."""
         for group in self._event_groups.values():
             channel = group.channel
@@ -711,9 +692,7 @@ class _QueryFacade:
                 return group
         return None
 
-    def get_state_paths(
-        self, *, rpc_callback_supported: bool | None = None, **_kwargs: Any
-    ) -> tuple[str, ...]:
+    def get_state_paths(self, *, rpc_callback_supported: bool | None = None, **_kwargs: Any) -> tuple[str, ...]:
         """
         Synthesise the MQTT state path of every generic data point.
 
@@ -735,7 +714,7 @@ class _QueryFacade:
 class _ClientCoordinator:
     """``central.client_coordinator`` surface (interface connectivity)."""
 
-    def __init__(self, client: LoomClient) -> None:
+    def __init__(self, *, client: LoomClient) -> None:
         self._client = client
         self._interface_ids: frozenset[str] = frozenset()
 
@@ -755,7 +734,7 @@ class _ClientCoordinator:
         return self._interface_ids
 
 
-def _incident_list(payload: Any) -> list[dict[str, Any]]:
+def _incident_list(*, payload: Any) -> list[dict[str, Any]]:
     """Pull the incident list out of the daemon's ``GET /incidents`` envelope."""
     if isinstance(payload, list):
         return payload
@@ -770,18 +749,18 @@ def _incident_list(payload: Any) -> list[dict[str, Any]]:
 class _IncidentStore:
     """``cache_coordinator.incident_store`` surface over ``client.diagnostics``."""
 
-    def __init__(self, client: LoomClient) -> None:
+    def __init__(self, *, client: LoomClient) -> None:
         self._client = client
 
     async def get_diagnostics(self) -> dict[str, Any]:
         return await self._client.diagnostics.list_incidents()
 
     async def get_incidents_by_interface(self, *, interface_id: str) -> list[dict[str, Any]]:
-        incidents = _incident_list(await self._client.diagnostics.list_incidents())
+        incidents = _incident_list(payload=await self._client.diagnostics.list_incidents())
         return [i for i in incidents if i.get("interface_id") == interface_id]
 
     async def get_recent_incidents(self, *, limit: int) -> list[dict[str, Any]]:
-        incidents = _incident_list(await self._client.diagnostics.list_incidents())
+        incidents = _incident_list(payload=await self._client.diagnostics.list_incidents())
         return incidents[:limit] if limit > 0 else incidents
 
     def clear_incidents(self) -> None:
@@ -792,7 +771,7 @@ class _IncidentStore:
 class _Recorder:
     """``cache_coordinator.recorder`` surface over the daemon's RPC recording."""
 
-    def __init__(self, client: LoomClient) -> None:
+    def __init__(self, *, client: LoomClient) -> None:
         self._client = client
 
     async def activate(self, **options: Any) -> Any:
@@ -805,10 +784,10 @@ class _Recorder:
 class _CacheCoordinator:
     """``central.cache_coordinator`` surface."""
 
-    def __init__(self, client: LoomClient) -> None:
+    def __init__(self, *, client: LoomClient) -> None:
         self._client = client
-        self._incident_store = _IncidentStore(client)
-        self._recorder = _Recorder(client)
+        self._incident_store = _IncidentStore(client=client)
+        self._recorder = _Recorder(client=client)
 
     async def clear_all(self) -> None:
         await self._client.diagnostics.reset_values_cache()
@@ -825,7 +804,7 @@ class _CacheCoordinator:
 class _JsonRpcClient:
     """``central.json_rpc_client`` surface (CCU-side message/inbox ops)."""
 
-    def __init__(self, client: LoomClient) -> None:
+    def __init__(self, *, client: LoomClient) -> None:
         self._client = client
 
     async def get_service_messages(self) -> Any:
@@ -860,12 +839,10 @@ class _JsonRpcClient:
 class _LinkCoordinator:
     """``central.link`` surface (direct links)."""
 
-    def __init__(self, client: LoomClient) -> None:
+    def __init__(self, *, client: LoomClient) -> None:
         self._client = client
 
-    async def add_link(
-        self, *, address: str, sender_address: str, receiver_address: str, **kwargs: Any
-    ) -> None:
+    async def add_link(self, *, address: str, sender_address: str, receiver_address: str, **kwargs: Any) -> None:
         await self._client.links.add_link(
             address=address,
             sender_address=sender_address,
@@ -892,12 +869,12 @@ class _LinkCoordinator:
         )
 
 
-def _paramset_token(paramset_key: Any) -> str:
+def _paramset_token(*, paramset_key: Any) -> str:
     """Normalise a ParamsetKey enum / string to the daemon's wire token."""
     return str(getattr(paramset_key, "value", paramset_key))
 
 
-def _split_channel_address(channel_address: str) -> tuple[str, int]:
+def _split_channel_address(*, channel_address: str) -> tuple[str, int]:
     """Split ``ABC1234567:3`` into ``("ABC1234567", 3)`` (channel 0 if absent)."""
     device, _, channel = channel_address.partition(":")
     return device, int(channel) if channel else 0
@@ -914,7 +891,7 @@ class _Configuration:
     websocket handlers must ``await`` them on the loom backend.
     """
 
-    def __init__(self, client: LoomClient) -> None:
+    def __init__(self, *, client: LoomClient) -> None:
         self._client = client
 
     async def get_paramset(
@@ -931,7 +908,7 @@ class _Configuration:
         if target is None:
             raise ValueError("get_paramset requires channel_address (or address)")
         return await self._client.datapoints.get_paramset(
-            address=target, paramset_key=_paramset_token(paramset_key)
+            address=target, paramset_key=_paramset_token(paramset_key=paramset_key)
         )
 
     async def get_paramset_description(
@@ -946,11 +923,11 @@ class _Configuration:
         **_kwargs: Any,
     ) -> dict[str, Any]:
         """Return renderable parameter descriptions for a channel paramset (ui-schema)."""
-        device, channel = _split_channel_address(channel_address)
+        device, channel = _split_channel_address(channel_address=channel_address)
         return await self._client.devices.get_ui_schema(
             address=device,
             channel=channel,
-            paramset=_paramset_token(paramset_key),
+            paramset=_paramset_token(paramset_key=paramset_key),
             peer=peer,
             locale=locale,
             expert=expert,
@@ -967,7 +944,7 @@ class _Configuration:
         **_kwargs: Any,
     ) -> dict[str, Any]:
         """Return renderable LINK-paramset descriptions between a channel and a peer."""
-        device, channel = _split_channel_address(channel_address)
+        device, channel = _split_channel_address(channel_address=channel_address)
         return await self._client.devices.get_ui_schema(
             address=device,
             channel=channel,
@@ -977,11 +954,9 @@ class _Configuration:
             expert=expert,
         )
 
-    def get_configurable_devices(
-        self, *, locale: str = "en", **_kwargs: Any
-    ) -> tuple[ConfigurableDevice, ...]:
+    def get_configurable_devices(self, *, locale: str = "en", **_kwargs: Any) -> tuple[ConfigurableDevice, ...]:
         """Return configurable-device descriptors for the config UI."""
-        return build_configurable_devices(self._client.store)
+        return build_configurable_devices(store=self._client.store)
 
 
 class LoomCentralAdapter:
@@ -1008,15 +983,15 @@ class LoomCentralAdapter:
         # Make the store build categorised Dp* / CustomDp* instances so
         # HA-side isinstance dispatch works on the live objects. Must be
         # set before bootstrap() runs.
-        client.store.set_data_point_factory(make_generic_data_point)
-        client.store.set_calculated_data_point_factory(make_calculated_data_point)
-        client.store.set_custom_data_point_factory(make_custom_data_point)
+        client.store.set_data_point_factory(factory=make_generic_data_point)
+        client.store.set_calculated_data_point_factory(factory=make_calculated_data_point)
+        client.store.set_custom_data_point_factory(factory=make_custom_data_point)
         # HA links every device to this central via Device.central_info.name,
         # which must equal the adapter name (the integration's instance name).
-        client.store.set_central_name(name)
+        client.store.set_central_name(central_name=name)
         # The HA UI language; entities read it back through
         # ``device.config_provider.config.locale`` (schedule names).
-        client.store.set_locale(locale)
+        client.store.set_locale(locale=locale)
         self._refresh_group: Any = None
         # HA entities subscribe on aiohomematic's *own* event bus and match
         # events by ``type(event)``/``.key``. The adapter therefore exposes a
@@ -1033,17 +1008,17 @@ class LoomCentralAdapter:
         # bootstrap to name the replacement number like the reference.
         self._suppressed_calc_labels: Final[dict[tuple[str, int], str]] = {}
         self._hub_refresh_task: asyncio.Task[None] | None = None
-        self.device_coordinator: Final = _DeviceCoordinator(client)
+        self.device_coordinator: Final = _DeviceCoordinator(client=client)
         self.hub_coordinator: Final = _HubCoordinator(
-            client,
+            client=client,
             ha_bus=self._ha_bus,
         )
-        self.query_facade: Final = _QueryFacade(client, extra_data_points=self._extra_data_points)
-        self.client_coordinator: Final = _ClientCoordinator(client)
-        self.cache_coordinator: Final = _CacheCoordinator(client)
-        self.json_rpc_client: Final = _JsonRpcClient(client)
-        self.link: Final = _LinkCoordinator(client)
-        self.configuration: Final = _Configuration(client)
+        self.query_facade: Final = _QueryFacade(client=client, extra_data_points=self._extra_data_points)
+        self.client_coordinator: Final = _ClientCoordinator(client=client)
+        self.cache_coordinator: Final = _CacheCoordinator(client=client)
+        self.json_rpc_client: Final = _JsonRpcClient(client=client)
+        self.link: Final = _LinkCoordinator(client=client)
+        self.configuration: Final = _Configuration(client=client)
 
     # ---- identity ----
 
@@ -1123,9 +1098,7 @@ class LoomCentralAdapter:
         await self._client.start_events()
         # Fan the daemon's typed value events into the uniform
         # DataPointStateChangedEvent the HA entities subscribe to.
-        self._refresh_group = self._client.events.create_subscription_group(
-            name="loom-compat-refresh"
-        )
+        self._refresh_group = self._client.events.create_subscription_group(name="loom-compat-refresh")
         install_refresh_bridge(
             group=self._refresh_group,
             store=self._client.store,
@@ -1181,7 +1154,7 @@ class LoomCentralAdapter:
             loom_category = getattr(dp, "category", None)
             if loom_category is None:
                 continue
-            if not _is_creatable(dp):
+            if not _is_creatable(dp=dp):
                 continue
             # Loom and aiohomematic share identical category *values*; map by
             # value (the loom StrEnum's ``str()`` yields its repr, not the value).
@@ -1223,9 +1196,7 @@ class LoomCentralAdapter:
         for device in list(self._client.store.devices):
             cdps = await self._client.custom_data_points.list_for_device(address=device.address)
             if cdps:
-                self._client.store.attach_custom_data_points(
-                    device_address=device.address, cdps=cdps
-                )
+                self._client.store.attach_custom_data_points(device_address=device.address, cdps=cdps)
             for channel in device.channels:
                 calculated = await self._client.devices.list_calculated_data_points(
                     address=device.address, channel=channel.number
@@ -1234,15 +1205,9 @@ class LoomCentralAdapter:
                 # calculated DURATION sensor (the ccu twin has none) —
                 # but its locale-aware label names the combined number.
                 for calc in calculated:
-                    if calc.name in _SUPPRESSED_CALCULATED_NAMES and getattr(
-                        calc, "translated_name", None
-                    ):
-                        self._suppressed_calc_labels[(device.address, channel.number)] = str(
-                            calc.translated_name
-                        )
-                calculated = [
-                    calc for calc in calculated if calc.name not in _SUPPRESSED_CALCULATED_NAMES
-                ]
+                    if calc.name in _SUPPRESSED_CALCULATED_NAMES and getattr(calc, "translated_name", None):
+                        self._suppressed_calc_labels[(device.address, channel.number)] = str(calc.translated_name)
+                calculated = [calc for calc in calculated if calc.name not in _SUPPRESSED_CALCULATED_NAMES]
                 if calculated:
                     self._client.store.attach_channel_calculated_data_points(
                         device_address=device.address,
@@ -1271,9 +1236,7 @@ class LoomCentralAdapter:
             cdps = store.custom_data_points_of(address=device.address)
             if not cdps:
                 continue
-            climate_cdp = next(
-                (cdp for cdp in cdps if (cdp.summary.category or "") == "climate"), None
-            )
+            climate_cdp = next((cdp for cdp in cdps if (cdp.summary.category or "") == "climate"), None)
             week_profile_channel_no = next(
                 (
                     channel.number
@@ -1302,9 +1265,7 @@ class LoomCentralAdapter:
                 with_switches=week_profile_channel_no is not None,
             )
 
-    async def _spawn_schedule_data_points(
-        self, *, device: Device, channel_no: int, with_switches: bool
-    ) -> None:
+    async def _spawn_schedule_data_points(self, *, device: Device, channel_no: int, with_switches: bool) -> None:
         """Probe one schedule channel and spawn its week-profile (+switch) DPs."""
         store = self._client.store
         try:
@@ -1321,13 +1282,9 @@ class LoomCentralAdapter:
             week_profile=week_profile,
         )
         try:
-            schedule = await self._client.schedules.get_channel_schedule(
-                address=device.address, channel=channel_no
-            )
+            schedule = await self._client.schedules.get_channel_schedule(address=device.address, channel=channel_no)
         except Exception:  # noqa: BLE001 — entry count degrades to unknown
-            _LOGGER.debug(
-                "schedule fetch failed for %s:%s", device.address, channel_no, exc_info=True
-            )
+            _LOGGER.debug("schedule fetch failed for %s:%s", device.address, channel_no, exc_info=True)
         else:
             wp_dp.update_from(schedule=schedule)
         self._extra_data_points.append(wp_dp)
@@ -1361,17 +1318,13 @@ class LoomCentralAdapter:
                 if not isinstance(cdp, BaseCustomDpSiren) or isinstance(cdp, CustomDpSoundPlayer):
                     continue
                 channel_no = cdp.summary.channel_no
-                if channel_has_duration_pair(
-                    store=store, address=device.address, channel_no=channel_no
-                ):
+                if channel_has_duration_pair(store=store, address=device.address, channel_no=channel_no):
                     self._extra_data_points.append(
                         CombinedDurationDp(
                             store=store,
                             device=device,
                             channel_no=channel_no,
-                            translated_name=self._suppressed_calc_labels.get(
-                                (device.address, channel_no)
-                            ),
+                            translated_name=self._suppressed_calc_labels.get((device.address, channel_no)),
                         )
                     )
 
@@ -1440,7 +1393,7 @@ class LoomCentralAdapter:
                 "virtual-remote data points will carry an empty central-id "
                 "slot (loom__…) and break the HA registry contract"
             )
-        self._client.store.set_serial(serial)
+        self._client.store.set_serial(serial=serial)
         interfaces: tuple[str, ...] = ()
         try:
             interfaces = tuple(i.id for i in await self._client.system.list_interfaces())

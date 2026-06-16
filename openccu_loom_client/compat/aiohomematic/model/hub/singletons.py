@@ -205,9 +205,7 @@ class AlarmMessagesSensor(HubSingletonDp):
         """Apply the fetched alarm list: count + ``alarm_<n>`` attributes."""
         attributes = {
             f"alarm_{idx}": (
-                f"{message.device_name}: {message.name}"
-                if getattr(message, "device_name", None)
-                else str(message.name)
+                f"{message.device_name}: {message.name}" if getattr(message, "device_name", None) else str(message.name)
             )
             for idx, message in enumerate(messages, start=1)
         }
@@ -232,9 +230,7 @@ class ServiceMessagesSensor(HubSingletonDp):
         """Apply the fetched service list: count + ``message_<n>`` attributes."""
         attributes = {
             f"message_{idx}": (
-                f"{message.device_name}: {message.name}"
-                if getattr(message, "device_name", None)
-                else str(message.name)
+                f"{message.device_name}: {message.name}" if getattr(message, "device_name", None) else str(message.name)
             )
             for idx, message in enumerate(messages, start=1)
         }
@@ -502,18 +498,14 @@ class InstallModeDpButton(HubSingletonDp):
         narrowing.
         """
         del device_address
-        await self._hub_ops.set_install_mode_interface(
-            interface=self._interface, active=True, seconds=time
-        )
+        await self._hub_ops.set_install_mode_interface(interface=self._interface, active=True, seconds=time)
         # Optimistic countdown start; the periodic hub poll resyncs it.
         self._sensor.update_value(value=time)
         return True
 
     async def deactivate(self) -> bool:
         """Deactivate install mode on this interface."""
-        await self._hub_ops.set_install_mode_interface(
-            interface=self._interface, active=False, seconds=0
-        )
+        await self._hub_ops.set_install_mode_interface(interface=self._interface, active=False, seconds=0)
         self._sensor.update_value(value=0)
         return True
 
