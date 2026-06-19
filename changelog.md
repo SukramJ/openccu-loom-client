@@ -1,3 +1,7 @@
+# Version 2026.6.19 (2026-06-19)
+
+- Chore: dependency bumps — `openccu-loom-types` 0.1.21 → 0.1.22, `ruff` 0.15.17 → 0.15.18 (pre-commit hook + pinned dev requirement), `pytest` 9.1.0 → 9.1.1.
+
 # Version 2026.6.18 (2026-06-16)
 
 - Chore: **adopt aiohomematic's lint suite**. New prek hooks — `pylint`, `kwonly-lint` (keyword-only enforcement), `lint-all-exports` (grouped/sorted `__all__` validation), plus `no-commit-to-branch` (main), `check-executables-have-shebangs` and `python-typing-update` (manual stage). `script/lint_kwonly.py` and `script/lint_all_exports.py` are ported from aiohomematic and adapted to loom: the export linter treats `openccu_loom_client` **and** the sister `openccu_loom_types` wire-type package as first-party re-exports, collects only top-level names (skipping Protocol members and `TYPE_CHECKING`-guarded imports), and supports `__version__`/`__all__: Final`. `pyproject.toml` aligns with aiohomematic (ruff `line-length` 120, `RUF022` ignored on package `__init__.py`, targeted pylint disables for the documented private-access / registration-mixin / Protocol-stub patterns).
