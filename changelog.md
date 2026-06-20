@@ -1,3 +1,24 @@
+# Version 2026.6.22 (2026-06-21)
+
+- Feat: **expose the aiohomematic device-level service surface on the loom
+  backend**, so the HA integration's raw device service handlers dispatch
+  unchanged. New lazily-built `Device.client` shim (`set_value`, `get_value`,
+  `get_paramset` / `put_paramset` — a peer-address `paramset_key` routes to the
+  link-paramset surface —, `get_link_peers`, `add_link`, `remove_link`) over the
+  existing data-point and link operations; `Device.channels` is now a
+  mapping-like view (`.get("ADDR:1")` plus number-order iteration);
+  `Device.week_profile_data_point` returns the adapter-built `WeekProfileDp`
+  (now registered on the store at bootstrap) instead of `None`, unblocking the
+  climate-schedule services; `Device.set_forced_availability` overrides the
+  reported availability. aiohomematic-only knobs (`wait_for_callback`,
+  `rx_mode`, `check_against_pd`, `retry`, `convert_from_pd`) are accepted and
+  ignored — the daemon owns write serialization and value typing.
+- Feat: wire the device/channel config-reload + export methods onto the model —
+  `Device.reload_device_config()`, `Channel.reload_channel_config()` (over the
+  v0.7.1 `DevicesOperations.reload_*` REST endpoints) and
+  `Device.export_device_definition()` (new `DevicesOperations.export_device_definition`,
+  `GET /devices/{address}/export-definition`, returning the raw zip archive).
+
 # Version 2026.6.21 (2026-06-21)
 
 - Feat: cover openccu-loom v0.7.1's REST config-reload endpoints —

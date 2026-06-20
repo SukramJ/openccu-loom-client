@@ -107,6 +107,10 @@ class LoomStore:
         # Same hook for Custom Data Points — the compat layer injects a
         # factory that returns the right categorised ``CustomDp*`` class.
         self._cdp_factory: Callable[..., CustomDataPoint] | None = None
+        # Per-device week-profile data point (the compat layer's
+        # ``WeekProfileDp``), registered by the adapter at bootstrap so the
+        # base :class:`Device` can expose it as ``week_profile_data_point``.
+        self._week_profile_dps: dict[str, Any] = {}
 
     # ---- central identity ----
 
@@ -161,6 +165,11 @@ class LoomStore:
         (e.g. integration tests).
         """
         self._transport = transport
+
+    @property
+    def transport(self) -> HttpTransport | None:
+        """Return the bound transport, or ``None`` if none is attached yet."""
+        return self._transport
 
     def set_data_point_factory(self, *, factory: Callable[..., DataPoint] | None) -> None:
         """
@@ -310,6 +319,16 @@ class LoomStore:
             if cdp_address == address and cdp.summary.channel_no == channel_no:
                 return cdp
         return None
+
+    # ---- week-profile data points ----
+
+    def set_week_profile_data_point(self, *, address: str, data_point: Any) -> None:
+        """Register a device's week-profile data point (built by the compat adapter)."""
+        self._week_profile_dps[address] = data_point
+
+    def get_week_profile_data_point(self, *, address: str) -> Any:
+        """Return a device's week-profile data point, or ``None`` if it has none."""
+        return self._week_profile_dps.get(address)
 
     def is_parameter_in_multiple_channels(self, *, address: str, parameter: str) -> bool:
         """

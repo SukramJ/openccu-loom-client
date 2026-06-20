@@ -172,6 +172,16 @@ class DevicesOperations(_OperationsBase):
         """
         await self._transport.request(method="POST", path=f"/devices/{address}/channels/{channel}/reload")
 
+    async def export_device_definition(self, *, address: str) -> bytes:
+        """
+        Export a device definition as an aiohomematic-compatible zip archive.
+
+        Wire: ``GET /devices/{address}/export-definition``. Returns the raw
+        archive bytes (the daemon assembles the same layout aiohomematic's
+        ``export_device_definition`` writes).
+        """
+        return await self._transport.request_bytes(method="GET", path=f"/devices/{address}/export-definition")
+
     async def patch_device(self, *, address: str, name: str) -> None:
         """
         Update a device's mutable metadata (currently just name).
