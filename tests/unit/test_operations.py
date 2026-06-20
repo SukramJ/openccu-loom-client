@@ -72,6 +72,18 @@ class TestDevicesOperations:
         mock_daemon.post("/api/v1/devices/refresh", status=202)
         await DevicesOperations(transport=http).refresh_all()
 
+    async def test_reload_device_config_posts_to_device(self, mock_daemon: MockDaemon, http: HttpTransport) -> None:
+        mock_daemon.post("/api/v1/devices/VCU0001/reload", status=200, payload={})
+        await DevicesOperations(transport=http).reload_device_config(address="VCU0001")
+        req = next(r for r in mock_daemon.requests if r.method == "POST")
+        assert req.path == "/api/v1/devices/VCU0001/reload"
+
+    async def test_reload_channel_config_posts_to_channel(self, mock_daemon: MockDaemon, http: HttpTransport) -> None:
+        mock_daemon.post("/api/v1/devices/VCU0001/channels/3/reload", status=200, payload={})
+        await DevicesOperations(transport=http).reload_channel_config(address="VCU0001", channel=3)
+        req = next(r for r in mock_daemon.requests if r.method == "POST")
+        assert req.path == "/api/v1/devices/VCU0001/channels/3/reload"
+
     async def test_patch_device_sends_name(self, mock_daemon: MockDaemon, http: HttpTransport) -> None:
         mock_daemon.patch("/api/v1/devices/VCU0001", status=200, payload={})
         await DevicesOperations(transport=http).patch_device(address="VCU0001", name="Renamed")
