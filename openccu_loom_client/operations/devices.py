@@ -162,9 +162,7 @@ class DevicesOperations(_OperationsBase):
         The surgical counterpart to :meth:`refresh_all` (re-pulls descriptions
         and master values for one device). Wire: ``POST /devices/{address}/reload``.
         """
-        await self._transport.request(
-            method="POST", path=f"/devices/{address}/reload"
-        )
+        await self._transport.request(method="POST", path=f"/devices/{address}/reload")
 
     async def reload_channel_config(self, *, address: str, channel: int) -> None:
         """
@@ -172,9 +170,7 @@ class DevicesOperations(_OperationsBase):
 
         Wire: ``POST /devices/{address}/channels/{channel}/reload``.
         """
-        await self._transport.request(
-            method="POST", path=f"/devices/{address}/channels/{channel}/reload"
-        )
+        await self._transport.request(method="POST", path=f"/devices/{address}/channels/{channel}/reload")
 
     async def patch_device(self, *, address: str, name: str) -> None:
         """

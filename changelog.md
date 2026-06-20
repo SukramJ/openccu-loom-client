@@ -2,7 +2,7 @@
 
 - Feat: cover openccu-loom v0.7.1's REST config-reload endpoints —
   `DevicesOperations.reload_device_config(address)` (`POST
-  /devices/{address}/reload`) and `reload_channel_config(address, channel)`
+/devices/{address}/reload`) and `reload_channel_config(address, channel)`
   (`POST /devices/{address}/channels/{channel}/reload`), the surgical
   counterparts to `refresh_all`. Bumps `openccu-loom-types` 0.1.23 → 0.1.24.
 
