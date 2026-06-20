@@ -175,3 +175,35 @@ class LinksOperations(_OperationsBase):
             path=f"/devices/{address}/central-links",
             allow_retry=True,
         )
+
+    # ---- central links, named after the daemon's central.* commands ----
+
+    async def central_links_status(self, *, address: str) -> CentralLinksStatus:
+        """
+        PRESS-event forwarding status for a device.
+
+        Wire: ``GET /devices/{addr}/central-links``. Alias of
+        :meth:`get_central_links_status` named after the daemon's
+        ``central.links_status`` command.
+        """
+        return await self.get_central_links_status(address=address)
+
+    async def create_central_links(self, *, address: str) -> None:
+        """
+        Enable central click-event forwarding for a device.
+
+        Wire: ``POST /devices/{addr}/central-links``. Alias of
+        :meth:`enable_central_links` named after the daemon's
+        ``central.create_links`` command.
+        """
+        await self.enable_central_links(address=address)
+
+    async def remove_central_links(self, *, address: str) -> None:
+        """
+        Disable central click-event forwarding for a device.
+
+        Wire: ``DELETE /devices/{addr}/central-links``. Alias of
+        :meth:`disable_central_links` named after the daemon's
+        ``central.remove_links`` command. Idempotent.
+        """
+        await self.disable_central_links(address=address)
