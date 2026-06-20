@@ -23,7 +23,7 @@ from dataclasses import dataclass
 import logging
 from typing import Any, ClassVar, Final
 
-from openccu_loom_types.rest import Kind
+from openccu_loom_types.rest import Kind1 as Kind
 from openccu_loom_types.ws import (
     CentralStateChangedPayload,
     CustomDataPointStateChangedPayload,

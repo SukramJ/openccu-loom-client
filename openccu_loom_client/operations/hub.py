@@ -162,6 +162,23 @@ class HubOperations(_OperationsBase):
         """Delete a system variable by name. Wire: ``DELETE /sysvars/{name}``."""
         await self._transport.request(method="DELETE", path=f"/sysvars/{name}")
 
+    async def fetch_system_variables(self, *, central_name: str | None = None) -> None:
+        """
+        Force a CCU re-pull of the system-variable catalogue into the hub model.
+
+        Wire: ``POST /sysvars/fetch``. Pass ``central_name`` to scope the
+        refresh to one CCU (``?central=``); omitted, every registered
+        central is refreshed. Async on the daemon side — the call returns
+        202. Not retried: a duplicate re-pull is wasted CCU radio work.
+        """
+        params = {"central": central_name} if central_name is not None else None
+        await self._transport.request(
+            method="POST",
+            path="/sysvars/fetch",
+            params=params,
+            allow_retry=False,
+        )
+
     # ---- messages ----
 
     async def list_alarm_messages(self) -> list[AlarmMessage]:

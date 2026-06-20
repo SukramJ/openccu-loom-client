@@ -23,7 +23,7 @@ from aiohomematic.const import (
     ParamsetKey,
 )
 from openccu_loom_types.enums import DataPointType
-from openccu_loom_types.rest import CustomDPSummary, DataPointSummary, Kind, Snapshot
+from openccu_loom_types.rest import CustomDPSummary, DataPointSummary, Kind1 as Kind, Snapshot
 from openccu_loom_types.ws import (
     CentralStateChangedPayload,
     CustomDataPointStateChangedPayload,

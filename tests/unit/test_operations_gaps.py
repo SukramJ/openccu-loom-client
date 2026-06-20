@@ -85,6 +85,29 @@ class TestSchedulesOperations:
         await SchedulesOperations(transport=t).set_device_active_profile(address="VCU1", profile="P2")
         assert _find_call(mock, "POST").json() == {"profile": "P2"}
 
+    async def test_copy_schedule_sends_target_device(self, http) -> None:
+        t, mock = http
+        mock.post("/api/v1/devices/VCU1/schedules/copy", status=202)
+        await SchedulesOperations(transport=t).copy_schedule(src_address="VCU1", dst_address="VCU2")
+        assert _find_call(mock, "POST").json() == {"target_device_address": "VCU2"}
+
+    async def test_copy_climate_profile_derives_source_channel(self, http) -> None:
+        t, mock = http
+        mock.post("/api/v1/devices/VCU1/channels/1/week_profile/copy", status=202)
+        await SchedulesOperations(transport=t).copy_climate_profile(
+            src_channel_address="VCU1:1",
+            src_profile=1,
+            dst_channel_address="VCU2:1",
+            dst_profile=3,
+        )
+        post = _find_call(mock, "POST")
+        assert post.path == "/api/v1/devices/VCU1/channels/1/week_profile/copy"
+        assert post.json() == {
+            "source_profile": 1,
+            "target_channel_address": "VCU2:1",
+            "target_profile": 3,
+        }
+
 
 class TestLinksOperations:
     async def test_add_link_sends_sender_receiver(self, http) -> None:
@@ -114,6 +137,28 @@ class TestLinksOperations:
         t, mock = http
         mock.post("/api/v1/devices/VCU1/central-links", status=202)
         await LinksOperations(transport=t).enable_central_links(address="VCU1")
+
+    async def test_create_central_links_alias(self, http) -> None:
+        t, mock = http
+        mock.post("/api/v1/devices/VCU1/central-links", status=202)
+        await LinksOperations(transport=t).create_central_links(address="VCU1")
+        assert _find_call(mock, "POST").path == "/api/v1/devices/VCU1/central-links"
+
+    async def test_remove_central_links_alias(self, http) -> None:
+        t, mock = http
+        mock.delete("/api/v1/devices/VCU1/central-links", status=202)
+        await LinksOperations(transport=t).remove_central_links(address="VCU1")
+        assert _find_call(mock, "DELETE").path == "/api/v1/devices/VCU1/central-links"
+
+    async def test_central_links_status_alias(self, http) -> None:
+        t, mock = http
+        mock.get(
+            "/api/v1/devices/VCU1/central-links",
+            payload={"supported": True, "eligible_channels": 2},
+        )
+        status = await LinksOperations(transport=t).central_links_status(address="VCU1")
+        assert status.supported is True
+        assert status.eligible_channels == 2
 
     async def test_get_link_paramset(self, http) -> None:
         t, mock = http
@@ -196,6 +241,20 @@ class TestHubOperationsGaps:
             "description": "Living room",
             "unit": "°C",
         }
+
+    async def test_fetch_system_variables_all_centrals(self, http) -> None:
+        t, mock = http
+        mock.post("/api/v1/sysvars/fetch", status=202)
+        await HubOperations(transport=t).fetch_system_variables()
+        post = _find_call(mock, "POST")
+        assert post.path == "/api/v1/sysvars/fetch"
+        assert "central" not in post.query
+
+    async def test_fetch_system_variables_scoped_central(self, http) -> None:
+        t, mock = http
+        mock.post("/api/v1/sysvars/fetch", status=202)
+        await HubOperations(transport=t).fetch_system_variables(central_name="home")
+        assert _find_call(mock, "POST").query == {"central": "home"}
 
 
 class TestInstallModeChangedEvent:

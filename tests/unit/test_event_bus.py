@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from openccu_loom_types.rest import Kind
+from openccu_loom_types.rest import Kind1 as Kind
 from openccu_loom_types.ws import CentralStateChangedPayload, DataPointValueChangedPayload
 import pytest
 

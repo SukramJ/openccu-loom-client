@@ -16,7 +16,13 @@ callers get end-to-end typing for the thermostat week-program feature
 
 from __future__ import annotations
 
-from openccu_loom_types.rest import Schedule, SetActiveProfileRequest, WeekProfileResponse
+from openccu_loom_types.rest import (
+    CopyProfileRequest,
+    CopyScheduleRequest,
+    Schedule,
+    SetActiveProfileRequest,
+    WeekProfileResponse,
+)
 
 from openccu_loom_client.operations._base import _OperationsBase
 
@@ -135,6 +141,55 @@ class SchedulesOperations(_OperationsBase):
         await self._transport.request(
             method="POST",
             path=f"/devices/{address}/schedule/active-profile",
+            json_body=body.model_dump(mode="json"),
+            allow_retry=False,
+        )
+
+    # ---- copy (clone a whole schedule / a single climate profile) ----
+
+    async def copy_schedule(self, *, src_address: str, dst_address: str) -> None:
+        """
+        Copy a device's whole week schedule onto another device.
+
+        Wire: ``POST /devices/{src}/schedules/copy`` with a
+        :class:`CopyScheduleRequest` (``{target_device_address}``).
+        Not retried — replaying the copy after a partial CCU write can
+        clobber an edit the operator made between attempts.
+        """
+        body = CopyScheduleRequest(target_device_address=dst_address)
+        await self._transport.request(
+            method="POST",
+            path=f"/devices/{src_address}/schedules/copy",
+            json_body=body.model_dump(mode="json"),
+            allow_retry=False,
+        )
+
+    async def copy_climate_profile(
+        self,
+        *,
+        src_channel_address: str,
+        src_profile: int,
+        dst_channel_address: str,
+        dst_profile: int,
+    ) -> None:
+        """
+        Copy a single climate profile (P1..P6) to another channel/profile.
+
+        Wire: ``POST /devices/{addr}/channels/{n}/week_profile/copy`` with
+        a :class:`CopyProfileRequest` (``{source_profile,
+        target_channel_address, target_profile}``). The source channel is
+        derived from ``src_channel_address`` (``"<device>:<channel>"``).
+        Profiles are 1-based (1..6). Not retried.
+        """
+        device_address, _, channel = src_channel_address.rpartition(":")
+        body = CopyProfileRequest(
+            source_profile=src_profile,
+            target_channel_address=dst_channel_address,
+            target_profile=dst_profile,
+        )
+        await self._transport.request(
+            method="POST",
+            path=f"/devices/{device_address}/channels/{channel}/week_profile/copy",
             json_body=body.model_dump(mode="json"),
             allow_retry=False,
         )

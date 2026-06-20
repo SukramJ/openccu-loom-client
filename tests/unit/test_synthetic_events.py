@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from openccu_loom_types.rest import Kind
+from openccu_loom_types.rest import Kind1 as Kind
 
 from openccu_loom_client.events import (
     DataPointsCreatedEvent,

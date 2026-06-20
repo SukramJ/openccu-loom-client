@@ -1,3 +1,20 @@
+# Version 2026.6.20 (2026-06-20)
+
+- Feat: cover openccu-loom v0.7.0's device-action services. New operations:
+  `SchedulesOperations.copy_schedule` / `copy_climate_profile` (copy a device
+  schedule or a climate profile between channels/profile slots),
+  `HubOperations.fetch_system_variables` (force a CCU system-variable re-pull),
+  and `LinksOperations.create_central_links` / `remove_central_links` /
+  `central_links_status`. The cdp device actions (climate away-mode, on-time,
+  cover combined, siren, text-display) ride the existing
+  `CustomDataPointsOperations.invoke`. WS-only daemon commands
+  (`reload_channel_config`, `recording.*`) have no REST surface and are not
+  wrapped by this REST-only client.
+- Chore: dependency bump — `openccu-loom-types` 0.1.22 → 0.1.23 (the v0.7.0
+  contract). The regenerated types renamed the WS-envelope `Kind` enum to
+  `Kind1` (a new `Kind` scope enum took the name); imports were migrated to
+  `Kind1 as Kind`, preserving the public `Kind` name.
+
 # Version 2026.6.19 (2026-06-19)
 
 - Chore: dependency bumps — `openccu-loom-types` 0.1.21 → 0.1.22, `ruff` 0.15.17 → 0.15.18 (pre-commit hook + pinned dev requirement), `pytest` 9.1.0 → 9.1.1.
