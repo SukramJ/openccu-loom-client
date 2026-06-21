@@ -6,10 +6,10 @@ Runtime reuse of `aiohomematic` is deliberate; the `compat/aiohomematic/`
 shim (integration form A1) is the chosen plug-in point. See `CLAUDE.md` →
 "What this is" and `docs/architecture-review.md` §2.1.
 
-Status after the `feat/drop-in-completion` work: the `LoomCentralAdapter`
-has **zero `NotImplementedError` stubs**. What remains is keeping the shim
-coupling robust (below), one feature model, a few cross-repo follow-ups, and
-some deferred refinements.
+Status: the `LoomCentralAdapter` has **zero `NotImplementedError` stubs**, all
+feature branches are merged (`main` @ 2026.6.22, openccu-loom-types 0.1.25
+pinned). What remains is keeping the shim coupling robust (below), a few
+cross-repo (`homematicip_local`) follow-ups, and some deferred refinements.
 
 ## P1 — keep the alternative-backend coupling robust (strategy follow-ups)
 
@@ -28,11 +28,12 @@ deliberately, keep the compat shim). Rationale: `docs/architecture-review.md`
       (The isinstance-tuple partners in `homematicip_local`'s
       `backend_types.py` are cross-repo and still verified there.)
 - [x] **Upper aiohomematic version bound + single-source the pin.** DONE
-      (2026-06-21). `pyproject.toml` now caps `aiohomematic>=2026.6.2,<2026.7`;
-      `requirements.txt` keeps the exact CI pin `==2026.6.2` (within range, the
-      standard library-range / CI-lockfile split). aiohttp/pydantic floors in
-      pyproject were also raised to match the CI pins. Bump the cap and the
-      drift-guard snapshot together when adopting a new aiohomematic series.
+      (2026-06-21). `pyproject.toml` and `requirements.txt` both pin
+      `aiohomematic==2026.6.4` (exact pin = hard upper bound; the compat shim
+      couples to aiohomematic internals, so a range would let an unverified
+      series leak in). aiohttp (`>=3.14.1`) / pydantic (`>=2.13.4`) floors match
+      across both files. Bump the pin and the drift-guard snapshot together when
+      adopting a new aiohomematic series.
 - [ ] **Bundle the aiohomematic imports in one module.** — DEFERRED (2026-06-21,
       reasoned). The reused symbols (`generate_unique_id`, `async_support.Looper`,
       `central.events.*`, `const.*`, `interfaces.*`) span ~9 files. _Why deferred:_
@@ -97,26 +98,30 @@ Client-side (this repo) — sequence small → large:
       (`_HUB_REFRESH_INTERVAL`, `_hub_singleton_refresh_loop`, `_hub_refresh_task`)
       is deleted; one cold-start `fetch_hub_singleton_data()` seeds the values.
       Tests: `test_compat_model.py::TestHubPushRouting`.
-      **⚠ Known gap:** `system_update` has **no push** (not among the 5 broadcasts)
-      and now refreshes at bootstrap only. Wire it via G4(a)'s aggregate (which
-      carries the `update` flags) on a slow cadence, or add a daemon
-      `hub.system_update` broadcast. Tracked below.
+      **⚠ Known gap — the one genuine remaining daemon ask (verified against
+      `../openccu-loom`, 2026-06-21):** `system_update` has **no WS push**. The
+      daemon ships the other 5 hub singletons as broadcasts
+      (`ws/hub_events.go:233-267`) but exposes system-update REST-only
+      (`GET /system/update`, `handlers/system_hub.go:38`). Client-side this is
+      backstopped by the slow reconcile loop (G6-followup below). The real fix
+      is a daemon `hub.system_update` broadcast — file it as the sole open
+      daemon ask.
 - [x] **G6-followup — keep `system_update` fresh post-bootstrap.** DONE
       (2026-06-21). A deliberately coarse reconcile loop
       (`_HUB_RECONCILE_INTERVAL = 300`, `_hub_reconcile_loop`, ~70x slower than
       the retired 30 s poll) re-seeds the singletons from the aggregate, so
       `system_update` (no daemon push) stays fresh and missed pushes are
       backstopped. Cancelled in `stop()`.
-- [x] **G4(a) — single `GET /hub/data-points`** (OPTIMISATION). DONE
-      (2026-06-21). Detail: `docs/g4a-hub-data-points-consumption.md`.
-      `SystemOperations.get_hub_data_points()` added; `fetch_hub_singleton_data`
-      now seeds every singleton from the single aggregate call (inbox, metrics,
-      connectivity, install-mode), refetching message bodies only on a count
-      delta and keeping `get_system_update` for the firmware strings. The
-      per-endpoint `_fetch_*` fan-out is deleted. While here, the previously
-      unconsumed central-wide `InstallModeChangedEvent` push was wired onto the
-      install-mode sensors (it was poll-only before). Tests live in
-      `test_compat_model.py` (`TestHubAggregateFetch`, `TestHubPushRouting`).
+  - [x] **G4(a) — single `GET /hub/data-points`** (OPTIMISATION). DONE
+        (2026-06-21). Detail: `docs/g4a-hub-data-points-consumption.md`.
+        `SystemOperations.get_hub_data_points()` added; `fetch_hub_singleton_data`
+        now seeds every singleton from the single aggregate call (inbox, metrics,
+        connectivity, install-mode), refetching message bodies only on a count
+        delta and keeping `get_system_update` for the firmware strings. The
+        per-endpoint `_fetch_*` fan-out is deleted. While here, the previously
+        unconsumed central-wide `InstallModeChangedEvent` push was wired onto the
+        install-mode sensors (it was poll-only before). Tests live in
+        `test_compat_model.py` (`TestHubAggregateFetch`, `TestHubPushRouting`).
 - [ ] **G5 — enrich `get_event_groups()` from REST** — DEFERRED (2026-06-21,
       reasoned). `get_event_groups` already builds groups locally (no
       `NotImplementedError`); `last_triggered_event` is **live** (the refresh
@@ -141,25 +146,12 @@ Cross-repo (homematicip_local), after the client items:
 - [ ] **G5** — drop the `NotImplementedError` fallback in `event.py:55-70` so
       the `event` platform gets its bootstrap entities.
 
-## Open branches awaiting merge
-
-- `openccu-loom-client` → `feat/drop-in-completion` (6 commits)
-- `openccu-loom` → `feat/channel-name-category-schema` (openapi `ChannelSummary.name` + `category`)
-- `openccu-loom-types` → `feat/channel-name-category` (regenerated `rest.py`)
-
 ## P1 — HA-side (homematicip_local)
 
 - [ ] **`websocket_api.py`**: the config-UI paramset description getters are
       **async** on the loom backend (daemon serves over REST), whereas
       aiohomematic's are sync/cached. `await` them on the loom path:
       `get_paramset_description`, `get_link_paramset_description`.
-
-## P2 — types release to populate channel names
-
-- [ ] Merge `openccu-loom` `feat/channel-name-category-schema`, release
-      **openccu-loom-types 0.1.6**, bump the client dependency. Then
-      `get_configurable_devices` `channel_name` populates (client already
-      reads it via `getattr`, falls back to `""`).
 
 ## P2 — verification gaps (e2e)
 
@@ -170,20 +162,52 @@ Cross-repo (homematicip_local), after the client items:
       `interface_id` for `FireEvent`; wire it up from the snapshot.
 - [ ] `test_optimistic_rollback_pushed_over_ws` (xfail): model a
       non-confirming DP in the godevccu harness to drive it deterministically.
-- [ ] hub `sysvar_changed` / `program_executed` broadcasts (xfail): the
-      daemon doesn't broadcast them for a client-initiated change against the
-      simulator — needs a CCU-side trigger.
+- [ ] hub `sysvar_changed` / `program_executed` broadcasts (xfail). _xfail
+      reasons corrected against daemon source (2026-06-21):_ - `sysvar_changed` **is** broadcast on client-initiated writes too
+      (`PatchSysvar → UpdateSysvar → SysvarChangedEvent`, with same-value
+      dedup — `coordinators/hub.go`). The xfail is a simulator/value-dedup
+      artefact (godevccu doesn't effect a real value change), not a daemon
+      gap. Drive it with a genuine value delta or against a real CCU. - `program_executed` is **CCU-originated only** by design; a client
+      `execute` gets REST 202 with no push (`coordinators/hub.go`
+      `NotifyProgramExecuted`). Not self-initiated-testable — verify via a
+      CCU-side program run.
 
 ## P3 — wire-contract / refinement
 
-- [ ] `config_admin.get_schema()` (Tier A xfail): daemon returns
-      `{sections, fields}` which doesn't validate against `SchemaResponse` —
-      reconcile the types model with the daemon shape.
-- [ ] **Value accuracy (Strategy B refinements)**: the compat protocol surface
-      returns neutral defaults for daemon-sourced fields it can't yet derive
-      (rooms/functions, translations). The daemon already ships generic
-      `data_point_type`/`category`; rooms/translations on the wire would let
-      the twins return accurate values instead of `None`/`()`.
-- [ ] N×M bootstrap cost: the snapshot lacks nested channels/DPs, so bootstrap
-      is one detail call per device + one DP call per channel. A streamed /
-      nested snapshot endpoint is a deferred daemon ask.
+> **Re-verified against the daemon source (`../openccu-loom`, 2026-06-21).**
+> Three items previously filed as "deferred daemon asks" turned out to be
+> **client-side gaps** — the daemon already ships the data/endpoints; the
+> client doesn't consume them. Corrected below.
+
+- [ ] **N×M bootstrap — adopt the nested/streamed snapshot (CLIENT, high
+      impact).** _Reclassified from "deferred daemon ask" → client work._ The
+      daemon's `GET /snapshot` already supports `?include=channels,data_points`
+      (full devices→channels→DPs nested in one JSON call) **and** NDJSON
+      streaming via `Accept: application/x-ndjson`
+      (`internal/north/rest/handlers/snapshot.go:24-56,241`). The client still
+      calls `GET /snapshot` parameterless (`operations/system.py:63`) and fans
+      out N detail + N×M data-point calls in `client.py:bootstrap`. Wire the
+      `include` param (and ideally the NDJSON path) through `get_snapshot` +
+      `load_snapshot` to collapse bootstrap to one round trip. _Also fix the
+      stale "asks.md H1 daemon ask" comments at `client.py:214` and
+      `operations/system.py:59` — that ask is already delivered._
+- [ ] **Value accuracy (Strategy B) — consume the presentation fields already
+      on the wire (CLIENT).** _Reclassified: mostly available, not daemon-
+      blocked._ The daemon serialises device `rooms[]`/`functions[]` (+ dedicated
+      `/rooms`, `/functions` endpoints + in the snapshot envelope),
+      `ChannelSummary.room` (singular), and per-DP `translated_name` /
+      `parameter_label` / `label_omitted` / `value_list`
+      (`handlers/devices.go` `DataPointSummary`). `_protocol_surface.py` still
+      returns `None`/`set()` for `room`/`rooms` and ignores `translated_name`
+      — wire these through the twins. **Genuinely still missing daemon-side**
+      (small): per-channel `functions` (internal `Channel.Functions` exists but
+      isn't serialised) and `value_translations` (translated enum display
+      strings — only raw `value_list` ships).
+- [ ] `config_admin.get_schema()` xfail — **likely stale, verify & remove
+      (CLIENT).** The daemon returns top-level `{sections, fields}`
+      (`handlers/admin_config.go:120`) which **does** validate against the
+      client's `SchemaResponse` (confirmed: the model is `{sections, fields}`
+      and Pydantic ignores the daemon's extra `SchemaField.default` — no
+      `extra='forbid'`). The only real mismatch is a daemon-repo **OpenAPI doc
+      omission** (`SchemaField.default` undocumented in `assets/openapi.yaml`),
+      not a client blocker. Drop the xfail if it now xpasses.

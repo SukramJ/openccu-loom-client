@@ -50,17 +50,28 @@ class SystemOperations(_OperationsBase):
 
     # ---- snapshot ----
 
-    async def get_snapshot(self) -> Snapshot:
+    async def get_snapshot(self, *, include: str | None = None) -> Snapshot:
         """
         One-shot dump of every device / program / sysvar / interface.
 
         Wire: ``GET /snapshot``. The HA bootstrap path calls this once
-        at connect time to seed the local :class:`LoomStore`. For
-        large CCUs the daemon's streaming snapshot ask (asks.md H1)
-        will eventually replace this with cursor pagination — until
-        then the client is expected to take the one-shot hit.
+        at connect time to seed the local :class:`LoomStore`.
+
+        ``include`` opts into the daemon's nested snapshot shape via the
+        ``?include=`` query parameter. Pass ``"data_points"`` (which the
+        daemon expands to channels + data points) to receive the full
+        devices→channels→data-points graph in this single response —
+        :attr:`Snapshot.device_channels` is then populated, letting
+        :meth:`LoomClient.bootstrap` skip the per-channel data-point
+        fan-out. With ``include=None`` the flat summary shape is returned
+        (devices / programs / sysvars / interfaces only), unchanged.
+
+        (The daemon additionally offers NDJSON streaming via
+        ``Accept: application/x-ndjson``; this client consumes the
+        nested JSON envelope, not the stream.)
         """
-        payload = await self._transport.request(method="GET", path="/snapshot")
+        params = {"include": include} if include else None
+        payload = await self._transport.request(method="GET", path="/snapshot", params=params)
         return Snapshot.model_validate(payload)
 
     # ---- interfaces ----

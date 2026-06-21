@@ -38,7 +38,7 @@ Usage::
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Coroutine, Iterable
+from collections.abc import Coroutine, Iterable, Mapping
 import contextlib
 import logging
 from typing import TYPE_CHECKING, Final, Self
@@ -75,6 +75,8 @@ from openccu_loom_client.transport import HttpTransport, WsTransport
 if TYPE_CHECKING:
     from types import TracebackType
 
+    from openccu_loom_types.rest import DataPointSummary, DeviceChannel
+
     from openccu_loom_client.config import LoomConfig
 
 _LOGGER: Final = logging.getLogger(__name__)
@@ -93,6 +95,24 @@ _DEFAULT_WS_SUBSCRIPTIONS: Final = (
     "system.*",
     "hub.*",
 )
+
+
+def _channel_dp_map(
+    *,
+    device_channels: list[DeviceChannel] | None,
+) -> dict[str, dict[int, list[DataPointSummary]]]:
+    """
+    Index a nested snapshot's ``device_channels`` by device + channel.
+
+    Returns ``{device_address: {channel_number: [DataPointSummary]}}``.
+    Empty when the daemon returned no nested data (older daemon, or the
+    flat snapshot shape) — the caller then falls back to per-channel
+    REST fetches.
+    """
+    return {
+        entry.device_address: {channel.number: list(channel.data_points or ()) for channel in entry.channels or ()}
+        for entry in device_channels or ()
+    }
 
 
 class LoomClient:
@@ -202,30 +222,43 @@ class LoomClient:
 
         Steps:
 
-        1. ``GET /snapshot`` → registers every device (summary only).
-        2. For each device: ``GET /devices/{addr}`` to attach channels.
-        3. Optional (``fetch_data_points=True``): for each channel,
-           ``GET …/data-points`` to attach the DPs.
+        1. ``GET /snapshot?include=data_points`` → registers every device
+           and, in the same response, the nested channels + data points
+           (:attr:`Snapshot.device_channels`).
+        2. For each device: ``GET /devices/{addr}`` to attach the
+           firmware / availability detail the flat snapshot omits (and
+           the authoritative channel list).
+        3. Optional (``fetch_data_points=True``): attach each channel's
+           DPs from the nested snapshot — no extra REST call. If the
+           daemon did not return ``device_channels`` (older daemon), fall
+           back to one ``GET …/data-points`` per channel.
         4. Emit one :class:`DataPointsCreatedEvent` carrying every
            device the store now knows, so HA-side spawn-entities
            subscribers fire once at the end of bootstrap.
 
-        For large CCUs step 3 is the dominant cost (N*M REST calls).
-        The daemon's deferred streaming-snapshot ask (asks.md H1)
-        will eventually fold all three steps into one streamed
-        response — this implementation matches the unstreamed
-        contract that's available today.
+        The nested snapshot collapses the formerly dominant cost — one
+        ``GET …/data-points`` per channel (N*M REST calls) — into the
+        single snapshot round trip. The per-device detail call (step 2)
+        stays: ``firmware`` / the rich ``availability`` object are
+        detail-only, not carried by the snapshot's device summaries.
         """
-        snapshot = await self.system.get_snapshot()
+        include = "data_points" if fetch_data_points else None
+        snapshot = await self.system.get_snapshot(include=include)
         self._store.load_snapshot(snapshot=snapshot)
 
         # load_snapshot derives the central id from the interface list.
         central_name = self._store.central_id or None
 
+        # Nested snapshot: {device_address: {channel_number: [DataPointSummary]}}.
+        # Empty when the daemon ignored ``include`` — bootstrap then falls
+        # back to the per-channel data-point fetch (older-daemon path).
+        dp_map = _channel_dp_map(device_channels=snapshot.device_channels) if fetch_data_points else {}
+
         for device_summary in snapshot.devices:
             await self._fetch_device_into_store(
                 address=device_summary.address,
                 fetch_data_points=fetch_data_points,
+                channel_data_points=dp_map.get(device_summary.address),
             )
 
         # Announce the bootstrap completion as one batch event.
@@ -316,18 +349,34 @@ class LoomClient:
         self._bg_tasks.add(task)
         task.add_done_callback(self._bg_tasks.discard)
 
-    async def _fetch_device_into_store(self, *, address: str, fetch_data_points: bool = True) -> None:
+    async def _fetch_device_into_store(
+        self,
+        *,
+        address: str,
+        fetch_data_points: bool = True,
+        channel_data_points: Mapping[int, list[DataPointSummary]] | None = None,
+    ) -> None:
         """
         Load one device's full graph into the store (detail + per-channel DPs).
 
         Shared by :meth:`bootstrap` and the live ``device.created`` reconcile.
+
+        When ``channel_data_points`` is supplied (the nested-snapshot path
+        in :meth:`bootstrap`), each channel's DPs are read from that map
+        instead of a per-channel ``GET …/data-points`` call. When it is
+        ``None`` (the ``device.created`` reconcile has no snapshot to draw
+        on, or an older daemon returned no nested data), the DPs are
+        fetched per channel over REST.
         """
         detail = await self.devices.get_device_detail(address=address)
         self._store.attach_device_detail(detail=detail)
         if not fetch_data_points:
             return
         for channel_summary in detail.channels or ():
-            dps = await self.devices.list_data_points(address=address, channel=channel_summary.number)
+            if channel_data_points is not None:
+                dps = list(channel_data_points.get(channel_summary.number, ()))
+            else:
+                dps = await self.devices.list_data_points(address=address, channel=channel_summary.number)
             self._store.attach_channel_data_points(
                 device_address=address,
                 channel_number=channel_summary.number,
