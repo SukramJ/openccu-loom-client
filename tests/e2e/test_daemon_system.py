@@ -25,12 +25,12 @@ async def test_get_config(client_no_ccu: LoomClient) -> None:
     assert config is not None
 
 
-@pytest.mark.xfail(
-    reason="config_admin.get_schema() fails to validate the daemon's /config/schema "
-    "response ({sections, fields}) against SchemaResponse — wire-contract gap",
-    strict=False,
-)
 async def test_get_config_schema(client_no_ccu: LoomClient) -> None:
+    # Previously xfail on a presumed wire-contract gap. Verified against the
+    # daemon source: the response is ``{sections, fields}`` which validates
+    # against SchemaResponse (the only mismatch is an undocumented per-field
+    # ``default`` in openapi.yaml, which Pydantic ignores). See the
+    # deterministic parse check in test_operations_admin.py.
     schema = await client_no_ccu.config_admin.get_schema()
     assert schema is not None
 
