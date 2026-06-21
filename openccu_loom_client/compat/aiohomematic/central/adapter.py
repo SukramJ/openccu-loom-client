@@ -29,14 +29,17 @@ Scope of this adapter:
   programs and the hub singletons: alarm/service messages, inbox,
   metrics, connectivity, system update, install mode),
   ``get_event_groups`` and ``get_state_paths``. The hub singletons are
-  seeded once at bootstrap via ``fetch_hub_singleton_data`` and then kept
-  live by the daemon's ``hub.*`` push broadcasts (see
-  ``_HubCoordinator.install_push_routing``); ``system_update`` has no push
-  and refreshes at bootstrap only.
+  seeded at bootstrap via ``fetch_hub_singleton_data`` (one aggregate
+  ``GET /hub/data-points`` call) and kept live by the daemon's ``hub.*``
+  push broadcasts (see ``_HubCoordinator.install_push_routing``); a slow
+  reconcile loop backstops missed pushes and refreshes ``system_update``,
+  which the daemon does not broadcast.
 """
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 from datetime import UTC, datetime
 import logging
 from typing import TYPE_CHECKING, Any, Final
@@ -106,6 +109,12 @@ if TYPE_CHECKING:
     from openccu_loom_client.model import Device
 
 _LOGGER: Final = logging.getLogger(__name__)
+
+# Slow reconcile cadence. The hub singletons are push-driven (see
+# _HubCoordinator.install_push_routing); this backstops any missed push and
+# refreshes system_update, which the daemon does not broadcast. Deliberately
+# coarse — ~70x slower than the retired 30 s poll.
+_HUB_RECONCILE_INTERVAL: Final = 300
 
 # Channel types owning a device's weekly program end in this suffix.
 _WEEK_PROFILE_CHANNEL_SUFFIX: Final = "WEEK_PROFILE"
@@ -1067,6 +1076,7 @@ class LoomCentralAdapter:
         # ``device.config_provider.config.locale`` (schedule names).
         client.store.set_locale(locale=locale)
         self._refresh_group: Any = None
+        self._hub_reconcile_task: asyncio.Task[None] | None = None
         # HA entities subscribe on aiohomematic's *own* event bus and match
         # events by ``type(event)``/``.key``. The adapter therefore exposes a
         # real aiohomematic EventBus (not the loom wire bus) as ``event_bus``
@@ -1180,17 +1190,29 @@ class LoomCentralAdapter:
             event_group_resolver=self.query_facade.find_event_group,
         )
         # Route the daemon's hub-singleton push broadcasts (alarm/service/inbox
-        # counts, metrics, connectivity) straight onto the singletons — this
-        # replaces the old 30 s poll loop. The cold-start fetch above seeded the
-        # values once; the pushes keep them live. (``system_update`` has no push
-        # and now refreshes at bootstrap only — see todo.md G6.)
+        # counts, metrics, connectivity, install-mode) straight onto the
+        # singletons — this replaces the old 30 s poll loop. The cold-start fetch
+        # above seeded the values once; the pushes keep them live.
         self.hub_coordinator.install_push_routing(group=self._refresh_group)
         # Announce every data point (generic + custom) in one batch *after*
         # the custom DPs are attached, so HA's platforms spawn entities for
         # them too. Published on the real aiohomematic bus as the real
         # DataPointsCreatedEvent HA subscribes to.
         await self._emit_data_points_created()
+        # Slow reconcile backstop: re-seed the singletons from the aggregate so
+        # a missed push can't drift, and so system_update (which the daemon does
+        # not broadcast) still refreshes.
+        self._hub_reconcile_task = asyncio.create_task(self._hub_reconcile_loop(), name="loom-hub-reconcile")
         self._state = CentralState.Running
+
+    async def _hub_reconcile_loop(self) -> None:
+        """Re-seed the hub singletons from the aggregate every reconcile interval."""
+        while True:
+            await asyncio.sleep(_HUB_RECONCILE_INTERVAL)
+            try:
+                await self.hub_coordinator.fetch_hub_singleton_data(scheduled=True)
+            except Exception:  # noqa: BLE001 — keep the reconcile loop alive
+                _LOGGER.debug("hub singleton reconcile failed", exc_info=True)
 
     async def _emit_data_points_created(self) -> None:
         """Publish a real ``DataPointsCreatedEvent`` grouped by aiohomematic category."""
@@ -1397,7 +1419,12 @@ class LoomCentralAdapter:
                     )
 
     async def stop(self) -> None:
-        """Cancel the refresh bridge, close the client, and stop."""
+        """Cancel the reconcile loop + refresh bridge, close the client, and stop."""
+        if self._hub_reconcile_task is not None:
+            self._hub_reconcile_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._hub_reconcile_task
+            self._hub_reconcile_task = None
         if self._refresh_group is not None:
             self._refresh_group.cancel()
             self._refresh_group = None
