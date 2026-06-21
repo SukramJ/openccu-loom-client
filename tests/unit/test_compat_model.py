@@ -26,7 +26,14 @@ from aiohomematic.const import (
     ParamsetKey,
 )
 from openccu_loom_types.enums import DataPointType
-from openccu_loom_types.rest import CustomDPSummary, DataPointSummary, HubDataPoints, Kind1 as Kind, Snapshot
+from openccu_loom_types.rest import (
+    CustomDPSummary,
+    DataPointSummary,
+    DeviceDetail,
+    HubDataPoints,
+    Kind1 as Kind,
+    Snapshot,
+)
 from openccu_loom_types.ws import (
     CentralStateChangedPayload,
     CustomDataPointStateChangedPayload,
@@ -349,6 +356,66 @@ class TestGenericSetOnTime:
         assert isinstance(dp, DpSwitch)
         await dp.set_on_time(on_time=5)
         assert transport.calls == []  # no write attempted
+
+
+class TestProtocolSurfaceRooms:
+    """The generic twin surfaces the channel's daemon-supplied room."""
+
+    def _store_with_room(self, *, room: str | None) -> LoomStore:
+        store = LoomStore(transport=_FakeTransport())  # type: ignore[arg-type]
+        store.set_data_point_factory(factory=make_generic_data_point)
+        channel: dict[str, Any] = {
+            "address": "VCU1:1",
+            "number": 1,
+            "paramset_key": "VALUES",
+            "data_points_count": 1,
+        }
+        if room is not None:
+            channel["room"] = room
+        store.attach_device_detail(
+            detail=DeviceDetail.model_validate(
+                {
+                    "address": "VCU1",
+                    "interface": "home:HmIP-RF",
+                    "interface_id": "home:HmIP-RF",
+                    "model": "HmIP-PSM",
+                    "name": "Lamp",
+                    "available": True,
+                    "channels_count": 1,
+                    "channels": [channel],
+                }
+            )
+        )
+        store.attach_channel_data_points(
+            device_address="VCU1",
+            channel_number=1,
+            data_points=[
+                DataPointSummary.model_validate(
+                    {
+                        "parameter": "STATE",
+                        "type": "BOOL",
+                        "value": False,
+                        "observed": True,
+                        "operations": {"read": True, "write": True, "event": True},
+                    }
+                )
+            ],
+        )
+        return store
+
+    def test_room_and_rooms_populate_from_channel(self) -> None:
+        store = self._store_with_room(room="Wohnzimmer")
+        dp = store.get_data_point(address="VCU1", channel=1, parameter="STATE")
+        assert isinstance(dp, DpSwitch)
+        assert dp.room == "Wohnzimmer"
+        assert dp.rooms == {"Wohnzimmer"}
+
+    def test_room_none_when_channel_has_no_room(self) -> None:
+        store = self._store_with_room(room=None)
+        dp = store.get_data_point(address="VCU1", channel=1, parameter="STATE")
+        assert isinstance(dp, DpSwitch)
+        assert dp.room is None
+        assert dp.rooms == set()
 
 
 class _FakeHubOps:

@@ -135,7 +135,7 @@ class _CommonProtocolSurface:
     def service_methods(self) -> dict[str, Any]:
         return {}
 
-    # ---- presentation (daemon does not ship rooms/translations yet) ----
+    # ---- presentation ----
 
     @property
     def additional_information(self) -> dict[str, Any]:
@@ -143,11 +143,15 @@ class _CommonProtocolSurface:
 
     @property
     def room(self) -> str | None:
+        # Default for kinds with no channel (hub sysvars / programs). The
+        # generic + custom surfaces override this to resolve the channel's
+        # daemon-supplied room.
         return None
 
     @property
     def rooms(self) -> set[str]:
-        return set()
+        room = self.room
+        return {room} if room else set()
 
     @property
     def translation_key(self) -> str | None:
@@ -183,7 +187,18 @@ class _GenericProtocolSurface(_CommonProtocolSurface):
         return None
 
     @property
+    def room(self) -> str | None:
+        """Resolve the channel's daemon-supplied room (``None`` if unknown)."""
+        device = getattr(self, "device", None)
+        if device is None:
+            return None
+        channel = device.get_channel(number=self.channel_number)  # type: ignore[attr-defined]
+        return channel.room if channel is not None else None
+
+    @property
     def function(self) -> str | None:
+        # Channel-level Gewerk is not on the wire yet (daemon serialises
+        # functions only at device level); stays None until it ships.
         return None
 
     @property
@@ -384,7 +399,14 @@ class _CustomProtocolSurface(_CommonProtocolSurface):
         )
 
     @property
+    def room(self) -> str | None:
+        """Resolve the primary channel's daemon-supplied room (``None`` if unknown)."""
+        channel = self.channel
+        return channel.room if channel is not None else None
+
+    @property
     def function(self) -> str | None:
+        # Channel-level Gewerk is not on the wire yet (device-level only).
         return None
 
     @property
