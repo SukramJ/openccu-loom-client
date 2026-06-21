@@ -29,13 +29,14 @@ Scope of this adapter:
   programs and the hub singletons: alarm/service messages, inbox,
   metrics, connectivity, system update, install mode),
   ``get_event_groups`` and ``get_state_paths``. The hub singletons are
-  polled every 30 s via ``fetch_hub_singleton_data``.
+  seeded once at bootstrap via ``fetch_hub_singleton_data`` and then kept
+  live by the daemon's ``hub.*`` push broadcasts (see
+  ``_HubCoordinator.install_push_routing``); ``system_update`` has no push
+  and refreshes at bootstrap only.
 """
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
 from datetime import UTC, datetime
 import logging
 from typing import TYPE_CHECKING, Any, Final
@@ -88,20 +89,22 @@ from openccu_loom_client.compat.aiohomematic.model.hub.singletons import (
 )
 from openccu_loom_client.compat.aiohomematic.model.update import make_update_data_point
 from openccu_loom_client.compat.aiohomematic.model.week_profile import ScheduleChannelSwitch, WeekProfileDp
+from openccu_loom_client.events import (
+    HubAlarmMessageCountChangedEvent,
+    HubConnectivityChangedEvent,
+    HubInboxChangedEvent,
+    HubMetricsChangedEvent,
+    HubServiceMessageCountChangedEvent,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Awaitable, Callable, Iterable
 
     from openccu_loom_client.client import LoomClient
-    from openccu_loom_client.events import EventBus
+    from openccu_loom_client.events import EventBus, SubscriptionGroup
     from openccu_loom_client.model import Device
 
 _LOGGER: Final = logging.getLogger(__name__)
-
-# Cadence of the hub-singleton poll (messages, inbox, metrics, system
-# update, install mode, connectivity) — matches aiohomematic's hub
-# data-fetch interval.
-_HUB_REFRESH_INTERVAL: Final = 30
 
 # Channel types owning a device's weekly program end in this suffix.
 _WEEK_PROFILE_CHANNEL_SUFFIX: Final = "WEEK_PROFILE"
@@ -571,6 +574,104 @@ class _HubCoordinator:
                 changed.append(entry.sensor)
         return changed
 
+    # ---- live push routing (G6) ----
+
+    def install_push_routing(self, *, group: SubscriptionGroup) -> None:
+        """
+        Subscribe the hub-singleton push handlers on the loom event bus.
+
+        Routes the daemon's ``hub.*`` / ``connectivity.changed`` broadcasts
+        straight onto the singleton ``update_*`` setters so the entities stay
+        live without polling. Count topics carry only a count; the message
+        lists are refetched lazily, and only when the count actually moved.
+        Subscribed on the supplied group so a single ``group.cancel()`` tears
+        them down. ``system_update`` has no push and is refreshed at bootstrap
+        only.
+        """
+        group.subscribe(event_type=HubInboxChangedEvent, handler=self._on_inbox_push)
+        group.subscribe(event_type=HubMetricsChangedEvent, handler=self._on_metrics_push)
+        group.subscribe(event_type=HubConnectivityChangedEvent, handler=self._on_connectivity_push)
+        group.subscribe(event_type=HubAlarmMessageCountChangedEvent, handler=self._on_alarm_push)
+        group.subscribe(event_type=HubServiceMessageCountChangedEvent, handler=self._on_service_push)
+
+    async def _publish_changed(self, *, dp: Any) -> None:
+        """Emit the keyed HA state-changed event for a mutated singleton."""
+        await self._ha_bus.publish(
+            event=AioDataPointStateChangedEvent(
+                timestamp=datetime.now(tz=UTC), unique_id=dp.unique_id, new_value=dp.value
+            )
+        )
+
+    def _metric_sensor_for(self, *, metric: str) -> Any | None:
+        """Map a metric legacy-name (either spelling) to its sensor."""
+        if (metrics := self._metrics_dps) is None:
+            return None
+        return {
+            "system_health": metrics.system_health,
+            "connection_latency": metrics.connection_latency,
+            "connection_latency_ms": metrics.connection_latency,
+            "last_event_age": metrics.last_event_age,
+            "last_event_age_seconds": metrics.last_event_age,
+        }.get(metric)
+
+    async def _on_inbox_push(self, event: HubInboxChangedEvent, /) -> None:
+        """Apply an ``hub.inbox_changed`` count push."""
+        if not self._matches_central(central=event.payload.central) or (dp := self._inbox_dp) is None:
+            return
+        if dp.update_value(value=event.payload.count):
+            await self._publish_changed(dp=dp)
+
+    async def _on_metrics_push(self, event: HubMetricsChangedEvent, /) -> None:
+        """Apply an ``hub.metrics_changed`` push to the matching metric sensor."""
+        if not self._matches_central(central=event.payload.central):
+            return
+        dp = self._metric_sensor_for(metric=event.payload.metric)
+        if dp is not None and dp.update_value(value=event.payload.value):
+            await self._publish_changed(dp=dp)
+
+    async def _on_connectivity_push(self, event: HubConnectivityChangedEvent, /) -> None:
+        """Apply a ``connectivity.changed`` push to the per-interface sensor."""
+        if not self._matches_central(central=event.payload.central):
+            return
+        entry = self._connectivity_dps.get(event.payload.interface_id)
+        if entry is not None and entry.sensor.update_value(value=bool(event.payload.reachable)):
+            await self._publish_changed(dp=entry.sensor)
+
+    async def _on_alarm_push(self, event: HubAlarmMessageCountChangedEvent, /) -> None:
+        """Apply an ``hub.alarm_message`` count push (refetch the list on a count delta)."""
+        await self._refresh_messages_on_count(
+            dp=self._alarm_messages_dp,
+            count=event.payload.count,
+            central=event.payload.central,
+            fetch=self._client.hub.list_alarm_messages,
+        )
+
+    async def _on_service_push(self, event: HubServiceMessageCountChangedEvent, /) -> None:
+        """Apply an ``hub.service_message`` count push (refetch the list on a count delta)."""
+        await self._refresh_messages_on_count(
+            dp=self._service_messages_dp,
+            count=event.payload.count,
+            central=event.payload.central,
+            fetch=self._client.hub.list_service_messages,
+        )
+
+    async def _refresh_messages_on_count(
+        self, *, dp: Any, count: int, central: str | None, fetch: Callable[[], Awaitable[list[Any]]]
+    ) -> None:
+        """Refetch a message list and re-render only when the pushed count differs."""
+        if dp is None or not self._matches_central(central=central):
+            return
+        if count == dp.value:  # count unchanged → skip the heavy list refetch
+            return
+        try:
+            messages = await fetch()
+        except Exception:  # noqa: BLE001 — endpoint optional, keep last value
+            _LOGGER.debug("message-list refetch on count push failed", exc_info=True)
+            return
+        local = [m for m in messages if self._matches_central(central=getattr(m, "central", None))]
+        if dp.update_messages(messages=local):
+            await self._publish_changed(dp=dp)
+
 
 class _QueryFacade:
     """``central.query_facade`` surface."""
@@ -1007,7 +1108,6 @@ class LoomCentralAdapter:
         # (device_address, channel_no) — consumed by the combined-DP
         # bootstrap to name the replacement number like the reference.
         self._suppressed_calc_labels: Final[dict[tuple[str, int], str]] = {}
-        self._hub_refresh_task: asyncio.Task[None] | None = None
         self.device_coordinator: Final = _DeviceCoordinator(client=client)
         self.hub_coordinator: Final = _HubCoordinator(
             client=client,
@@ -1106,26 +1206,18 @@ class LoomCentralAdapter:
             central_name=self._name,
             event_group_resolver=self.query_facade.find_event_group,
         )
+        # Route the daemon's hub-singleton push broadcasts (alarm/service/inbox
+        # counts, metrics, connectivity) straight onto the singletons — this
+        # replaces the old 30 s poll loop. The cold-start fetch above seeded the
+        # values once; the pushes keep them live. (``system_update`` has no push
+        # and now refreshes at bootstrap only — see todo.md G6.)
+        self.hub_coordinator.install_push_routing(group=self._refresh_group)
         # Announce every data point (generic + custom) in one batch *after*
         # the custom DPs are attached, so HA's platforms spawn entities for
         # them too. Published on the real aiohomematic bus as the real
         # DataPointsCreatedEvent HA subscribes to.
         await self._emit_data_points_created()
-        # Keep the hub singletons fresh; the daemon has no push channel
-        # for messages/metrics/install mode yet, so they are polled.
-        self._hub_refresh_task = asyncio.create_task(
-            self._hub_singleton_refresh_loop(), name="loom-hub-singleton-refresh"
-        )
         self._state = CentralState.Running
-
-    async def _hub_singleton_refresh_loop(self) -> None:
-        """Re-poll the hub singleton endpoints every refresh interval."""
-        while True:
-            await asyncio.sleep(_HUB_REFRESH_INTERVAL)
-            try:
-                await self.hub_coordinator.fetch_hub_singleton_data(scheduled=True)
-            except Exception:  # noqa: BLE001 — keep the refresh loop alive
-                _LOGGER.debug("hub singleton refresh failed", exc_info=True)
 
     async def _emit_data_points_created(self) -> None:
         """Publish a real ``DataPointsCreatedEvent`` grouped by aiohomematic category."""
@@ -1332,12 +1424,7 @@ class LoomCentralAdapter:
                     )
 
     async def stop(self) -> None:
-        """Cancel the refresh bridge and hub poll, close the client, and stop."""
-        if self._hub_refresh_task is not None:
-            self._hub_refresh_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._hub_refresh_task
-            self._hub_refresh_task = None
+        """Cancel the refresh bridge, close the client, and stop."""
         if self._refresh_group is not None:
             self._refresh_group.cancel()
             self._refresh_group = None

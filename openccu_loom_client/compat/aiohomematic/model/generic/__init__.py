@@ -214,17 +214,25 @@ class DpSwitch(_GenericEntitySurface, DataPoint):
 
     async def set_on_time(self, *, on_time: float) -> None:
         """
-        Timed-on for a generic switch parameter.
+        Timed-on for a generic switch: write the sibling ``ON_TIME`` parameter.
 
-        aiohomematic writes a sibling ``ON_TIME`` parameter; the loom
-        client addresses one parameter per data point, so this is a
-        no-op placeholder until a paramset-level write is wired.
+        aiohomematic writes a sibling ``ON_TIME`` parameter; the daemon serves
+        a generic value write for every parameter, so this routes to ``ON_TIME``
+        on the same channel. No-op (with a debug log) when the channel exposes
+        no ``ON_TIME`` parameter.
         """
-        _LOGGER.debug(
-            "set_on_time(%s) is not yet wired for the loom generic switch %s",
-            on_time,
-            self.parameter,
-        )
+        store: LoomStore = self._store
+        address: str = self.device_address
+        channel: int = self.channel_number
+        if store.get_data_point(address=address, channel=channel, parameter="ON_TIME") is None:
+            _LOGGER.debug(
+                "set_on_time(%s): channel %s:%s exposes no ON_TIME parameter — skipping",
+                on_time,
+                address,
+                channel,
+            )
+            return
+        await store.set_value(address=address, channel=channel, parameter="ON_TIME", value=on_time)
 
 
 # ENUM value lists that HA reads as a binary sensor, mapped to the option

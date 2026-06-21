@@ -5,6 +5,9 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from typing import Any
+
 from aiohomematic.async_support import Looper
 from aiohomematic.central.events import (
     CentralStateChangedEvent as AioCentralStateChangedEvent,
@@ -31,20 +34,30 @@ from openccu_loom_types.ws import (
     DeviceCreatedPayload,
     DeviceRemovedPayload,
     DeviceTriggerPayload,
+    HubConnectivityChangedPayload,
+    HubCountChangedPayload,
+    HubMetricChangedPayload,
     OptimisticRollbackPayload,
     SysvarChangedPayload,
 )
 
 from openccu_loom_client.compat.aiohomematic.central import CentralConfig
+from openccu_loom_client.compat.aiohomematic.central.adapter import _HubCoordinator
 from openccu_loom_client.compat.aiohomematic.central.refresh import install_refresh_bridge
 from openccu_loom_client.compat.aiohomematic.model.custom import (
     CustomDpCover,
     CustomDpDimmer,
     CustomDpIpBlind,
     CustomDpIpThermostat,
+    CustomDpTextDisplay,
     make_custom_data_point,
 )
-from openccu_loom_client.compat.aiohomematic.model.generic import DpBinarySensor, DpSensor
+from openccu_loom_client.compat.aiohomematic.model.generic import (
+    DpBinarySensor,
+    DpSensor,
+    DpSwitch,
+    make_generic_data_point,
+)
 from openccu_loom_client.events import (
     CentralStateChangedEvent as LoomCentralStateChangedEvent,
     CustomDataPointStateChangedEvent,
@@ -52,6 +65,10 @@ from openccu_loom_client.events import (
     DeviceCreatedEvent,
     DeviceRemovedEvent,
     EventBus,
+    HubAlarmMessageCountChangedEvent,
+    HubConnectivityChangedEvent,
+    HubInboxChangedEvent,
+    HubMetricsChangedEvent,
     SysvarChangedEvent,
 )
 from openccu_loom_client.events.types import (
@@ -229,6 +246,264 @@ class TestCustomDeepParity:
         paths = [c[1] for c in transport.calls]
         assert any(p.endswith("/set_position") for p in paths)
         assert any(p.endswith("/set_tilt") for p in paths)
+
+    # ---- G1: light HS colour read-back ----
+
+    def test_light_hs_color_reads_nested_color_object(self) -> None:
+        dp, _ = _cdp_instance(
+            kind="light_color",
+            category="light",
+            capabilities={"color": True, "brightness": True},
+            state={"state": "ON", "color_mode": "hs", "color": {"h": 210, "s": 0.8}},
+        )
+        assert isinstance(dp, CustomDpDimmer)
+        # hue passthrough (degrees); daemon saturation [0,1] → HA [0,100].
+        assert dp.hs_color == (210.0, 80.0)
+
+    def test_light_hs_color_falls_back_to_flat_keys(self) -> None:
+        dp, _ = _cdp_instance(
+            kind="light_color",
+            category="light",
+            capabilities={"color": True},
+            state={"state": "ON", "hue": 120, "saturation": 50},
+        )
+        # Legacy flat keys (pre-0.8.0 daemon) pass through unscaled.
+        assert dp.hs_color == (120.0, 50.0)
+
+    def test_light_hs_color_none_without_colour(self) -> None:
+        dp, _ = _cdp_instance(kind="light", category="light", state={"state": "ON"})
+        assert dp.hs_color is None
+
+    # ---- G2: text-display option lists ----
+
+    def test_text_display_option_lists_read_from_state(self) -> None:
+        dp, _ = _cdp_instance(
+            kind="text_display",
+            category="text_display",
+            supported=("write", "clear"),
+            state={
+                "available_icons": ["icon1", "icon2"],
+                "available_background_colors": ["WHITE", "BLACK"],
+                "available_text_colors": ["RED"],
+                "available_alignments": ["LEFT", "CENTER"],
+            },
+        )
+        assert isinstance(dp, CustomDpTextDisplay)
+        assert dp.available_icons == ("icon1", "icon2")
+        assert dp.available_background_colors == ("WHITE", "BLACK")
+        assert dp.available_text_colors == ("RED",)
+        assert dp.available_alignments == ("LEFT", "CENTER")
+        assert dp.available_sounds == ()  # omitted from state → empty
+        assert dp.has_icons is True
+        assert dp.has_sounds is False
+
+
+class TestGenericSetOnTime:
+    """G7: generic switch set_on_time writes the sibling ON_TIME parameter."""
+
+    def _switch_store(self, *, with_on_time: bool) -> tuple[LoomStore, _FakeTransport]:
+        transport = _FakeTransport()
+        store = LoomStore(transport=transport)  # type: ignore[arg-type]
+        store.set_data_point_factory(factory=make_generic_data_point)
+        dps = [
+            DataPointSummary.model_validate(
+                {
+                    "parameter": "STATE",
+                    "type": "BOOL",
+                    "value": False,
+                    "observed": True,
+                    "operations": {"read": True, "write": True, "event": True},
+                }
+            )
+        ]
+        if with_on_time:
+            dps.append(
+                DataPointSummary.model_validate(
+                    {
+                        "parameter": "ON_TIME",
+                        "type": "FLOAT",
+                        "value": 0.0,
+                        "observed": True,
+                        "operations": {"read": True, "write": True, "event": True},
+                    }
+                )
+            )
+        store.attach_channel_data_points(device_address="VCU1", channel_number=1, data_points=dps)
+        return store, transport
+
+    async def test_set_on_time_writes_on_time_value(self) -> None:
+        store, transport = self._switch_store(with_on_time=True)
+        dp = store.get_data_point(address="VCU1", channel=1, parameter="STATE")
+        assert isinstance(dp, DpSwitch)
+        await dp.set_on_time(on_time=5)
+        method, path, body = transport.calls[-1]
+        assert method == "PUT"
+        assert path.endswith("/channels/1/data-points/ON_TIME/value")
+        assert body == {"value": 5}
+
+    async def test_set_on_time_noop_when_channel_lacks_on_time(self) -> None:
+        store, transport = self._switch_store(with_on_time=False)
+        dp = store.get_data_point(address="VCU1", channel=1, parameter="STATE")
+        assert isinstance(dp, DpSwitch)
+        await dp.set_on_time(on_time=5)
+        assert transport.calls == []  # no write attempted
+
+
+class _FakeHubOps:
+    """Stand-in for ``client.hub`` recording how often the message lists are fetched."""
+
+    def __init__(self, *, alarms: list[Any] | None = None, services: list[Any] | None = None) -> None:
+        self._alarms = list(alarms or ())
+        self._services = list(services or ())
+        self.alarm_calls = 0
+        self.service_calls = 0
+
+    async def list_alarm_messages(self) -> list[Any]:
+        self.alarm_calls += 1
+        return list(self._alarms)
+
+    async def list_service_messages(self) -> list[Any]:
+        self.service_calls += 1
+        return list(self._services)
+
+
+class _FakeSystemOps:
+    """Stand-in for ``client.system`` returning a fixed interface list."""
+
+    def __init__(self, *, interfaces: list[Any] | None = None) -> None:
+        self._interfaces = list(interfaces or ())
+
+    async def list_interfaces(self) -> list[Any]:
+        return list(self._interfaces)
+
+
+class _FakeHubClient:
+    def __init__(self, *, store: LoomStore, hub: _FakeHubOps, system: _FakeSystemOps) -> None:
+        self.store = store
+        self.hub = hub
+        self.system = system
+
+
+def _iface(*, ident: str = "HmIP-RF", central_id: str = "home", connected: bool = True) -> SimpleNamespace:
+    return SimpleNamespace(id=ident, interface=ident, central_id=central_id, connected=connected)
+
+
+class TestHubPushRouting:
+    """G6: hub push broadcasts route onto the singletons and emit HA state-changed."""
+
+    def _coordinator(
+        self, *, hub: _FakeHubOps | None = None, interfaces: list[Any] | None = None
+    ) -> tuple[_HubCoordinator, EventBus, Any, Looper, list[str]]:
+        store = LoomStore()
+        store.set_serial(serial="ABC1234567")
+        store.set_central_name(central_name="home")
+        looper = Looper()
+        ha_bus = AioEventBus(task_scheduler=looper)
+        seen: list[str] = []
+        ha_bus.create_subscription_group(name="entity").subscribe(
+            event_type=DataPointStateChangedEvent,
+            event_key=None,
+            handler=lambda *, event: seen.append(event.unique_id),
+        )
+        coord = _HubCoordinator(
+            client=_FakeHubClient(store=store, hub=hub or _FakeHubOps(), system=_FakeSystemOps(interfaces=interfaces)),
+            ha_bus=ha_bus,
+        )
+        loom_bus = EventBus()
+        group = loom_bus.create_subscription_group(name="push")
+        return coord, loom_bus, group, looper, seen
+
+    async def test_inbox_push_updates_singleton_and_emits(self) -> None:
+        coord, loom_bus, group, looper, seen = self._coordinator()
+        await coord._ensure_singletons()
+        coord.install_push_routing(group=group)
+        await loom_bus.publish(
+            event=HubInboxChangedEvent(
+                seq=1,
+                kind=Kind.change,
+                ts="2026-06-21T08:00:00Z",
+                payload=HubCountChangedPayload(central="home", count=3),
+            )
+        )
+        await looper.block_till_done()
+        assert coord._inbox_dp.value == 3
+        assert seen == [coord._inbox_dp.unique_id]
+
+    async def test_metrics_push_routes_by_legacy_name(self) -> None:
+        coord, loom_bus, group, looper, seen = self._coordinator()
+        await coord._ensure_singletons()
+        coord.install_push_routing(group=group)
+        await loom_bus.publish(
+            event=HubMetricsChangedEvent(
+                seq=1,
+                kind=Kind.change,
+                ts="2026-06-21T08:00:00Z",
+                payload=HubMetricChangedPayload(central="home", metric="connection_latency_ms", value=12, unit="ms"),
+            )
+        )
+        await looper.block_till_done()
+        assert coord._metrics_dps.connection_latency.value == 12
+        assert seen == [coord._metrics_dps.connection_latency.unique_id]
+
+    async def test_connectivity_push_updates_interface_sensor(self) -> None:
+        coord, loom_bus, group, looper, seen = self._coordinator(interfaces=[_iface()])
+        await coord._ensure_singletons()
+        coord.install_push_routing(group=group)
+        await loom_bus.publish(
+            event=HubConnectivityChangedEvent(
+                seq=1,
+                kind=Kind.change,
+                ts="2026-06-21T08:00:00Z",
+                payload=HubConnectivityChangedPayload(
+                    central="home", interface_id="HmIP-RF", reachable=False, latency_ms=None
+                ),
+            )
+        )
+        await looper.block_till_done()
+        entry = coord._connectivity_dps["HmIP-RF"]
+        assert entry.sensor.value is False
+        assert seen == [entry.sensor.unique_id]
+
+    async def test_alarm_count_push_refetches_then_skips_when_unchanged(self) -> None:
+        hub = _FakeHubOps(alarms=[SimpleNamespace(central="home", name="Low battery", device_name="Sensor")])
+        coord, loom_bus, group, looper, seen = self._coordinator(hub=hub)
+        await coord._ensure_singletons()
+        coord.install_push_routing(group=group)
+
+        def _push() -> HubAlarmMessageCountChangedEvent:
+            return HubAlarmMessageCountChangedEvent(
+                seq=1,
+                kind=Kind.change,
+                ts="2026-06-21T08:00:00Z",
+                payload=HubCountChangedPayload(central="home", count=1),
+            )
+
+        await loom_bus.publish(event=_push())
+        await looper.block_till_done()
+        assert hub.alarm_calls == 1  # None → 1 delta: list refetched
+        assert coord._alarm_messages_dp.value == 1
+        assert seen == [coord._alarm_messages_dp.unique_id]
+
+        await loom_bus.publish(event=_push())
+        await looper.block_till_done()
+        assert hub.alarm_calls == 1  # 1 == 1: no refetch, no new emit
+        assert seen == [coord._alarm_messages_dp.unique_id]
+
+    async def test_push_for_other_central_is_ignored(self) -> None:
+        coord, loom_bus, group, looper, seen = self._coordinator()
+        await coord._ensure_singletons()
+        coord.install_push_routing(group=group)
+        await loom_bus.publish(
+            event=HubInboxChangedEvent(
+                seq=1,
+                kind=Kind.change,
+                ts="2026-06-21T08:00:00Z",
+                payload=HubCountChangedPayload(central="other-ccu", count=9),
+            )
+        )
+        await looper.block_till_done()
+        assert coord._inbox_dp.value is None  # foreign central → not applied
+        assert seen == []
 
 
 class TestRefreshBridge:
