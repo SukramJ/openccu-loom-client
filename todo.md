@@ -179,35 +179,33 @@ Cross-repo (homematicip_local), after the client items:
 > **client-side gaps** — the daemon already ships the data/endpoints; the
 > client doesn't consume them. Corrected below.
 
-- [ ] **N×M bootstrap — adopt the nested/streamed snapshot (CLIENT, high
-      impact).** _Reclassified from "deferred daemon ask" → client work._ The
-      daemon's `GET /snapshot` already supports `?include=channels,data_points`
-      (full devices→channels→DPs nested in one JSON call) **and** NDJSON
-      streaming via `Accept: application/x-ndjson`
-      (`internal/north/rest/handlers/snapshot.go:24-56,241`). The client still
-      calls `GET /snapshot` parameterless (`operations/system.py:63`) and fans
-      out N detail + N×M data-point calls in `client.py:bootstrap`. Wire the
-      `include` param (and ideally the NDJSON path) through `get_snapshot` +
-      `load_snapshot` to collapse bootstrap to one round trip. _Also fix the
-      stale "asks.md H1 daemon ask" comments at `client.py:214` and
-      `operations/system.py:59` — that ask is already delivered._
-- [ ] **Value accuracy (Strategy B) — consume the presentation fields already
-      on the wire (CLIENT).** _Reclassified: mostly available, not daemon-
-      blocked._ The daemon serialises device `rooms[]`/`functions[]` (+ dedicated
-      `/rooms`, `/functions` endpoints + in the snapshot envelope),
-      `ChannelSummary.room` (singular), and per-DP `translated_name` /
-      `parameter_label` / `label_omitted` / `value_list`
-      (`handlers/devices.go` `DataPointSummary`). `_protocol_surface.py` still
-      returns `None`/`set()` for `room`/`rooms` and ignores `translated_name`
-      — wire these through the twins. **Genuinely still missing daemon-side**
-      (small): per-channel `functions` (internal `Channel.Functions` exists but
-      isn't serialised) and `value_translations` (translated enum display
-      strings — only raw `value_list` ships).
-- [ ] `config_admin.get_schema()` xfail — **likely stale, verify & remove
-      (CLIENT).** The daemon returns top-level `{sections, fields}`
-      (`handlers/admin_config.go:120`) which **does** validate against the
-      client's `SchemaResponse` (confirmed: the model is `{sections, fields}`
-      and Pydantic ignores the daemon's extra `SchemaField.default` — no
-      `extra='forbid'`). The only real mismatch is a daemon-repo **OpenAPI doc
-      omission** (`SchemaField.default` undocumented in `assets/openapi.yaml`),
-      not a client blocker. Drop the xfail if it now xpasses.
+- [x] **N×M bootstrap — adopt the nested snapshot (CLIENT, high impact).**
+      DONE (branch `feat/consume-daemon-wire-fields`). `get_snapshot` takes an
+      `include` param; `bootstrap()` requests `?include=data_points` and
+      attaches each channel's DPs from `Snapshot.device_channels` instead of one
+      `GET …/data-points` per channel — collapsing the formerly dominant N×M
+      fan-out into the single snapshot round trip. Per-device detail calls stay
+      (firmware / rich `availability` are detail-only, absent from the snapshot
+      summaries); falls back to the per-channel fetch when the daemon returns no
+      `device_channels` (older daemon) and on the `device.created` reconcile
+      path. The stale "asks.md H1 daemon ask" comments are corrected. Test:
+      `test_client_bootstrap.py::TestNestedSnapshotBootstrap` (asserts no
+      `/data-points` call and `?include=data_points`).
+- [x] **Value accuracy (Strategy B) — consume the room already on the wire
+      (CLIENT).** DONE (same branch). `_protocol_surface.py` `room` now resolves
+      the DP's channel room (generic: `device.get_channel(channel_number)`;
+      custom: the primary channel) and `rooms` derives `{room}` from it; hub
+      sysvar/program twins keep the no-channel `None` default. (`translated_name`
+      was already consumed via `generic_translated_name`.) Test:
+      `test_compat_model.py::TestProtocolSurfaceRooms`.
+      **Still daemon-blocked** (small, tracked as D2/D3 in `../openccu-loom/todo.md`):
+      per-channel `functions` (device-level only on the wire) and
+      `value_translations` (only raw `value_list` ships).
+- [x] `config_admin.get_schema()` xfail — **removed, verified (CLIENT).** DONE
+      (same branch). The daemon's `{sections, fields}` validates against
+      `SchemaResponse` (Pydantic ignores the undocumented per-field `default`).
+      Replaced the e2e xfail with a deterministic parse test mirroring the
+      daemon payload (incl. `default`):
+      `test_operations_admin.py::TestConfigOperations::test_get_schema_parses_daemon_shape`.
+      The remaining `SchemaField.default` OpenAPI doc omission is a daemon-repo
+      fix (D4 in `../openccu-loom/todo.md`).
