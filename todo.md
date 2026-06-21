@@ -33,20 +33,23 @@ deliberately, keep the compat shim). Rationale: `docs/architecture-review.md`
       standard library-range / CI-lockfile split). aiohttp/pydantic floors in
       pyproject were also raised to match the CI pins. Bump the cap and the
       drift-guard snapshot together when adopting a new aiohomematic series.
-- [ ] **Bundle the aiohomematic imports in one module.** The reused symbols
-      (`generate_unique_id`, `async_support.Looper`, `central.events.*`,
-      `const.*`, `interfaces.model.*`) span 8 files. Funnel them through one
-      re-export module so the used surface is explicit and a breaking upstream
-      change has a single blast radius. _Lower urgency now that the drift-guard
-      above catches upstream protocol changes; this is an organizational
-      refactor, not a correctness fix._
-- [ ] **Roll back imitation in favour of selective reuse.** Where an
-      aiohomematic class/function works _without_ a live `CentralUnit`, reuse it
-      instead of mirroring — shrinks the ~50 % stub properties in
+- [ ] **Bundle the aiohomematic imports in one module.** — DEFERRED (2026-06-21,
+      reasoned). The reused symbols (`generate_unique_id`, `async_support.Looper`,
+      `central.events.*`, `const.*`, `interfaces.*`) span ~9 files. _Why deferred:_
+      the **critical** surface — the bit-identical routing-key contract — is
+      already isolated in `canonical.py`; the remainder is ordinary library use
+      now guarded by the protocol drift-guard test + the `aiohomematic<2026.7`
+      cap. A re-export module would add indirection at every use site (provenance
+      lost) for a small blast-radius gain on a rarely-moving, version-capped
+      dependency. Revisit if the aiohomematic-internals surface starts churning.
+- [ ] **Roll back imitation in favour of selective reuse.** — DEFERRED (large).
+      Where an aiohomematic class/function works _without_ a live `CentralUnit`,
+      reuse it instead of mirroring — shrinks the ~50 % stub properties in
       `_protocol_surface.py` and the 60 `type: ignore[attr-defined]` in the
-      compat model layer (`docs/architecture-review.md` §2.2). Incremental,
-      class by class, guarded by the drift-guard test above. _Large multi-step
-      rewrite; deliberately left as future work._
+      compat model layer (`docs/architecture-review.md` §2.2). _Why deferred:_ a
+      multi-session, class-by-class rewrite of the compat model layer; the
+      drift-guard makes the current imitation safe in the meantime. Do it
+      incrementally when touching each model file for other reasons.
 
 ## P1/P2 — loom wire-gap follow-ups (daemon 0.8.0 / API 1.18.0)
 
@@ -98,46 +101,33 @@ Client-side (this repo) — sequence small → large:
       and now refreshes at bootstrap only. Wire it via G4(a)'s aggregate (which
       carries the `update` flags) on a slow cadence, or add a daemon
       `hub.system_update` broadcast. Tracked below.
-- [ ] **G6-followup — keep `system_update` fresh post-bootstrap.** With the poll
-      loop gone, the firmware-update singleton (`SystemUpdateDp`, refreshed by
-      `_fetch_system_update` → `get_system_update`) only updates at bootstrap.
-      Drive it from G4(a)'s `/hub/data-points` `update` flags on a slow poll, or
-      from a new daemon broadcast. Low urgency (firmware availability changes
-      rarely), but a real regression vs. the old 30 s poll.
-- [ ] **G4(a) — single `GET /hub/data-points`** (OPTIMISATION).
-      Detail: `docs/g4a-hub-data-points-consumption.md`. Collapse
-      `fetch_hub_singleton_data()` (`adapter.py:444-465`) from **7 REST calls**
-      (across 6 `_fetch_*` helpers — `_fetch_messages` makes 2: alarm + service;
-      verified 2026-06-21) to **1** aggregate + conditional follow-ups (→ 3 only
-      on a count change). Sub-steps:
-  - [ ] **Add the op** `SystemOperations.get_hub_data_points()` →
-        `list[HubDataPoints]` (mirror `get_hub_metrics`, `system.py:107`).
-  - [ ] **Fully replace** four `_fetch_*` with scalar fans off the aggregate,
-        then delete the helpers: `_fetch_inbox` (`adapter.py:490`),
-        `_fetch_metrics` (`:502`, match the 3 sensors by `legacy_name`:
-        `system_health`/`connection_latency_ms`/`last_event_age_seconds`),
-        `_fetch_connectivity` (`:557`), `_fetch_install_mode` (`:538`,
-        `remaining_s if enabled else 0`). Add `_select_central(...)` (picks this
-        coordinator's per-central entry, like `get_hub_metrics` needs) +
-        `_apply_{inbox,metrics,connectivity,install_mode}` helpers.
-  - [ ] **Count-delta guard for messages.** Keep `_fetch_messages`
-        (`adapter.py:467`, `list_alarm_messages`/`list_service_messages` feed
-        `update_messages` with the bodies) but call it **only when**
-        `alarm_messages.value` / `service_messages.value` differ from the held
-        count — the aggregate carries counts only. Steady state → zero list
-        fetches.
-  - [ ] **Decide `update` handling.** The aggregate gives only
-        `update_available`/`in_progress`; `update_dp.update_data` wants the
-        firmware strings. Either keep `_fetch_system_update` (`:524`,
-        `get_system_update`) lazily (fetch only when `update_available` flips)
-        or drop it if the entity needs only the flags.
-  - [ ] Multi-CCU: map each per-central aggregate entry to its coordinator.
-        Pairs with **G6** — once pushes land, the aggregate becomes the
-        cold-start snapshot and the poll loop is deleted.
-- [ ] **G5 — enrich `get_event_groups()` from REST** (OPTIMISATION).
-      `adapter.py:663` already builds groups locally (no `NotImplementedError`).
-      Optionally back/enrich it from `GET …/event-groups` so
-      `last_triggered_event` / `available` are authoritative, not derived.
+- [x] **G6-followup — keep `system_update` fresh post-bootstrap.** DONE
+      (2026-06-21). A deliberately coarse reconcile loop
+      (`_HUB_RECONCILE_INTERVAL = 300`, `_hub_reconcile_loop`, ~70x slower than
+      the retired 30 s poll) re-seeds the singletons from the aggregate, so
+      `system_update` (no daemon push) stays fresh and missed pushes are
+      backstopped. Cancelled in `stop()`.
+- [x] **G4(a) — single `GET /hub/data-points`** (OPTIMISATION). DONE
+      (2026-06-21). Detail: `docs/g4a-hub-data-points-consumption.md`.
+      `SystemOperations.get_hub_data_points()` added; `fetch_hub_singleton_data`
+      now seeds every singleton from the one aggregate call (inbox, metrics,
+      connectivity, install-mode via an interface*id→token map), refetches
+      message bodies only on a count delta, and keeps `get_system_update` for the
+      firmware strings. The per-endpoint `_fetch_inbox/_fetch_metrics/
+_fetch_connectivity/_fetch_install_mode` fan-out is deleted. While here, the
+      previously-unconsumed central-wide `InstallModeChangedEvent` push was wired
+      onto the install-mode sensors (it was poll-only before). Shared `\_apply*\*`    helpers back both the aggregate path and the push handlers. Tests:`test_compat_model.py::TestHubAggregateFetch`+`TestHubPushRouting`.
+- [ ] **G5 — enrich `get_event_groups()` from REST** — DEFERRED (2026-06-21,
+      reasoned). `get_event_groups` already builds groups locally (no
+      `NotImplementedError`); `last_triggered_event` is **live** (the refresh
+      bridge calls `record_trigger` on every `device.trigger` push) and
+      `available` tracks the device. _Why deferred:_ backing it with
+      `GET …/event-groups` means a per-trigger-channel fetch at bootstrap — the
+      exact N×M cost the project avoids (P3 below) — for marginal gain (a daemon
+      snapshot that is no fresher than the live trigger feed). Revisit only if
+      event-groups join a nested snapshot. The remaining client-visible part
+      (drop the `event.py` `NotImplementedError` fallback) is cross-repo
+      (homematicip_local, below).
 - [ ] **G3 — sysvar `extended` marker** (VERIFY, no code). Wired end-to-end
       (`compat/aiohomematic/model/hub/__init__.py:225`); confirm on a real CCU
       that an extended variable surfaces as the writable flavour.
