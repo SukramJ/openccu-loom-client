@@ -110,13 +110,13 @@ Client-side (this repo) — sequence small → large:
 - [x] **G4(a) — single `GET /hub/data-points`** (OPTIMISATION). DONE
       (2026-06-21). Detail: `docs/g4a-hub-data-points-consumption.md`.
       `SystemOperations.get_hub_data_points()` added; `fetch_hub_singleton_data`
-      now seeds every singleton from the one aggregate call (inbox, metrics,
-      connectivity, install-mode via an interface*id→token map), refetches
-      message bodies only on a count delta, and keeps `get_system_update` for the
-      firmware strings. The per-endpoint `_fetch_inbox/_fetch_metrics/
-_fetch_connectivity/_fetch_install_mode` fan-out is deleted. While here, the
-      previously-unconsumed central-wide `InstallModeChangedEvent` push was wired
-      onto the install-mode sensors (it was poll-only before). Shared `\_apply*\*`    helpers back both the aggregate path and the push handlers. Tests:`test_compat_model.py::TestHubAggregateFetch`+`TestHubPushRouting`.
+      now seeds every singleton from the single aggregate call (inbox, metrics,
+      connectivity, install-mode), refetching message bodies only on a count
+      delta and keeping `get_system_update` for the firmware strings. The
+      per-endpoint `_fetch_*` fan-out is deleted. While here, the previously
+      unconsumed central-wide `InstallModeChangedEvent` push was wired onto the
+      install-mode sensors (it was poll-only before). Tests live in
+      `test_compat_model.py` (`TestHubAggregateFetch`, `TestHubPushRouting`).
 - [ ] **G5 — enrich `get_event_groups()` from REST** — DEFERRED (2026-06-21,
       reasoned). `get_event_groups` already builds groups locally (no
       `NotImplementedError`); `last_triggered_event` is **live** (the refresh
