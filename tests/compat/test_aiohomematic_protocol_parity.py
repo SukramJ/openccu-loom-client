@@ -175,3 +175,97 @@ def test_compat_dp_satisfies_aiohomematic_protocol(class_name: str, builder: Any
     assert isinstance(instance, protocol), (
         f"{class_name} does not satisfy {protocol.__name__}; missing members: {_missing_members(instance, protocol)}"
     )
+
+
+# --- drift guard: the upstream protocol surface itself ---
+
+# Snapshot of every ``@runtime_checkable`` protocol exported by
+# ``aiohomematic.interfaces.model`` at the pinned aiohomematic version.
+# HA dispatches on these via ``isinstance``. The cases above structurally
+# verify the four the loom twins must satisfy; the remaining protocols
+# describe aiohomematic's own central/device/channel objects, which the
+# loom backend does not hand to the platforms. If aiohomematic ADDS or
+# REMOVES a model protocol, this test fails so a human decides whether a
+# compat twin (and a parity case above) needs to follow — turning silent,
+# runtime-only HA breakage into a loud CI failure. Bump the aiohomematic
+# version bound (pyproject) and this snapshot together. See todo.md P1.
+_KNOWN_AIOHM_MODEL_PROTOCOLS: frozenset[str] = frozenset(
+    {
+        "BaseDataPointProtocol",
+        "BaseParameterDataPointProtocol",
+        "CalculatedDataPointProtocol",
+        "CallbackDataPointProtocol",
+        "ChannelDataPointAccessProtocol",
+        "ChannelEventGroupProtocol",
+        "ChannelGroupingProtocol",
+        "ChannelIdentityProtocol",
+        "ChannelLifecycleProtocol",
+        "ChannelLinkManagementProtocol",
+        "ChannelManagementProtocol",
+        "ChannelMetadataAndGroupingProtocol",
+        "ChannelMetadataProtocol",
+        "ChannelProtocol",
+        "ClimateWeekProfileDataPointProtocol",
+        "CombinedDataPointProtocol",
+        "CustomDataPointProtocol",
+        "DeviceAvailabilityProtocol",
+        "DeviceChannelAccessProtocol",
+        "DeviceConfigurationProtocol",
+        "DeviceDescriptionProviderProtocol",
+        "DeviceDetailsProviderProtocol",
+        "DeviceFirmwareProtocol",
+        "DeviceGroupManagementProtocol",
+        "DeviceIdentityProtocol",
+        "DeviceLifecycleProtocol",
+        "DeviceLinkManagementProtocol",
+        "DeviceOperationsProtocol",
+        "DeviceProtocol",
+        "DeviceProvidersProtocol",
+        "DeviceRemovalInfoProtocol",
+        "DeviceStateProtocol",
+        "DeviceWeekProfileProtocol",
+        "GenericDataPointProtocol",
+        "GenericEventProtocol",
+        "GenericHubDataPointProtocol",
+        "GenericInstallModeDataPointProtocol",
+        "GenericProgramDataPointProtocol",
+        "GenericSysvarDataPointProtocol",
+        "HubBinarySensorDataPointProtocol",
+        "HubProtocol",
+        "HubSensorDataPointProtocol",
+        "ParameterVisibilityProviderProtocol",
+        "ParamsetDescriptionProviderProtocol",
+        "PayloadProtocol",
+        "ScheduleChannelSwitchProtocol",
+        "TaskSchedulerProtocol",
+        "WeekProfileDataPointProtocol",
+        "WeekProfileProtocol",
+    }
+)
+
+
+def _runtime_checkable_model_protocols() -> frozenset[str]:
+    from aiohomematic.interfaces import model
+
+    names: set[str] = set()
+    for name in dir(model):
+        obj = getattr(model, name)
+        if (
+            isinstance(obj, type)
+            and getattr(obj, "_is_protocol", False)
+            and getattr(obj, "_is_runtime_protocol", False)
+        ):
+            names.add(name)
+    return frozenset(names)
+
+
+def test_aiohomematic_model_protocol_surface_has_not_drifted() -> None:
+    current = _runtime_checkable_model_protocols()
+    added = current - _KNOWN_AIOHM_MODEL_PROTOCOLS
+    removed = _KNOWN_AIOHM_MODEL_PROTOCOLS - current
+    assert not (added or removed), (
+        "aiohomematic.interfaces.model runtime_checkable protocols drifted — review whether the "
+        "compat twins / parity cases need to follow, then update the snapshot.\n"
+        f"  added (new upstream protocols): {sorted(added)}\n"
+        f"  removed (gone upstream): {sorted(removed)}"
+    )
