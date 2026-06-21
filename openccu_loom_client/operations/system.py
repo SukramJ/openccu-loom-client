@@ -9,6 +9,7 @@ from typing import Any
 
 from openccu_loom_types.rest import (
     Health,
+    HubDataPoints,
     HubMetricsEntry,
     Info,
     InterfaceState,
@@ -113,6 +114,19 @@ class SystemOperations(_OperationsBase):
         """
         payload = await self._transport.request(method="GET", path="/system/metrics")
         return [HubMetricsEntry.model_validate(m) for m in (payload or [])]
+
+    async def get_hub_data_points(self) -> list[HubDataPoints]:
+        """
+        Return the aggregated hub-singleton snapshot, one entry per central.
+
+        Wire: ``GET /hub/data-points``. Collapses the per-endpoint message /
+        inbox / metrics / connectivity / install-mode fan-out into a single
+        round-trip; alarm/service carry the **count only** (bodies stay on the
+        list endpoints) and ``update`` the flags only (firmware strings stay on
+        ``get_system_update``).
+        """
+        payload = await self._transport.request(method="GET", path="/hub/data-points")
+        return [HubDataPoints.model_validate(e) for e in (payload or [])]
 
     # ---- CCU repair surface ----
 

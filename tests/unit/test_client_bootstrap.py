@@ -13,14 +13,15 @@ bus must mutate the store's DP in place.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 
 from openccu_loom_types.rest import Kind1 as Kind
-from openccu_loom_types.ws import DataPointValueChangedPayload
+from openccu_loom_types.ws import DataPointValueChangedPayload, DeviceCreatedPayload
 
 from openccu_loom_client import LoomClient
 from openccu_loom_client.bridge import bind_ws_events_to_store
-from openccu_loom_client.events import DataPointsCreatedEvent, DataPointValueChangedEvent
+from openccu_loom_client.events import DataPointsCreatedEvent, DataPointValueChangedEvent, DeviceCreatedEvent
 from tests.helpers import MockDaemon
 
 _INFO = {
@@ -220,3 +221,197 @@ class TestSendValueThroughClient:
             dp = client.store.get_data_point(address="VCU0001", channel=1, parameter="STATE")
             assert dp is not None
             await dp.send_value(value=True)
+
+
+# Detail + DP catalogue for a device that is NOT in the snapshot — it
+# only appears via a live device.created push (B1 reconcile path).
+_NEW_DEVICE_DETAIL = {
+    "address": "VCU0002",
+    "interface": "home:HmIP-RF",
+    "interface_id": "home:HmIP-RF",
+    "model": "HmIP-SWDO",
+    "name": "Window",
+    "available": True,
+    "channels_count": 1,
+    "channels": [
+        {
+            "address": "VCU0002:1",
+            "number": 1,
+            "paramset_key": "VALUES",
+            "data_points_count": 1,
+        }
+    ],
+}
+
+_NEW_DEVICE_DATA_POINTS = [
+    {
+        "parameter": "STATE",
+        "value": False,
+        "observed": True,
+        "operations": {"read": True, "write": False, "event": True},
+    },
+]
+
+
+def _device_created_event(*, address: str) -> DeviceCreatedEvent:
+    """Build the typed event the dispatch loop would emit for a device.created push."""
+    return DeviceCreatedEvent(
+        seq=99,
+        kind=Kind.change,
+        ts=datetime(2026, 5, 24, 9, 0, 0, tzinfo=UTC),
+        topic=f"device.{address}.created",
+        type="device.created",
+        payload=DeviceCreatedPayload.model_validate(
+            {
+                "central": "home",
+                "interface_id": "home:HmIP-RF",
+                "device_address": address,
+                "model": "HmIP-SWDO",
+                "source": "pairing",
+            }
+        ),
+    )
+
+
+class TestDeviceCreatedReconcile:
+    """B1: a live device.created push must spawn HA entities without a full re-bootstrap."""
+
+    async def test_device_created_reconciles_graph_and_announces(self, mock_daemon: MockDaemon) -> None:
+        _wire_endpoints(mock_daemon)
+        mock_daemon.get("/api/v1/devices/VCU0002", payload=_NEW_DEVICE_DETAIL)
+        mock_daemon.get(
+            "/api/v1/devices/VCU0002/channels/1/data-points",
+            payload=_NEW_DEVICE_DATA_POINTS,
+        )
+
+        captured: list[DataPointsCreatedEvent] = []
+
+        async def on_created_dps(e: DataPointsCreatedEvent) -> None:
+            captured.append(e)
+
+        async with LoomClient(config=mock_daemon.config) as client:
+            await client.bootstrap()
+            # Mirror what start_events() wires (no real WS server here):
+            # bridge seeds the stub, the client owns the reconcile.
+            group = client.events.create_subscription_group(name="test-created")
+            bind_ws_events_to_store(bus=client.events, store=client.store, group=group)
+            group.subscribe(event_type=DeviceCreatedEvent, handler=client._on_device_created)
+            # Subscribe AFTER bootstrap so we only capture the reconcile's event.
+            client.events.subscribe(event_type=DataPointsCreatedEvent, handler=on_created_dps)
+
+            assert client.store.get_device(address="VCU0002") is None
+
+            await client.events.publish(event=_device_created_event(address="VCU0002"))
+            # The reconcile runs off the dispatch loop as a tracked task.
+            pending = list(client._bg_tasks)
+            assert pending, "device.created should have spawned a reconcile task"
+            await asyncio.gather(*pending)
+
+            device = client.store.get_device(address="VCU0002")
+            assert device is not None
+            channels = list(device.channels)
+            assert len(channels) == 1
+            assert {dp.parameter for dp in channels[0].data_points} == {"STATE"}
+            group.cancel()
+
+        # Exactly one DataPointsCreatedEvent for the new device.
+        assert len(captured) == 1
+        assert {d.address for d in captured[0].devices} == {"VCU0002"}
+        assert {dp.parameter for dp in captured[0].data_points} == {"STATE"}
+
+    async def test_duplicate_device_created_is_idempotent(self, mock_daemon: MockDaemon) -> None:
+        _wire_endpoints(mock_daemon)
+        mock_daemon.get("/api/v1/devices/VCU0002", payload=_NEW_DEVICE_DETAIL)
+        mock_daemon.get(
+            "/api/v1/devices/VCU0002/channels/1/data-points",
+            payload=_NEW_DEVICE_DATA_POINTS,
+        )
+        async with LoomClient(config=mock_daemon.config) as client:
+            await client.bootstrap()
+            group = client.events.create_subscription_group(name="test-created")
+            bind_ws_events_to_store(bus=client.events, store=client.store, group=group)
+            group.subscribe(event_type=DeviceCreatedEvent, handler=client._on_device_created)
+
+            for _ in range(2):
+                await client.events.publish(event=_device_created_event(address="VCU0002"))
+                await asyncio.gather(*list(client._bg_tasks))
+
+            device = client.store.get_device(address="VCU0002")
+            assert device is not None
+            # Still exactly one channel with one DP — no duplication.
+            channels = list(device.channels)
+            assert len(channels) == 1
+            assert len(list(channels[0].data_points)) == 1
+            group.cancel()
+
+
+class _StubWs:
+    """Minimal WsTransport stand-in that records subscribe() calls."""
+
+    def __init__(self) -> None:
+        self.started = False
+        self.subscribed: list[list[str]] = []
+        self._stop = asyncio.Event()
+
+    async def start(self) -> None:
+        self.started = True
+
+    async def subscribe(self, *, topics: list[str]) -> None:
+        self.subscribed.append(list(topics))
+
+    async def events(self):
+        await self._stop.wait()
+        for _ in ():  # generator that yields nothing once stopped
+            yield
+
+    async def stop(self) -> None:
+        self._stop.set()
+
+
+class TestExternalWsTransport:
+    """B6: an injected ws_transport must still honour an explicit subscriptions list."""
+
+    async def test_external_transport_receives_subscriptions(self, mock_daemon: MockDaemon) -> None:
+        mock_daemon.get("/api/v1/info", payload=_INFO)
+        stub = _StubWs()
+        client = LoomClient(config=mock_daemon.config, ws_transport=stub)  # type: ignore[arg-type]
+        await client.connect()
+        await client.start_events(subscriptions=["device.*", "hub.*"])
+        try:
+            assert stub.started
+            assert stub.subscribed == [["device.*", "hub.*"]]
+        finally:
+            await client.close()
+
+
+class TestReplayLostRebootstrap:
+    """B3: replay-lost re-bootstrap runs off the reader loop and de-duplicates."""
+
+    async def test_replay_lost_reboots_once_off_loop(self, mock_daemon: MockDaemon) -> None:
+        _wire_endpoints(mock_daemon)
+        async with LoomClient(config=mock_daemon.config) as client:
+            calls = 0
+            started = asyncio.Event()
+            release = asyncio.Event()
+
+            async def slow_bootstrap(**_kwargs: object) -> None:
+                nonlocal calls
+                calls += 1
+                started.set()
+                await release.wait()
+
+            client.bootstrap = slow_bootstrap  # type: ignore[method-assign]
+
+            # First replay_lost schedules a background re-bootstrap and
+            # returns immediately (does not block the reader).
+            await client._on_replay_lost(901)
+            assert client._rebootstrap_task is not None
+            assert not client._rebootstrap_task.done()
+            await asyncio.wait_for(started.wait(), timeout=1.0)
+
+            # Second replay_lost while the first is in flight is deduped.
+            await client._on_replay_lost(902)
+
+            release.set()
+            await asyncio.wait_for(client._rebootstrap_task, timeout=1.0)
+            assert calls == 1

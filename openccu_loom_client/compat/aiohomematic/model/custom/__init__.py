@@ -346,9 +346,6 @@ class CustomDpDimmer(_CustomEntitySurface):
         """Return whether the light supports effects."""
         return self.capabilities.effects
 
-    # Colour / effect state is not carried in the daemon's light CDP
-    # state (only on/off + brightness); these read as "unknown" until the
-    # daemon surfaces them. Writes still drive the daemon set_* ops.
     @property
     def color_temp_kelvin(self) -> int | None:
         """Return the colour temperature in kelvin, or ``None`` if not surfaced."""
@@ -356,7 +353,20 @@ class CustomDpDimmer(_CustomEntitySurface):
 
     @property
     def hs_color(self) -> tuple[float, float] | None:
-        """Return the ``(hue, saturation)`` colour, or ``None`` if either is unknown."""
+        """
+        Return the ``(hue, saturation)`` colour, or ``None`` if unavailable.
+
+        The daemon emits a nested ``color: {h, s}`` object (hue in degrees
+        [0,360], saturation in [0,1]); HA's ``hs_color`` convention is
+        saturation [0,100], so scale it up. Falls back to the legacy flat
+        ``hue``/``saturation`` keys for pre-0.8.0 daemons.
+        """
+        color = self._state.get("color")
+        if isinstance(color, dict):
+            hue = _as_float(value=color.get("h"))
+            sat = _as_float(value=color.get("s"))
+            return (hue, sat * 100.0) if hue is not None and sat is not None else None
+        # Legacy flat keys (pre-0.8.0 daemons) — passed through unscaled.
         hue = _as_float(value=self._state.get("hue"))
         sat = _as_float(value=self._state.get("saturation"))
         return (hue, sat) if hue is not None and sat is not None else None
@@ -967,43 +977,47 @@ class CustomDpTextDisplay(_CustomEntitySurface):
 
     _category: ClassVar[DataPointCategory] = DataPointCategory.TextDisplay
 
-    # The daemon's text-display CDP does not yet surface the selectable
-    # option lists; expose empty sets so the HA notify entity's state
-    # attributes render without the per-option ActionSelects.
+    # The daemon surfaces the selectable option lists in the CDP state as
+    # ``[]string`` (omitted when empty); read them so the HA notify entity's
+    # per-option ActionSelects populate.
+    def _option_list(self, *, key: str) -> tuple[str, ...]:
+        """Read a ``[]string`` option list from the CDP state (empty when omitted)."""
+        return tuple(str(v) for v in (self._state.get(key) or ()))
+
     @property
     def available_icons(self) -> tuple[str, ...]:
-        """Return the selectable icons (none surfaced by the daemon yet)."""
-        return ()
+        """Return the selectable icons."""
+        return self._option_list(key="available_icons")
 
     @property
     def available_sounds(self) -> tuple[str, ...]:
-        """Return the selectable sounds (none surfaced by the daemon yet)."""
-        return ()
+        """Return the selectable sounds."""
+        return self._option_list(key="available_sounds")
 
     @property
     def available_background_colors(self) -> tuple[str, ...]:
-        """Return the selectable background colours (none surfaced by the daemon yet)."""
-        return ()
+        """Return the selectable background colours."""
+        return self._option_list(key="available_background_colors")
 
     @property
     def available_text_colors(self) -> tuple[str, ...]:
-        """Return the selectable text colours (none surfaced by the daemon yet)."""
-        return ()
+        """Return the selectable text colours."""
+        return self._option_list(key="available_text_colors")
 
     @property
     def available_alignments(self) -> tuple[str, ...]:
-        """Return the selectable alignments (none surfaced by the daemon yet)."""
-        return ()
+        """Return the selectable alignments."""
+        return self._option_list(key="available_alignments")
 
     @property
     def has_icons(self) -> bool:
-        """Return whether the display supports icons (not surfaced yet)."""
-        return False
+        """Return whether the display offers selectable icons."""
+        return bool(self.available_icons)
 
     @property
     def has_sounds(self) -> bool:
-        """Return whether the display supports sounds (not surfaced yet)."""
-        return False
+        """Return whether the display offers selectable sounds."""
+        return bool(self.available_sounds)
 
     @property
     def burst_limit_warning(self) -> bool:

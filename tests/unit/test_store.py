@@ -319,6 +319,97 @@ class TestLiveUpdates:
         assert populated.get_data_point(address="VCU0001", channel=1, parameter="LEVEL") is None
 
 
+class _PayloadTransport:
+    """Returns a settable payload from every request (for refresh tests)."""
+
+    def __init__(self, *, payload: Any) -> None:
+        self.payload = payload
+
+    async def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: Any = None,
+        json_body: Any = None,
+        headers: Any = None,
+        allow_retry: Any = None,
+    ) -> Any:
+        return self.payload
+
+
+def _dp_payload(*, parameter: str, value: Any, modified_at: str) -> dict[str, Any]:
+    return {
+        "parameter": parameter,
+        "value": value,
+        "observed": True,
+        "operations": Operations(read=True, write=True, event=True).model_dump(),
+        "modified_at": modified_at,
+    }
+
+
+class TestRefreshStaleGuard:
+    """B8: a refresh_* GET must not clobber a newer value from a live push."""
+
+    def _store_with_value(self, *, transport: _PayloadTransport, value: Any, modified_at: str) -> LoomStore:
+        store = LoomStore(transport=transport)  # type: ignore[arg-type]
+        store.load_snapshot(snapshot=_snapshot(devices=[_device_summary()]))
+        store.attach_device_detail(
+            detail=DeviceDetail.model_validate(
+                {
+                    **_device_summary().model_dump(),
+                    "channels": [_channel_summary(address="VCU0001", number=1).model_dump()],
+                }
+            )
+        )
+        store.attach_channel_data_points(
+            device_address="VCU0001",
+            channel_number=1,
+            data_points=[_dp_summary(parameter="STATE", value=value)],
+        )
+        # Seed the in-store modified_at via a live push.
+        store.apply_value_changed(
+            payload=DataPointValueChangedPayload.model_validate(
+                {
+                    "central": "home",
+                    "device_address": "VCU0001",
+                    "channel": 1,
+                    "parameter": "STATE",
+                    "paramset_key": "VALUES",
+                    "value": value,
+                    "modified_at": modified_at,
+                }
+            )
+        )
+        return store
+
+    async def test_older_refresh_is_ignored(self) -> None:
+        # In-store value is from 10:00; the REST refresh carries an older 09:00 value.
+        transport = _PayloadTransport(
+            payload=_dp_payload(parameter="STATE", value=False, modified_at="2026-05-24T09:00:00Z")
+        )
+        store = self._store_with_value(transport=transport, value=True, modified_at="2026-05-24T10:00:00Z")
+
+        await store.refresh_data_point(address="VCU0001", channel=1, parameter="STATE")
+
+        dp = store.get_data_point(address="VCU0001", channel=1, parameter="STATE")
+        assert dp is not None
+        assert dp.value is True  # stale refresh did NOT overwrite the newer push
+
+    async def test_newer_refresh_is_applied(self) -> None:
+        # In-store value is from 10:00; the REST refresh carries a newer 11:00 value.
+        transport = _PayloadTransport(
+            payload=_dp_payload(parameter="STATE", value=False, modified_at="2026-05-24T11:00:00Z")
+        )
+        store = self._store_with_value(transport=transport, value=True, modified_at="2026-05-24T10:00:00Z")
+
+        await store.refresh_data_point(address="VCU0001", channel=1, parameter="STATE")
+
+        dp = store.get_data_point(address="VCU0001", channel=1, parameter="STATE")
+        assert dp is not None
+        assert dp.value is False  # newer refresh wins
+
+
 # ---- write-back ----
 
 

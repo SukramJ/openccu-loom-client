@@ -70,8 +70,17 @@ class DataPointsOperations(_OperationsBase):
             # Reads are idempotent — let the transport retry on transient upstream errors.
             allow_retry=True,
         )
+        # The daemon may wrap the items in a ``{"results": [...]}`` envelope
+        # or return a bare list. Distinguish explicitly: a dict without
+        # ``results`` must yield no items, not iterate its string keys.
+        if isinstance(payload, dict):
+            results = payload.get("results", [])
+        elif isinstance(payload, list):
+            results = payload
+        else:
+            results = []
         out: dict[tuple[str, int, str], Any] = {}
-        for item in (payload or {}).get("results", payload or []):
+        for item in results:
             key = (item["address"], item["channel"], item["parameter"])
             # Surface a successful result's summary.value; failures
             # surface as the raw error string so the caller can decide.

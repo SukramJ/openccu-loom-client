@@ -8,9 +8,14 @@ below).
 Async Python REST + WebSocket client for the
 [openccu-loom](https://github.com/SukramJ/openccu-loom) daemon.
 
-Designed as the drop-in replacement for `aiohomematic` in the
-`homematicip_local` Home-Assistant custom component, once the daemon
-has fully replaced direct XML-RPC/JSON-RPC contact with the CCU.
+An **alternative backend** for the `homematicip_local` Home-Assistant
+custom component — coexisting with `aiohomematic` rather than replacing
+it. Instead of direct XML-RPC/JSON-RPC, it mediates CCU contact through
+the openccu-loom daemon. Reusing `aiohomematic` at runtime (routing-key
+algorithm, protocols, selected model code) is a deliberate part of this
+strategy: it shares one contract between two backends and avoids silent
+drift. The `compat/aiohomematic/` namespace shim is how the backend is
+plugged in today (see [`docs/architecture-review.md`](./docs/architecture-review.md) §2.1).
 
 ## Architecture
 
@@ -43,7 +48,7 @@ adds:
 
 The daemon's external-client contract is tracked in
 [`docs/external-clients/asks.md`](https://github.com/SukramJ/openccu-loom/blob/main/docs/external-clients/asks.md)
-in the daemon repo. As of `openccu-loom-types==0.1.2`, all push-event
+in the daemon repo. As of `openccu-loom-types==0.1.24`, all push-event
 payloads needed by Home Assistant (`DataPointValueChanged`,
 `CustomDataPointStateChanged`, `CentralStateChanged`,
 `SystemStatusChanged`, `SysvarChanged`, `ProgramExecuted`,
@@ -67,25 +72,27 @@ The full daemon REST surface is wrapped — typed end-to-end against
   sessions (`client.sessions`), the Matter bridge (`client.matter`),
   and parameter visibility (`client.visibility`).
 
-The schedule, link and calculated-data-point schemas were added to the
-daemon's `openapi.yaml` (`components.schemas`) and regenerated into
-`openccu-loom-types` 0.1.3, so they are typed rather than free-form
-dicts.
+The schedule, link and calculated-data-point schemas live in the
+daemon's `openapi.yaml` (`components.schemas`) and are regenerated into
+`openccu-loom-types` (currently `0.1.24`), so they are typed rather than
+free-form dicts.
 
-Two gaps remain and are **daemon-side**, not closeable from the client
-alone:
+Two broadcasts that were once daemon-side gaps are **now live and
+bound**:
 
-- `OptimisticRollback` — not yet broadcast by the daemon; synthesized
-  client-side from REST `set_value` failures in the meantime.
-- Device **trigger / keypress** events — `central-links` forwarding can
-  be enabled via REST, but the daemon does not yet emit the
-  corresponding click broadcast (reserved topic namespace). The
-  `DeviceTriggerEvent` compat class is ready to bind once it ships.
+- `datapoint.optimistic_rolled_back` — broadcast by the daemon, consumed
+  as `DataPointOptimisticRolledBackEvent` and bridged to the HA-facing
+  `OptimisticRollbackEvent`. Local synthesis from REST `set_value`
+  failures remains available as a fallback.
+- Device **trigger / keypress** events — emitted on the
+  `device.{address}.channels.{channel}.trigger` topic and bound to
+  `DeviceTriggerEvent`; the HA event-group surface is served by
+  `query_facade.get_event_groups`.
 
 ## Development
 
 ```sh
-python3.11 -m venv venv
+python3.14 -m venv venv
 source venv/bin/activate
 pip install -e '.[dev]'
 pytest

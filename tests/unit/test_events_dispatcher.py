@@ -35,6 +35,11 @@ from openccu_loom_client.events import (
     DataPointValueChangedEvent,
     DeviceCreatedEvent,
     DeviceRemovedEvent,
+    HubAlarmMessageCountChangedEvent,
+    HubConnectivityChangedEvent,
+    HubInboxChangedEvent,
+    HubMetricsChangedEvent,
+    HubServiceMessageCountChangedEvent,
     ProgramExecutedEvent,
     SystemStatusChangedEvent,
     SysvarChangedEvent,
@@ -153,6 +158,42 @@ class TestDispatch:
         )
         ev = event_from_envelope(envelope=env)
         assert isinstance(ev, DeviceRemovedEvent)
+
+    def test_hub_count_pushes_land_typed_and_central_keyed(self) -> None:
+        # alarm / service / inbox share HubCountChangedPayload but distinct types.
+        for type_, cls in (
+            ("hub.alarm_message", HubAlarmMessageCountChangedEvent),
+            ("hub.service_message", HubServiceMessageCountChangedEvent),
+            ("hub.inbox_changed", HubInboxChangedEvent),
+        ):
+            ev = event_from_envelope(envelope=self._envelope(type_=type_, payload={"central": "home", "count": 3}))
+            assert isinstance(ev, cls)
+            assert ev.payload.count == 3
+            assert ev.event_key == "home"  # central-keyed for per-CCU routing
+
+    def test_hub_metrics_push_lands_typed(self) -> None:
+        ev = event_from_envelope(
+            envelope=self._envelope(
+                type_="hub.metrics_changed",
+                payload={"central": "home", "metric": "system_health", "value": 95, "unit": "%"},
+            )
+        )
+        assert isinstance(ev, HubMetricsChangedEvent)
+        assert ev.payload.metric == "system_health"
+        assert ev.payload.value == 95
+        assert ev.event_key == "home"
+
+    def test_connectivity_push_lands_typed(self) -> None:
+        ev = event_from_envelope(
+            envelope=self._envelope(
+                type_="connectivity.changed",
+                payload={"central": "home", "interface_id": "HmIP-RF", "reachable": True, "latency_ms": 12},
+            )
+        )
+        assert isinstance(ev, HubConnectivityChangedEvent)
+        assert ev.payload.interface_id == "HmIP-RF"
+        assert ev.payload.reachable is True
+        assert ev.event_key == "home"
 
     def test_sysvar_changed_lands_typed(self) -> None:
         env = self._envelope(

@@ -61,11 +61,13 @@ def _event_key_of(*, event: LoomEvent) -> str | None:
     Convention: events expose an ``event_key`` attribute when they
     want to be filtered by something more specific than the type
     alone (typically the central name, device address, or sysvar
-    name). When the attribute is absent or ``None`` the event
-    matches every subscriber of its type regardless of
-    ``event_key``.
+    name). When it is ``None`` the event matches every subscriber of
+    its type regardless of ``event_key``.
     """
-    return getattr(event, "event_key", None)
+    # ``event_key`` is a declared field on the LoomEvent base — read it
+    # directly so a renamed/removed field fails the type check instead of
+    # silently degrading to None via getattr.
+    return event.event_key
 
 
 class EventBus:

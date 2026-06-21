@@ -20,6 +20,7 @@ from openccu_loom_types.rest import ChannelSummary, DeviceDetail, DeviceSummary,
 import pytest
 
 from openccu_loom_client.model.device_client import DeviceClient
+from openccu_loom_client.operations.datapoints import DataPointsOperations
 from openccu_loom_client.store import LoomStore
 from openccu_loom_client.transport import HttpTransport
 from tests.helpers import MockDaemon
@@ -116,6 +117,18 @@ class TestDeviceClientValues:
         )
         assert value == 0.42
 
+    async def test_get_value_returns_none_on_per_item_error(self, http) -> None:
+        """B4: a per-item batch error must not leak back as the value."""
+        t, mock = http
+        mock.post(
+            "/api/v1/devices/values:batch",
+            payload={"results": [{"address": "VCU1", "channel": 1, "parameter": "LEVEL", "error": "ccu timeout"}]},
+        )
+        value = await DeviceClient(transport=t, device_address="VCU1").get_value(
+            channel_address="VCU1:1", paramset_key="VALUES", parameter="LEVEL"
+        )
+        assert value is None
+
     async def test_get_paramset_reads_channel_paramset(self, http) -> None:
         t, mock = http
         mock.get("/api/v1/devices/VCU1:1/paramsets/MASTER", payload={"TEMPERATURE_OFFSET": 1})
@@ -134,6 +147,26 @@ class TestDeviceClientValues:
         put = _find_call(mock, "PUT")
         assert put.path == "/api/v1/devices/VCU1:1/paramsets/MASTER"
         assert put.json() == {"X": 2}
+
+
+class TestBatchReadParsing:
+    """B7: batch_read tolerates both wire shapes and never iterates dict keys."""
+
+    async def test_dict_without_results_yields_empty(self, http) -> None:
+        t, mock = http
+        # A dict that lacks "results" must yield no items — not iterate its keys.
+        mock.post("/api/v1/devices/values:batch", payload={"unexpected": "shape"})
+        out = await DataPointsOperations(transport=t).batch_read(queries=[("VCU1", 1, "LEVEL")])
+        assert out == {}
+
+    async def test_bare_list_payload_is_parsed(self, http) -> None:
+        t, mock = http
+        mock.post(
+            "/api/v1/devices/values:batch",
+            payload=[{"address": "VCU1", "channel": 1, "parameter": "LEVEL", "summary": {"value": 1.5}}],
+        )
+        out = await DataPointsOperations(transport=t).batch_read(queries=[("VCU1", 1, "LEVEL")])
+        assert out == {("VCU1", 1, "LEVEL"): 1.5}
 
 
 class TestDeviceClientLinks:

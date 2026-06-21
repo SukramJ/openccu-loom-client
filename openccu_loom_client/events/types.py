@@ -31,6 +31,9 @@ from openccu_loom_types.ws import (
     DeviceCreatedPayload,
     DeviceRemovedPayload,
     DeviceTriggerPayload,
+    HubConnectivityChangedPayload,
+    HubCountChangedPayload,
+    HubMetricChangedPayload,
     InstallModeChangedPayload,
     MatterCommissioningProgressPayload,
     MatterCommissioningWindowResponse,
@@ -221,6 +224,71 @@ class InstallModeChangedEvent(LoomEvent):
 
 
 @dataclass(slots=True, kw_only=True)
+class HubAlarmMessageCountChangedEvent(LoomEvent):
+    """The CCU alarm-message count changed (push carries the count only)."""
+
+    payload: HubCountChangedPayload
+    type_id: ClassVar[str] = "hub.alarm_message"
+
+    def __post_init__(self) -> None:
+        """Default the routing key to the payload's central name."""
+        if self.event_key is None:
+            self.event_key = self.payload.central
+
+
+@dataclass(slots=True, kw_only=True)
+class HubServiceMessageCountChangedEvent(LoomEvent):
+    """The CCU service-message count changed (push carries the count only)."""
+
+    payload: HubCountChangedPayload
+    type_id: ClassVar[str] = "hub.service_message"
+
+    def __post_init__(self) -> None:
+        """Default the routing key to the payload's central name."""
+        if self.event_key is None:
+            self.event_key = self.payload.central
+
+
+@dataclass(slots=True, kw_only=True)
+class HubInboxChangedEvent(LoomEvent):
+    """The CCU inbox count changed (push carries the count only)."""
+
+    payload: HubCountChangedPayload
+    type_id: ClassVar[str] = "hub.inbox_changed"
+
+    def __post_init__(self) -> None:
+        """Default the routing key to the payload's central name."""
+        if self.event_key is None:
+            self.event_key = self.payload.central
+
+
+@dataclass(slots=True, kw_only=True)
+class HubMetricsChangedEvent(LoomEvent):
+    """One CCU health/latency/age metric changed value."""
+
+    payload: HubMetricChangedPayload
+    type_id: ClassVar[str] = "hub.metrics_changed"
+
+    def __post_init__(self) -> None:
+        """Default the routing key to the payload's central name."""
+        if self.event_key is None:
+            self.event_key = self.payload.central
+
+
+@dataclass(slots=True, kw_only=True)
+class HubConnectivityChangedEvent(LoomEvent):
+    """One interface's reachability (and optional latency) changed."""
+
+    payload: HubConnectivityChangedPayload
+    type_id: ClassVar[str] = "connectivity.changed"
+
+    def __post_init__(self) -> None:
+        """Default the routing key to the payload's central name."""
+        if self.event_key is None:
+            self.event_key = self.payload.central
+
+
+@dataclass(slots=True, kw_only=True)
 class DeviceCreatedEvent(LoomEvent):
     """
     A new device was paired and is now part of the registry.
@@ -372,6 +440,11 @@ _EVENT_REGISTRY: Final[dict[str, tuple[Callable[..., LoomEvent], type[BaseModel]
     SysvarChangedEvent.type_id: (SysvarChangedEvent, SysvarChangedPayload),
     ProgramExecutedEvent.type_id: (ProgramExecutedEvent, ProgramExecutedPayload),
     InstallModeChangedEvent.type_id: (InstallModeChangedEvent, InstallModeChangedPayload),
+    HubAlarmMessageCountChangedEvent.type_id: (HubAlarmMessageCountChangedEvent, HubCountChangedPayload),
+    HubServiceMessageCountChangedEvent.type_id: (HubServiceMessageCountChangedEvent, HubCountChangedPayload),
+    HubInboxChangedEvent.type_id: (HubInboxChangedEvent, HubCountChangedPayload),
+    HubMetricsChangedEvent.type_id: (HubMetricsChangedEvent, HubMetricChangedPayload),
+    HubConnectivityChangedEvent.type_id: (HubConnectivityChangedEvent, HubConnectivityChangedPayload),
     DeviceCreatedEvent.type_id: (DeviceCreatedEvent, DeviceCreatedPayload),
     DeviceRemovedEvent.type_id: (DeviceRemovedEvent, DeviceRemovedPayload),
     DeviceTriggerEvent.type_id: (DeviceTriggerEvent, DeviceTriggerPayload),

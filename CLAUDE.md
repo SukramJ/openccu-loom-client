@@ -4,7 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Async Python REST + WebSocket client for the [openccu-loom](https://github.com/SukramJ/openccu-loom) daemon. It is meant to become the drop-in replacement for `aiohomematic` inside the `homematicip_local` Home Assistant custom component, once the daemon fully mediates CCU contact. Status: WIP / Alpha.
+Async Python REST + WebSocket client for the [openccu-loom](https://github.com/SukramJ/openccu-loom) daemon. Status: WIP / Alpha.
+
+**Strategy — alternative backend, not a replacement.** For the foreseeable future `openccu-loom*` is _not_ meant to replace `aiohomematic`; it is an **alternative backend** for `homematicip_local` that mediates CCU contact through the daemon instead of direct XML-RPC/JSON-RPC. Both backends coexist and HA can choose between them. Because of this, **depending on `aiohomematic` at runtime is deliberate and architecturally sound**: the routing-key algorithm, the `@runtime_checkable` protocols and (selectively) model code are _reused_ from `aiohomematic` rather than re-implemented, which avoids silent drift between two implementations of the same contract. `aiohomematic` and `openccu-loom*` share one maintainer, so the coupling is coordinated, not external.
+
+**Integration form (decided) — the compat shim.** HA dispatches on type identity: concrete `Dp*`/`CustomDp*` classes (via isinstance _tuples_ `(AioClass, LoomTwin)` in `homematicip_local`'s `backend_types.py`) plus `@runtime_checkable` protocols. That isinstance coupling makes the namespace shim under `compat/aiohomematic/` the pragmatic integration form — the twins satisfy aiohomematic's surface _structurally_ (not by subclassing, since aiohomematic's model classes are bound to a live `CentralUnit`). A clean backend abstraction inside `homematicip_local` is the deferred alternative: it would mean rebuilding the production aiohomematic integration for unclear gain, so it is only pursued if `homematicip_local` grows such a layer for its own reasons. The follow-ups that keep the shim form robust — a drift-guard test against the real aiohomematic protocols, selective reuse over mirroring, and an upper aiohomematic version bound — are tracked in `todo.md`; rationale in `docs/architecture-review.md` §2.1.
 
 Wire types are **not** defined here — they come from the sister package `openccu-loom-types` (Pydantic models + enum catalogue, generated from the daemon's `assets/openapi.yaml`). Import wire schemas from `openccu_loom_types.rest`, `openccu_loom_types.ws`, and `openccu_loom_types.enums`. This package adds the transport, store, event-bus, domain-wrapper, and aiohomematic-compat layers on top.
 
@@ -34,7 +38,7 @@ prek run --all-files                     # run all hooks manually
 prek run --hook-stage manual --all-files # manual-stage hooks (python-typing-update, …)
 ```
 
-Requires Python ≥ 3.14. Tests use `pytest-asyncio` (auto mode — no `@pytest.mark.asyncio` needed) and `aioresponses` to mock the daemon's HTTP surface.
+Requires Python ≥ 3.14. Tests use `pytest-asyncio` (auto mode — no `@pytest.mark.asyncio` needed) and an in-process aiohttp mock daemon (`tests/helpers/mock_daemon.py` `MockDaemon`) for the daemon's HTTP surface; the WS transport tests run a real `aiohttp` test server.
 
 ## Architecture
 
