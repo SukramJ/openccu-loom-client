@@ -26,7 +26,7 @@ from aiohomematic.const import (
     ParamsetKey,
 )
 from openccu_loom_types.enums import DataPointType
-from openccu_loom_types.rest import CustomDPSummary, DataPointSummary, Kind1 as Kind, Snapshot
+from openccu_loom_types.rest import CustomDPSummary, DataPointSummary, HubDataPoints, Kind1 as Kind, Snapshot
 from openccu_loom_types.ws import (
     CentralStateChangedPayload,
     CustomDataPointStateChangedPayload,
@@ -37,6 +37,7 @@ from openccu_loom_types.ws import (
     HubConnectivityChangedPayload,
     HubCountChangedPayload,
     HubMetricChangedPayload,
+    InstallModeChangedPayload,
     OptimisticRollbackPayload,
     SysvarChangedPayload,
 )
@@ -69,6 +70,7 @@ from openccu_loom_client.events import (
     HubConnectivityChangedEvent,
     HubInboxChangedEvent,
     HubMetricsChangedEvent,
+    InstallModeChangedEvent,
     SysvarChangedEvent,
 )
 from openccu_loom_client.events.types import (
@@ -368,13 +370,29 @@ class _FakeHubOps:
 
 
 class _FakeSystemOps:
-    """Stand-in for ``client.system`` returning a fixed interface list."""
+    """Stand-in for ``client.system`` returning a fixed interface list + aggregate."""
 
-    def __init__(self, *, interfaces: list[Any] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        interfaces: list[Any] | None = None,
+        aggregate: list[Any] | None = None,
+        update: list[Any] | None = None,
+    ) -> None:
         self._interfaces = list(interfaces or ())
+        self._aggregate = list(aggregate or ())
+        self._update = list(update or ())
+        self.aggregate_calls = 0
 
     async def list_interfaces(self) -> list[Any]:
         return list(self._interfaces)
+
+    async def get_hub_data_points(self) -> list[Any]:
+        self.aggregate_calls += 1
+        return list(self._aggregate)
+
+    async def get_system_update(self) -> list[Any]:
+        return list(self._update)
 
 
 class _FakeHubClient:
@@ -392,7 +410,12 @@ class TestHubPushRouting:
     """G6: hub push broadcasts route onto the singletons and emit HA state-changed."""
 
     def _coordinator(
-        self, *, hub: _FakeHubOps | None = None, interfaces: list[Any] | None = None
+        self,
+        *,
+        hub: _FakeHubOps | None = None,
+        interfaces: list[Any] | None = None,
+        aggregate: list[Any] | None = None,
+        update: list[Any] | None = None,
     ) -> tuple[_HubCoordinator, EventBus, Any, Looper, list[str]]:
         store = LoomStore()
         store.set_serial(serial="ABC1234567")
@@ -406,7 +429,11 @@ class TestHubPushRouting:
             handler=lambda *, event: seen.append(event.unique_id),
         )
         coord = _HubCoordinator(
-            client=_FakeHubClient(store=store, hub=hub or _FakeHubOps(), system=_FakeSystemOps(interfaces=interfaces)),
+            client=_FakeHubClient(
+                store=store,
+                hub=hub or _FakeHubOps(),
+                system=_FakeSystemOps(interfaces=interfaces, aggregate=aggregate, update=update),
+            ),
             ha_bus=ha_bus,
         )
         loom_bus = EventBus()
@@ -504,6 +531,58 @@ class TestHubPushRouting:
         await looper.block_till_done()
         assert coord._inbox_dp.value is None  # foreign central → not applied
         assert seen == []
+
+    async def test_install_mode_push_applies_to_all_interface_sensors(self) -> None:
+        coord, loom_bus, group, looper, seen = self._coordinator(interfaces=[_iface()])
+        await coord._ensure_singletons()
+        coord.install_push_routing(group=group)
+        await loom_bus.publish(
+            event=InstallModeChangedEvent(
+                seq=1,
+                kind=Kind.change,
+                ts="2026-06-21T08:00:00Z",
+                payload=InstallModeChangedPayload(central="home", enabled=True, remaining_s=45),
+            )
+        )
+        await looper.block_till_done()
+        pair = coord._install_pair_for(interface_id="HmIP-RF")
+        assert pair is not None
+        assert pair.sensor.value == 45
+        assert seen == [pair.sensor.unique_id]
+
+
+class TestHubAggregateFetch:
+    """G4(a): one GET /hub/data-points seeds every singleton in a single call."""
+
+    def _aggregate(self) -> HubDataPoints:
+        return HubDataPoints.model_validate(
+            {
+                "central": "home",
+                "alarm_messages": {"legacy_name": "alarm_messages", "value": 0},
+                "service_messages": {"legacy_name": "service_messages", "value": 0},
+                "inbox": {"legacy_name": "inbox", "value": 2},
+                "update": {"legacy_name": "system_update", "update_available": False, "in_progress": False},
+                "metrics": [{"legacy_name": "system_health", "value": 95, "unit": "%"}],
+                "connectivity": [{"interface_id": "HmIP-RF", "reachable": True}],
+                "install_mode": [{"interface_id": "HmIP-RF", "enabled": True, "remaining_s": 30, "observed": True}],
+            }
+        )
+
+    async def test_aggregate_seeds_all_singletons_in_one_call(self) -> None:
+        coord, _loom_bus, _group, looper, _seen = TestHubPushRouting()._coordinator(
+            interfaces=[_iface()], aggregate=[self._aggregate()]
+        )
+        await coord.fetch_hub_singleton_data()
+        await looper.block_till_done()
+
+        assert coord._inbox_dp.value == 2
+        assert coord._metrics_dps.system_health.value == 95
+        assert coord._connectivity_dps["HmIP-RF"].sensor.value is True
+        install = coord._install_pair_for(interface_id="HmIP-RF")
+        assert install is not None
+        assert install.sensor.value == 30
+        # The per-endpoint fan-out collapsed to a single aggregate call.
+        assert coord._client.system.aggregate_calls == 1
 
 
 class TestRefreshBridge:
