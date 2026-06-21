@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING
 
 from openccu_loom_types.rest import ChannelSummary
 
+from openccu_loom_client.operations.devices import DevicesOperations
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
@@ -167,6 +169,16 @@ class Channel:
             address=self.device_address,
             channel=self.number,
             parameter=parameter,
+        )
+
+    async def reload_channel_config(self) -> None:
+        """Re-pull this channel's paramset descriptions and master values from the CCU."""
+        transport = self._store.transport
+        if transport is None:
+            msg = "LoomStore has no transport bound — cannot reach device operations"
+            raise RuntimeError(msg)
+        await DevicesOperations(transport=transport).reload_channel_config(
+            address=self.device_address, channel=self.number
         )
 
     def __repr__(self) -> str:

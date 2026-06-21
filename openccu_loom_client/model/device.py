@@ -6,15 +6,47 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from openccu_loom_types.rest import Availability, DeviceSummary, Firmware
+
+from openccu_loom_client.model.device_client import DeviceClient
+from openccu_loom_client.operations.devices import DevicesOperations
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from openccu_loom_client.model.channel import Channel
     from openccu_loom_client.store import LoomStore
+
+
+class _ChannelsView:
+    """
+    Mapping-like view over a device's channels.
+
+    Iterates the channels in number order (as the bare ``channels``
+    property used to) and additionally resolves a channel by its full
+    address so the HA integration's ``device.channels.get(channel_address)``
+    keeps working on the loom backend.
+    """
+
+    __slots__ = ("_device_address", "_store")
+
+    def __init__(self, *, store: LoomStore, device_address: str) -> None:
+        """Bind the view to one device's channels in the owning store."""
+        self._store = store
+        self._device_address = device_address
+
+    def __iter__(self) -> Iterator[Channel]:
+        """Iterate this device's channels in number order."""
+        return iter(self._store.channels_of(address=self._device_address))
+
+    def get(self, channel_address: str, /) -> Channel | None:
+        """Return the channel by full address (``ABC:1``), or ``None`` if absent (dict-like)."""
+        _device, _, channel = channel_address.partition(":")
+        if not channel:
+            return None
+        return self._store.get_channel(address=self._device_address, number=int(channel))
 
 
 class Device:
@@ -29,7 +61,9 @@ class Device:
 
     __slots__ = (
         "_availability",
+        "_client",
         "_firmware",
+        "_forced_availability",
         "_store",
         "_summary",
     )
@@ -40,6 +74,8 @@ class Device:
         self._store = store
         self._firmware: Firmware | None = None
         self._availability: Availability | None = None
+        self._client: DeviceClient | None = None
+        self._forced_availability: Any = None
 
     # ---- raw view ----
 
@@ -92,7 +128,13 @@ class Device:
 
     @property
     def available(self) -> bool:
-        """Return whether the device is currently available."""
+        """Return whether the device is currently available (honouring a forced override)."""
+        if self._forced_availability is not None:
+            forced = str(getattr(self._forced_availability, "value", self._forced_availability)).upper()
+            if "FALSE" in forced:
+                return False
+            if "TRUE" in forced:
+                return True
         return self._summary.available
 
     @property
@@ -194,16 +236,59 @@ class Device:
         return self.model
 
     @property
-    def week_profile_data_point(self) -> None:
-        """Return the device's climate week-profile data point (not modelled for loom)."""
-        return None
+    def week_profile_data_point(self) -> Any:
+        """Return the device's climate week-profile data point, or ``None`` if it has none."""
+        return self._store.get_week_profile_data_point(address=self.address)
+
+    @property
+    def client(self) -> DeviceClient:
+        """
+        Return the aiohomematic-compatible interface client for this device.
+
+        Lazily built against the store's transport; the HA integration's
+        service handlers call ``device.client.set_value`` / ``get_paramset``
+        / ``put_paramset`` / link operations through it.
+        """
+        if self._client is None:
+            transport = self._store.transport
+            if transport is None:
+                msg = "LoomStore has no transport bound — cannot build a device client"
+                raise RuntimeError(msg)
+            self._client = DeviceClient(transport=transport, device_address=self.address)
+        return self._client
+
+    def set_forced_availability(self, *, forced_availability: Any) -> None:
+        """
+        Force the device's reported availability (aiohomematic parity).
+
+        The daemon owns the measured availability, so this only overrides
+        the locally reported :attr:`available`; ``FORCE_TRUE`` / ``FORCE_FALSE``
+        pin the value, anything else (``NOT_SET``) clears the override.
+        """
+        self._forced_availability = forced_availability
+
+    async def reload_device_config(self) -> None:
+        """Re-pull this device's paramset descriptions and master values from the CCU."""
+        await self._devices_ops().reload_device_config(address=self.address)
+
+    async def export_device_definition(self) -> bytes:
+        """Return an aiohomematic-compatible device-definition archive (raw zip bytes)."""
+        return await self._devices_ops().export_device_definition(address=self.address)
+
+    def _devices_ops(self) -> DevicesOperations:
+        """Build the device-operations façade against the store's transport."""
+        transport = self._store.transport
+        if transport is None:
+            msg = "LoomStore has no transport bound — cannot reach device operations"
+            raise RuntimeError(msg)
+        return DevicesOperations(transport=transport)
 
     # ---- graph navigation ----
 
     @property
-    def channels(self) -> Iterator[Channel]:
-        """Iterate this device's channels in number order."""
-        return iter(self._store.channels_of(address=self.address))
+    def channels(self) -> _ChannelsView:
+        """Return a mapping-like view over this device's channels."""
+        return _ChannelsView(store=self._store, device_address=self.address)
 
     def get_channel(self, *, number: int) -> Channel | None:
         """Return one channel by number, or ``None`` if absent."""

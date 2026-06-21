@@ -1288,6 +1288,9 @@ class LoomCentralAdapter:
         else:
             wp_dp.update_from(schedule=schedule)
         self._extra_data_points.append(wp_dp)
+        # Register on the store so the base Device can expose it as
+        # ``week_profile_data_point`` (the HA schedule services reach it there).
+        store.set_week_profile_data_point(address=device.address, data_point=wp_dp)
         if not with_switches:
             return
         for channel_key in week_profile.schedule_enabled or {}:
