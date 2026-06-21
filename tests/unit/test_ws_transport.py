@@ -167,6 +167,25 @@ class TestReplayLost:
 
         assert captured == [901]
 
+    async def test_replay_lost_without_oldest_seq_still_invokes_handler(self, fake_daemon) -> None:
+        """B2: a malformed replay_lost (no oldest_seq) must still trigger the resync."""
+        captured: list[int] = []
+
+        async def on_lost(oldest: int) -> None:
+            captured.append(oldest)
+
+        async def script(ws: web.WebSocketResponse, _rx: list[dict]) -> None:
+            await asyncio.sleep(0.05)
+            await ws.send_str(json.dumps({"op": "replay_lost"}))  # no oldest_seq field
+            await asyncio.sleep(0.2)
+
+        cfg, _rx = await fake_daemon(script)
+        async with WsTransport(config=cfg, initial_subscriptions=["device.*"], on_replay_lost=on_lost):
+            await asyncio.sleep(0.3)
+
+        # Sentinel -1 → callback fired despite the missing field (no silent skip).
+        assert captured == [-1]
+
 
 class TestRuntimeSubscriptions:
     async def test_subscribe_sends_only_new_topics(self, fake_daemon) -> None:

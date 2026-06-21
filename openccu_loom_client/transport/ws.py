@@ -331,9 +331,16 @@ class WsTransport:
                 "WS replay buffer aged events out (oldest_seq=%s) — caller must resync",
                 oldest,
             )
-            if self._on_replay_lost is not None and isinstance(oldest, int):
+            # Fire the resync callback unconditionally: the buffer has aged
+            # out regardless of whether the daemon attached a usable
+            # oldest_seq. Coerce a missing / non-int value to a -1 sentinel
+            # so a malformed frame can't silently skip the resync (the
+            # callback only logs the value; the resync starts from a fresh
+            # snapshot either way).
+            if self._on_replay_lost is not None:
+                oldest_seq = oldest if isinstance(oldest, int) else -1
                 with contextlib.suppress(Exception):
-                    await self._on_replay_lost(oldest)
+                    await self._on_replay_lost(oldest_seq)
         elif op in ("subscribe_ack", "unsubscribe_ack", "pong"):
             _LOGGER.debug("WS control: %s %s", op, frame)
         elif op == "reauth_ok":

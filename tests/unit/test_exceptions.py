@@ -130,3 +130,21 @@ class TestErrorMapping:
         assert "404" in msg
         assert "No such device" in msg
         assert "GET https://x/api/v1/devices/0001" in msg
+
+
+class TestPublicExports:
+    """B5: every mapped exception is re-exported from the top-level package."""
+
+    def test_every_mapped_exception_is_publicly_exported(self) -> None:
+        import openccu_loom_client as pkg
+
+        for cls in set(_CODE_TO_EXCEPTION.values()):
+            assert hasattr(pkg, cls.__name__), f"{cls.__name__} not importable from openccu_loom_client"
+            assert cls.__name__ in pkg.__all__, f"{cls.__name__} missing from __all__"
+
+    def test_internal_error_is_exported(self) -> None:
+        # The specific regression: LoomInternalError was defined + mapped but
+        # never re-exported, so `except LoomInternalError` needed a deep import.
+        from openccu_loom_client import LoomInternalError
+
+        assert LoomInternalError.__name__ in __import__("openccu_loom_client").__all__

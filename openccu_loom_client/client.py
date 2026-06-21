@@ -38,13 +38,19 @@ Usage::
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterable
+from collections.abc import Coroutine, Iterable
 import contextlib
 import logging
 from typing import TYPE_CHECKING, Final, Self
 
 from openccu_loom_client.bridge import bind_ws_events_to_store
-from openccu_loom_client.events import EventBus, SubscriptionGroup, event_from_envelope, new_data_points_created_event
+from openccu_loom_client.events import (
+    DeviceCreatedEvent,
+    EventBus,
+    SubscriptionGroup,
+    event_from_envelope,
+    new_data_points_created_event,
+)
 from openccu_loom_client.operations import (
     AuthOperations,
     BackupOperations,
@@ -113,6 +119,11 @@ class LoomClient:
         self._ws: WsTransport | None = ws_transport
         self._wire_group: SubscriptionGroup | None = None
         self._dispatch_task: asyncio.Task[None] | None = None
+        # Background tasks spawned off the dispatch / WS-reader loops so
+        # network I/O (per-device reconcile, replay-lost re-bootstrap)
+        # never blocks event delivery. Tracked so close() can cancel them.
+        self._bg_tasks: set[asyncio.Task[None]] = set()
+        self._rebootstrap_task: asyncio.Task[None] | None = None
         self._closing = False
 
         # Operations are stateless façades over the transport.
@@ -212,21 +223,10 @@ class LoomClient:
         central_name = self._store.central_id or None
 
         for device_summary in snapshot.devices:
-            detail = await self.devices.get_device_detail(address=device_summary.address)
-            self._store.attach_device_detail(detail=detail)
-
-            if not fetch_data_points:
-                continue
-            for channel_summary in detail.channels or ():
-                dps = await self.devices.list_data_points(
-                    address=device_summary.address,
-                    channel=channel_summary.number,
-                )
-                self._store.attach_channel_data_points(
-                    device_address=device_summary.address,
-                    channel_number=channel_summary.number,
-                    data_points=dps,
-                )
+            await self._fetch_device_into_store(
+                address=device_summary.address,
+                fetch_data_points=fetch_data_points,
+            )
 
         # Announce the bootstrap completion as one batch event.
         await self._bus.publish(
@@ -258,11 +258,23 @@ class LoomClient:
                 initial_subscriptions=list(subscriptions or _DEFAULT_WS_SUBSCRIPTIONS),
                 on_replay_lost=self._on_replay_lost,
             )
-        await self._ws.start()
+            await self._ws.start()
+        else:
+            # Injected transport: it owns its own initial subscriptions and
+            # replay-lost wiring, but an explicit subscriptions list passed
+            # here must still take effect (it was silently dropped before).
+            await self._ws.start()
+            if subscriptions is not None:
+                await self._ws.subscribe(topics=list(subscriptions))
 
         # Bridge: WS events → store apply_*
         self._wire_group = self._bus.create_subscription_group(name="loom-client-wire")
         bind_ws_events_to_store(bus=self._bus, store=self._store, group=self._wire_group)
+        # The bridge only seeds a stub for a freshly-paired device; the
+        # client owns the follow-up reconcile (fetch detail + DPs, then
+        # announce) because it — unlike the store — knows the bus. Subscribed
+        # after the bridge so the stub exists before the reconcile spawns.
+        self._wire_group.subscribe(event_type=DeviceCreatedEvent, handler=self._on_device_created)
 
         # Dispatch loop: WsEnvelope → typed event → bus.publish.
         self._dispatch_task = asyncio.create_task(self._dispatch_loop(), name="openccu-loom-dispatch")
@@ -270,6 +282,18 @@ class LoomClient:
     async def close(self) -> None:
         """Tear down WS, HTTP, and all bus subscriptions."""
         self._closing = True
+        # Cancel in-flight reconcile / re-bootstrap work before tearing
+        # transports down, so nothing runs against a closed HTTP session.
+        background = [*self._bg_tasks, self._rebootstrap_task]
+        for task in background:
+            if task is not None:
+                task.cancel()
+        for task in background:
+            if task is not None:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+        self._bg_tasks.clear()
+        self._rebootstrap_task = None
         if self._dispatch_task is not None:
             self._dispatch_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -286,6 +310,30 @@ class LoomClient:
 
     # ---- internals ----
 
+    def _spawn_background(self, *, coro: Coroutine[object, object, None], name: str) -> None:
+        """Run ``coro`` as a tracked background task (auto-removed on completion)."""
+        task = asyncio.create_task(coro, name=name)
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
+
+    async def _fetch_device_into_store(self, *, address: str, fetch_data_points: bool = True) -> None:
+        """
+        Load one device's full graph into the store (detail + per-channel DPs).
+
+        Shared by :meth:`bootstrap` and the live ``device.created`` reconcile.
+        """
+        detail = await self.devices.get_device_detail(address=address)
+        self._store.attach_device_detail(detail=detail)
+        if not fetch_data_points:
+            return
+        for channel_summary in detail.channels or ():
+            dps = await self.devices.list_data_points(address=address, channel=channel_summary.number)
+            self._store.attach_channel_data_points(
+                device_address=address,
+                channel_number=channel_summary.number,
+                data_points=dps,
+            )
+
     async def _dispatch_loop(self) -> None:
         """Pump WsEnvelope → typed event → EventBus."""
         assert self._ws is not None  # noqa: S101 — invariant: dispatch loop runs only after start_events()
@@ -298,20 +346,68 @@ class LoomClient:
         except Exception:
             _LOGGER.exception("WS dispatch loop crashed")
 
+    async def _on_device_created(self, event: DeviceCreatedEvent, /) -> None:
+        """
+        Reconcile a freshly-paired device so it spawns HA entities live.
+
+        The wire bridge has already seeded a stub; here we fetch the full
+        graph and announce it — off the dispatch loop, so loading the new
+        device's channels/DPs doesn't stall event delivery.
+        """
+        if self._closing:
+            return
+        self._spawn_background(
+            coro=self._reconcile_new_device(address=event.payload.device_address),
+            name="openccu-loom-reconcile-device",
+        )
+
+    async def _reconcile_new_device(self, *, address: str) -> None:
+        """Fetch detail + DPs for a new device and publish a DataPointsCreatedEvent."""
+        try:
+            await self._fetch_device_into_store(address=address)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            _LOGGER.exception("reconcile of newly-created device %s failed", address)
+            return
+        device = self._store.get_device(address=address)
+        if device is None:
+            return
+        await self._bus.publish(
+            event=new_data_points_created_event(
+                devices=[device],
+                data_points=[dp for channel in device.channels for dp in channel.data_points],
+                central=self._store.central_id or None,
+            )
+        )
+
     async def _on_replay_lost(self, oldest_seq: int, /) -> None:
         """
-        Re-bootstrap the store after the daemon's replay buffer aged out.
+        Schedule a store re-bootstrap after the daemon's replay buffer aged out.
 
-        Called by the WS transport when the requested events are no longer
-        replayable; triggers a fresh bootstrap so the store re-syncs against
-        ``/snapshot``. Background-runs on the WS reader task so it doesn't
-        block the next frame.
+        Called by the WS transport on the reader task when the requested
+        events are no longer replayable. The re-bootstrap runs as a tracked
+        background task (never inline) so the N×M snapshot walk can't block
+        the read loop and trip the inbound-ping deadline. De-duplicated: a
+        second ``replay_lost`` while a re-bootstrap is already running is
+        dropped rather than stacking another full walk.
         """
-        _LOGGER.warning(
-            "WS replay lost (oldest_seq=%s) — re-bootstrapping store",
-            oldest_seq,
-        )
+        if self._closing:
+            return
+        if self._rebootstrap_task is not None and not self._rebootstrap_task.done():
+            _LOGGER.warning(
+                "WS replay lost (oldest_seq=%s) — re-bootstrap already in progress, skipping",
+                oldest_seq,
+            )
+            return
+        _LOGGER.warning("WS replay lost (oldest_seq=%s) — scheduling store re-bootstrap", oldest_seq)
+        self._rebootstrap_task = asyncio.create_task(self._run_rebootstrap(), name="openccu-loom-rebootstrap")
+
+    async def _run_rebootstrap(self) -> None:
+        """Body of the replay-lost re-bootstrap; logs and swallows failures."""
         try:
             await self.bootstrap()
+        except asyncio.CancelledError:
+            raise
         except Exception:
             _LOGGER.exception("re-bootstrap after replay_lost failed")

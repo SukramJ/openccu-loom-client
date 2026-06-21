@@ -54,14 +54,17 @@ def bind_ws_events_to_store(
     - ``SysvarChangedEvent`` → ``store.apply_sysvar_changed``
     - ``ProgramExecutedEvent`` → ``store.apply_program_executed``
 
-    All three are scoped to the supplied :class:`SubscriptionGroup`
+    All six are scoped to the supplied :class:`SubscriptionGroup`
     so the high-level client can tear them down with a single
     ``group.cancel()`` on close.
 
     The group is the caller's choice — typically one per LoomClient
-    instance. Adding extra wire events to the bridge (e.g. when the
-    daemon ships its deferred OptimisticRollback broadcast) is a
-    matter of one more ``group.subscribe`` call here.
+    instance. This bridge wires the store-mutating events only; events
+    that translate into HA-facing signals (e.g. the daemon's
+    OptimisticRollback broadcast) are bound in the compat refresh
+    bridge, not here. The follow-up reconcile for ``device.created`` is
+    owned by :class:`~openccu_loom_client.client.LoomClient` (it needs
+    the bus), so it subscribes its own handler after this binding.
     """
 
     async def on_value(event: DataPointValueChangedEvent) -> None:

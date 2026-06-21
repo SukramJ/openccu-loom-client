@@ -18,13 +18,16 @@ ignored — the daemon owns write serialization and value typing.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+import logging
+from typing import TYPE_CHECKING, Any, Final
 
 from openccu_loom_client.operations.datapoints import DataPointsOperations
 from openccu_loom_client.operations.links import LinksOperations
 
 if TYPE_CHECKING:
     from openccu_loom_client.transport.http import HttpTransport
+
+_LOGGER: Final = logging.getLogger(__name__)
 
 # aiohomematic ParamsetKey members; anything else passed as ``paramset_key``
 # is a peer channel address and routes to the link-paramset surface.
@@ -68,7 +71,13 @@ class DeviceClient:
         """Read a single data-point value (``ParamsetKey.VALUES``)."""
         address, channel = _split_channel_address(channel_address=channel_address)
         result = await self._datapoints.batch_read(queries=[(address, channel, parameter)])
-        return result.get((address, channel, parameter))
+        value = result.get((address, channel, parameter))
+        # batch_read carries a per-item failure as ``{"error": ...}``. Don't
+        # hand that back as if it were the value — log and report unavailable.
+        if isinstance(value, dict) and "error" in value:
+            _LOGGER.warning("get_value(%s:%s/%s) failed: %s", address, channel, parameter, value["error"])
+            return None
+        return value
 
     async def get_paramset(self, *, channel_address: str, paramset_key: Any, **_kwargs: Any) -> dict[str, Any]:
         """Read a whole paramset; a peer-address ``paramset_key`` reads the link paramset."""

@@ -223,6 +223,22 @@ class LoomStore:
             initial_state=initial_state,
         )
 
+    @staticmethod
+    def _refresh_is_stale(*, current_modified_at: Any, incoming_modified_at: Any) -> bool:
+        """
+        Report whether a REST refresh is older than the in-store value.
+
+        Closes a lost-update race: a live ``value_changed`` push can land
+        between a ``refresh_*`` GET and its write-back, on a different task
+        than the dispatch loop. Both timestamps must be present to compare;
+        otherwise we let the refresh through (best effort).
+        """
+        return (
+            current_modified_at is not None
+            and incoming_modified_at is not None
+            and incoming_modified_at < current_modified_at
+        )
+
     async def refresh_custom_data_point(self, *, address: str, name: str) -> None:
         """
         Re-read one CDP's detail from the daemon and apply its state.
@@ -254,8 +270,14 @@ class LoomStore:
         )
         summary = DataPointSummary.model_validate(payload)
         dp = self._data_points.get((address, channel, parameter))
-        if dp is not None:
-            dp._replace_summary(summary=summary)
+        if dp is None:
+            return
+        if self._refresh_is_stale(
+            current_modified_at=dp.summary.modified_at,
+            incoming_modified_at=summary.modified_at,
+        ):
+            return
+        dp._replace_summary(summary=summary)
 
     # ---- read access ----
 
@@ -774,6 +796,11 @@ class LoomStore:
         dp = self._data_points.get((address, channel, name))
         if dp is not None and isinstance(payload, dict):
             calc = CalculatedDPSummary.model_validate(payload)
+            if self._refresh_is_stale(
+                current_modified_at=dp.summary.modified_at,
+                incoming_modified_at=calc.modified_at,
+            ):
+                return
             new_summary = dp.summary.model_copy(
                 update={
                     "value": calc.value,
