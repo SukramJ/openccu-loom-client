@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
 import contextlib
+from dataclasses import replace
 import json
 import logging
 from typing import TYPE_CHECKING, Final, Self
@@ -34,6 +35,7 @@ from typing import TYPE_CHECKING, Final, Self
 import aiohttp
 from openccu_loom_types.ws import WsEnvelope
 
+from openccu_loom_client.auth import BearerAuth
 from openccu_loom_client.exceptions import LoomTransportError
 
 if TYPE_CHECKING:
@@ -56,6 +58,12 @@ _RECONNECT_BACKOFF: Final = (0.5, 2.0, 5.0, 15.0, 30.0)
 # for the inbound direction so a silent socket can't sit forever.
 _INBOUND_PING_DEADLINE_SECONDS: Final = 60.0
 
+# Upper bound on the in-memory envelope queue. A slow consumer (e.g. a long
+# re-bootstrap) on a busy CCU would otherwise let the reader grow the queue
+# without limit → OOM. On overflow the backlog is stale anyway, so we drop it
+# and force a resync (fresh snapshot) — the store rebuilds rather than drifting.
+_ENVELOPE_QUEUE_MAXSIZE: Final = 4096
+
 
 ReplayLostHandler = Callable[[int], Awaitable[None]]
 """Async callback invoked when the daemon emits ``replay_lost``.
@@ -64,6 +72,17 @@ Argument is ``oldest_seq`` reported by the daemon — i.e. the
 oldest event still in the buffer. The caller's job is to trigger
 a snapshot-based resync; the transport itself stays subscribed.
 """
+
+AuthFailedHandler = Callable[[], Awaitable[None]]
+"""Async callback invoked when the daemon rejects an in-band ``reauth``.
+
+The caller can re-provision a token (and call :meth:`WsTransport.reauth`
+again) or tear the client down — without it, a rejected token would let the
+reconnect loop spin forever against a dead credential.
+"""
+
+# How long :meth:`WsTransport.reauth` waits for the daemon's ack control frame.
+_REAUTH_ACK_TIMEOUT_SECONDS: Final = 10.0
 
 
 class WsTransport:
@@ -87,6 +106,7 @@ class WsTransport:
         config: LoomConfig,
         initial_subscriptions: list[str] | None = None,
         on_replay_lost: ReplayLostHandler | None = None,
+        on_auth_failed: AuthFailedHandler | None = None,
         session: aiohttp.ClientSession | None = None,
     ) -> None:
         """Configure the transport; the connection opens on :meth:`start`."""
@@ -97,7 +117,12 @@ class WsTransport:
         self._subscriptions: set[str] = set(initial_subscriptions or [])
         self._last_seq: int | None = None
         self._on_replay_lost: Final = on_replay_lost
-        self._envelope_queue: asyncio.Queue[WsEnvelope] = asyncio.Queue()
+        self._on_auth_failed: Final = on_auth_failed
+        # Pending in-band reauth ack (resolved by _handle_control on
+        # reauth_ok/reauth_failed); None when no reauth is in flight.
+        self._reauth_ack: asyncio.Future[bool] | None = None
+        self._envelope_queue: asyncio.Queue[WsEnvelope] = asyncio.Queue(maxsize=_ENVELOPE_QUEUE_MAXSIZE)
+        self._dropped_count = 0
         self._read_task: asyncio.Task[None] | None = None
         self._closing = False
         # Coordinates between the consumer (events()) and the producer
@@ -317,7 +342,20 @@ class WsTransport:
         # Monotonic by daemon contract — keep the highest we've seen.
         if envelope.seq is not None and (self._last_seq is None or envelope.seq > self._last_seq):
             self._last_seq = envelope.seq
-        await self._envelope_queue.put(envelope)
+        try:
+            self._envelope_queue.put_nowait(envelope)
+        except asyncio.QueueFull:
+            # Consumer can't keep up — drop the backlog and force a resync.
+            # Log on the first drop and every 1000th to avoid flooding.
+            if self._dropped_count % 1000 == 0:
+                _LOGGER.warning(
+                    "WS envelope queue full (maxsize=%d) — forcing resync; %d events dropped so far",
+                    _ENVELOPE_QUEUE_MAXSIZE,
+                    self._dropped_count + 1,
+                )
+            self._dropped_count += 1
+            # Repeated calls are de-duplicated by the resync handler.
+            await self._trigger_resync(oldest_seq=-1)
 
     async def _handle_control(self, *, op: str, frame: dict[str, object]) -> None:
         if op == "ping":
@@ -337,18 +375,35 @@ class WsTransport:
             # so a malformed frame can't silently skip the resync (the
             # callback only logs the value; the resync starts from a fresh
             # snapshot either way).
-            if self._on_replay_lost is not None:
-                oldest_seq = oldest if isinstance(oldest, int) else -1
-                with contextlib.suppress(Exception):
-                    await self._on_replay_lost(oldest_seq)
+            await self._trigger_resync(oldest_seq=oldest if isinstance(oldest, int) else -1)
         elif op in ("subscribe_ack", "unsubscribe_ack", "pong"):
             _LOGGER.debug("WS control: %s %s", op, frame)
         elif op == "reauth_ok":
             _LOGGER.info("WS reauth accepted")
+            if self._reauth_ack is not None and not self._reauth_ack.done():
+                self._reauth_ack.set_result(True)
         elif op == "reauth_failed":
             _LOGGER.warning("WS reauth rejected — daemon will close the connection")
+            if self._reauth_ack is not None and not self._reauth_ack.done():
+                self._reauth_ack.set_result(False)
+            if self._on_auth_failed is not None:
+                with contextlib.suppress(Exception):
+                    await self._on_auth_failed()
         else:
             _LOGGER.debug("unknown WS control op %r: %s", op, frame)
+
+    async def _trigger_resync(self, *, oldest_seq: int) -> None:
+        """
+        Invoke the resync callback (caller re-snapshots), swallowing handler errors.
+
+        Shared by the daemon's ``replay_lost`` control frame and the local
+        envelope-queue overflow path: both mean buffered events were lost, so
+        the store must rebuild from a fresh snapshot. The callback is expected
+        to de-duplicate concurrent invocations (it schedules one re-bootstrap).
+        """
+        if self._on_replay_lost is not None:
+            with contextlib.suppress(Exception):
+                await self._on_replay_lost(oldest_seq)
 
     @staticmethod
     def _parse_envelope(frame: dict[str, object]) -> WsEnvelope | None:
@@ -373,5 +428,28 @@ class WsTransport:
         Useful when an operator revokes the active token via
         ``DELETE /auth/tokens/{id}`` and the client wants to present
         a freshly-issued one without losing its subscription state.
+
+        Awaits the daemon's ``reauth_ok`` / ``reauth_failed`` ack. On success
+        the new token is mirrored into ``config.auth`` so a later reconnect
+        carries it (without this the socket would silently revert to the old
+        token). On rejection — or ack timeout — raises :class:`LoomTransportError`
+        so the caller learns the credential is dead instead of looping forever.
         """
-        await self._send(frame={"op": "reauth", "token": token})
+        ack: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
+        self._reauth_ack = ack
+        try:
+            await self._send(frame={"op": "reauth", "token": token})
+            try:
+                accepted = await asyncio.wait_for(ack, timeout=_REAUTH_ACK_TIMEOUT_SECONDS)
+            except TimeoutError as exc:
+                msg = f"no reauth ack within {_REAUTH_ACK_TIMEOUT_SECONDS}s"
+                raise LoomTransportError(msg) from exc
+        finally:
+            self._reauth_ack = None
+        if not accepted:
+            msg = "daemon rejected the reauth token"
+            raise LoomTransportError(msg)
+        # Mirror the accepted token so reconnects present it (BearerAuth is
+        # frozen, so replace the config's auth method with an updated copy).
+        if isinstance(self._config.auth, BearerAuth):
+            self._config.auth = replace(self._config.auth, token=token)
