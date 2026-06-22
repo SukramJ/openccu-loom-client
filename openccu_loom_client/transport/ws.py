@@ -221,24 +221,29 @@ class WsTransport:
         """
         Yield validated envelopes in arrival order until ``stop()``.
 
-        Backed by an unbounded internal queue — backpressure is the
-        consumer's responsibility. The iterator terminates cleanly
-        when ``stop()`` is called.
+        Backed by a bounded internal queue (overflow forces a resync, see
+        :data:`_ENVELOPE_QUEUE_MAXSIZE`). The iterator terminates cleanly when
+        ``stop()`` is called. The stop-waiter is created once and reused, so
+        only a single ``queue.get()`` task is spawned per envelope (not two).
         """
-        while not self._stopped.is_set():
-            getter = asyncio.create_task(self._envelope_queue.get())
-            waiter = asyncio.create_task(self._stopped.wait())
-            done, pending = await asyncio.wait(
-                {getter, waiter},
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            for p in pending:
-                p.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await p
-            if waiter in done:
-                return
-            yield getter.result()
+        waiter = asyncio.create_task(self._stopped.wait())
+        try:
+            while not self._stopped.is_set():
+                getter = asyncio.create_task(self._envelope_queue.get())
+                done, _pending = await asyncio.wait(
+                    {getter, waiter},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if waiter in done:
+                    getter.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await getter
+                    return
+                yield getter.result()
+        finally:
+            waiter.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await waiter
 
     # ---- internals: connect / read / reconnect ----
 
