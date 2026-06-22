@@ -175,6 +175,15 @@ class LoomStore:
         """Return the bound transport, or ``None`` if none is attached yet."""
         return self._transport
 
+    def _require_transport(self) -> HttpTransport:
+        """Return the bound transport, raising if none is set (write-back path)."""
+        if self._transport is None:
+            msg = (
+                "LoomStore has no transport bound — set one via set_transport() or construct the store with transport=…"
+            )
+            raise RuntimeError(msg)
+        return self._transport
+
     def set_data_point_factory(self, *, factory: Callable[..., DataPoint] | None) -> None:
         """
         Install a factory that builds (subclasses of) :class:`DataPoint`.
@@ -682,16 +691,12 @@ class LoomStore:
         priority: str | None = None,
     ) -> None:
         """Translate a domain ``send_value`` into a daemon REST call."""
-        if self._transport is None:
-            msg = (
-                "LoomStore has no transport bound — set one via set_transport() or construct the store with transport=…"
-            )
-            raise RuntimeError(msg)
+        transport = self._require_transport()
         body: dict[str, Any] = {"value": value}
         if priority is not None:
             body["priority"] = priority
         path = f"/devices/{address}/channels/{channel}/data-points/{parameter}/value"
-        await self._transport.request(
+        await transport.request(
             method="PUT",
             path=path,
             json_body=body,
@@ -704,10 +709,8 @@ class LoomStore:
 
         Wire: ``PUT /sysvars/{name}``.
         """
-        if self._transport is None:
-            msg = "LoomStore has no transport bound — set one via set_transport()"
-            raise RuntimeError(msg)
-        await self._transport.request(
+        transport = self._require_transport()
+        await transport.request(
             method="PUT",
             path=f"/sysvars/{name}",
             json_body={"value": value},
@@ -722,10 +725,8 @@ class LoomStore:
         can have side effects (cover open, notification send) where
         a double-invocation is the wrong default.
         """
-        if self._transport is None:
-            msg = "LoomStore has no transport bound — set one via set_transport()"
-            raise RuntimeError(msg)
-        await self._transport.request(
+        transport = self._require_transport()
+        await transport.request(
             method="POST",
             path=f"/programs/{program_id}/execute",
             allow_retry=False,
@@ -741,11 +742,7 @@ class LoomStore:
         priority: str | None = None,
     ) -> None:
         """Translate a domain ``CustomDataPoint.invoke`` into a CDP-invoke REST call."""
-        if self._transport is None:
-            msg = (
-                "LoomStore has no transport bound — set one via set_transport() or construct the store with transport=…"
-            )
-            raise RuntimeError(msg)
+        transport = self._require_transport()
         body: dict[str, Any] = {}
         if params is not None:
             body["params"] = params
@@ -754,7 +751,7 @@ class LoomStore:
         # Always send a JSON body: the daemon parses the body strictly and
         # rejects an empty payload with 400 "Invalid JSON: EOF", so a bare
         # operation (turn_on without params) must POST ``{}``.
-        await self._transport.request(
+        await transport.request(
             method="POST",
             path=f"/devices/{address}/cdps/{name}/{operation}",
             json_body=body,
@@ -844,10 +841,8 @@ class LoomStore:
         Wire: ``POST /devices/{addr}/firmware/update``. Never retried —
         a duplicated trigger could double-flash the device.
         """
-        if self._transport is None:
-            msg = "LoomStore has no transport bound — set one via set_transport()"
-            raise RuntimeError(msg)
-        await self._transport.request(
+        transport = self._require_transport()
+        await transport.request(
             method="POST",
             path=f"/devices/{address}/firmware/update",
             allow_retry=False,
