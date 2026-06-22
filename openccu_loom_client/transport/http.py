@@ -9,10 +9,13 @@ contract specifics:
 
 - RFC 9457 ``application/problem+json`` parsing into typed
   exceptions (see :mod:`openccu_loom_client.exceptions`).
-- Retry with exponential backoff for transient upstream failures
-  (``upstream_unavailable`` 502, ``service_unready`` 503). Retries
-  are bounded and never applied to non-idempotent verbs (POST /
-  PATCH) unless the caller explicitly opts in.
+- Retry with exponential backoff for transient failures on idempotent
+  verbs: the daemon's ``upstream_unavailable`` (502) / ``service_unready``
+  (503), **and** any wrapped network/timeout error (``aiohttp.ClientError``
+  / ``TimeoutError`` → :class:`LoomTransportError`). All attempts share one
+  total-deadline budget (``request_timeout_seconds``), so the worst-case
+  wall-clock is that budget — not N × per-request timeout. Never applied to
+  non-idempotent verbs (POST / PATCH) unless the caller opts in.
 - One-shot capability handshake against ``GET /info`` at
   :meth:`HttpTransport.connect`, asserting the daemon's ``api_version``
   is compatible and that any caller-required capabilities are present.
@@ -62,10 +65,11 @@ _RETRYABLE_EXCEPTIONS: Final = (
     LoomTransportError,
 )
 
-# Backoff schedule (seconds) used on retryable failures. Three
-# attempts total (initial + two retries) keeps the worst-case latency
-# under ~3.5 seconds while still riding out the typical CCU
-# reconnect window the daemon manages on the south-bound side.
+# Backoff schedule (seconds) used on retryable failures: three attempts
+# total (initial + two retries) ride out the typical CCU reconnect window
+# the daemon manages south-bound. The total wall-clock is capped by the
+# shared deadline budget in ``request()`` (``request_timeout_seconds``),
+# not the sum of per-attempt timeouts.
 _DEFAULT_BACKOFF_SEQUENCE: Final = (0.5, 2.0)
 
 
@@ -224,11 +228,21 @@ class HttpTransport:
         merged_headers = self._build_headers(extra=headers)
         retry = allow_retry if allow_retry is not None else method.upper() in _RETRY_SAFE_METHODS
 
+        # Single total-deadline budget shared across all attempts: each retry's
+        # per-request timeout is the *remaining* budget, so the worst case is
+        # ``request_timeout_seconds`` overall — not N × timeout. Backoff that
+        # would overrun the deadline is skipped.
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self._config.request_timeout_seconds
         attempt_delays = (0.0, *self._backoff_sequence) if retry else (0.0,)
         last_exc: Exception | None = None
         for delay in attempt_delays:
+            remaining = deadline - loop.time()
+            if remaining <= 0 or (delay and delay >= remaining):
+                break  # no budget left for another attempt (or its backoff)
             if delay:
                 await asyncio.sleep(delay)
+                remaining = deadline - loop.time()
             try:
                 return await self._do_once(
                     method=method,
@@ -236,6 +250,7 @@ class HttpTransport:
                     params=params,
                     json_body=json_body,
                     headers=merged_headers,
+                    client_timeout=aiohttp.ClientTimeout(total=remaining),
                 )
             except _RETRYABLE_EXCEPTIONS as exc:
                 last_exc = exc
@@ -245,9 +260,11 @@ class HttpTransport:
                     url,
                     exc,
                 )
-        # Exhausted all attempts — re-raise the last failure.
-        assert last_exc is not None  # noqa: S101 — invariant: loop ran at least once
-        raise last_exc
+        if last_exc is not None:
+            raise last_exc
+        # Only reachable if the configured budget was ≤ 0 (no attempt ran).
+        msg = f"request to {url}: no time budget ({self._config.request_timeout_seconds}s)"
+        raise LoomTransportError(msg)
 
     async def request_bytes(
         self,
@@ -315,8 +332,12 @@ class HttpTransport:
         params: dict[str, Any] | None,
         json_body: Any | None,
         headers: dict[str, str],
+        client_timeout: aiohttp.ClientTimeout | None = None,
     ) -> Any:
         assert self._session is not None  # noqa: S101 — narrowed by the connected-state guard above
+        # ``timeout=None`` in aiohttp DISABLES the timeout; to keep the session
+        # default we must omit the kwarg entirely, so pass it only when set.
+        extra: dict[str, Any] = {"timeout": client_timeout} if client_timeout is not None else {}
         try:
             async with self._session.request(
                 method,
@@ -324,6 +345,7 @@ class HttpTransport:
                 params=params,
                 json=json_body,
                 headers=headers,
+                **extra,
             ) as resp:
                 if resp.status == HTTPStatus.NO_CONTENT:
                     return None
