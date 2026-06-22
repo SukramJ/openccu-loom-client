@@ -27,11 +27,17 @@ any member already implemented there wins and these only fill gaps.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from openccu_loom_types.enums import DataPointType, DataPointUsage, ParamsetKey
 
 from openccu_loom_client.compat.aiohomematic.model.naming import generic_translated_name
+
+if TYPE_CHECKING:
+    from openccu_loom_types.rest import CustomDPSummary, DataPointSummary, ProgramSummary, SysvarSummary
+
+    from openccu_loom_client.model import Device
+    from openccu_loom_client.store import LoomStore
 
 
 class _NameData:
@@ -161,6 +167,32 @@ class _CommonProtocolSurface:
 class _GenericProtocolSurface(_CommonProtocolSurface):
     """Protocol tail specific to generic ``Dp*`` data points."""
 
+    if TYPE_CHECKING:
+        # Host attributes the concrete ``Dp*`` twin provides (via ``DataPoint``
+        # + ``_GenericEntitySurface``). Declared so mypy --strict type-checks
+        # this mixin without ``# type: ignore[attr-defined]`` at each use site.
+        summary: DataPointSummary
+        parameter: str
+        device: Device | None
+        device_address: str
+        channel_number: int
+        unit: str | None
+        value: Any
+        emits_events: bool
+        _store: LoomStore
+        # Read-only on the concrete twins (overridden as properties), so declare
+        # them as such — a plain-attribute annotation would clash with the override.
+        parameter_label: str | None
+        type: str | None
+        value_list: tuple[str, ...]
+
+        @property
+        def name(self) -> str: ...  # kwonly: disable
+        @property
+        def full_name(self) -> str: ...  # kwonly: disable
+
+        async def send_value(self, *, value: Any, priority: str | None = None) -> None: ...  # kwonly: disable
+
     @property
     def paramset_key(self) -> ParamsetKey:
         return ParamsetKey.Values
@@ -177,9 +209,9 @@ class _GenericProtocolSurface(_CommonProtocolSurface):
     @property
     def name_data(self) -> _NameData:
         return _NameData(
-            parameter_name=self.parameter,  # type: ignore[attr-defined]
-            name=self.name,  # type: ignore[attr-defined]
-            full_name=self.full_name,  # type: ignore[attr-defined]
+            parameter_name=self.parameter,
+            name=self.name,
+            full_name=self.full_name,
         )
 
     @property
@@ -189,19 +221,19 @@ class _GenericProtocolSurface(_CommonProtocolSurface):
     @property
     def room(self) -> str | None:
         """Resolve the channel's daemon-supplied room (``None`` if unknown)."""
-        device = getattr(self, "device", None)
+        device = self.device
         if device is None:
             return None
-        channel = device.get_channel(number=self.channel_number)  # type: ignore[attr-defined]
+        channel = device.get_channel(number=self.channel_number)
         return channel.room if channel is not None else None
 
     @property
     def function(self) -> str | None:
         """Resolve the channel's single Gewerk (the first daemon-supplied function)."""
-        device = getattr(self, "device", None)
+        device = self.device
         if device is None:
             return None
-        channel = device.get_channel(number=self.channel_number)  # type: ignore[attr-defined]
+        channel = device.get_channel(number=self.channel_number)
         if channel is None:
             return None
         functions = channel.functions
@@ -213,7 +245,7 @@ class _GenericProtocolSurface(_CommonProtocolSurface):
 
     @property
     def raw_unit(self) -> str | None:
-        return self.unit  # type: ignore[attr-defined,no-any-return]
+        return self.unit
 
     @property
     def is_unit_fixed(self) -> bool:
@@ -245,7 +277,7 @@ class _GenericProtocolSurface(_CommonProtocolSurface):
 
     @property
     def has_events(self) -> bool:
-        return bool(self.emits_events)  # type: ignore[attr-defined]
+        return bool(self.emits_events)
 
     @property
     def status(self) -> Any:
@@ -253,7 +285,7 @@ class _GenericProtocolSurface(_CommonProtocolSurface):
 
     @property
     def last_non_default_value(self) -> Any:
-        return self.value  # type: ignore[attr-defined]
+        return self.value
 
     @property
     def unconfirmed_last_value_send(self) -> Any:
@@ -262,7 +294,7 @@ class _GenericProtocolSurface(_CommonProtocolSurface):
     @property
     def value_translations(self) -> dict[str, Any]:
         """Localised display labels per raw ENUM value (daemon api ≥ 1.19.0)."""
-        return dict(getattr(self.summary, "value_translations", None) or {})  # type: ignore[attr-defined]
+        return dict(self.summary.value_translations or {})
 
     @property
     def translation(self) -> str | None:
@@ -280,23 +312,21 @@ class _GenericProtocolSurface(_CommonProtocolSurface):
         composition of aiohomematic's ``get_data_point_name_data``.
         ``None`` collapses the entity to the device name alone.
         """
-        summary = getattr(self, "summary", None)
-        if summary is None:
-            return None
-        device = getattr(self, "device", None)
+        summary = self.summary
+        device = self.device
         if device is None:
             # No device in the store (e.g. partial fixtures): fall back to
             # the daemon's plain label without channel-name composition.
-            if getattr(summary, "label_omitted", False):
+            if summary.label_omitted:
                 return None
-            return getattr(summary, "translated_name", None) or None
+            return summary.translated_name or None
         return generic_translated_name(
-            store=self._store,  # type: ignore[attr-defined]
+            store=self._store,
             device=device,
-            channel_no=self.channel_number,  # type: ignore[attr-defined]
-            parameter=self.parameter,  # type: ignore[attr-defined]
-            translation=getattr(summary, "translated_name", None) or None,
-            label_omitted=bool(getattr(summary, "label_omitted", False)),
+            channel_no=self.channel_number,
+            parameter=self.parameter,
+            translation=summary.translated_name or None,
+            label_omitted=bool(summary.label_omitted),
         )
 
     @property
@@ -304,8 +334,8 @@ class _GenericProtocolSurface(_CommonProtocolSurface):
         name = self.translated_name
         if name is None:
             return None
-        device = getattr(self, "device", None)
-        device_name = device.name if device is not None else getattr(self, "device_address", "")
+        device = self.device
+        device_name = device.name if device is not None else self.device_address
         return f"{device_name} {name}".strip()
 
     @property
@@ -348,22 +378,33 @@ class _GenericProtocolSurface(_CommonProtocolSurface):
 
     async def write_value(self, *, value: Any, **_kwargs: Any) -> None:
         """Write a raw value through the store (aiohomematic alias)."""
-        await self.send_value(value=value)  # type: ignore[attr-defined]
+        await self.send_value(value=value)
 
     async def write_unconfirmed_value(self, *, value: Any, **_kwargs: Any) -> None:
         """Optimistic write — same path as :meth:`write_value` for loom."""
-        await self.send_value(value=value)  # type: ignore[attr-defined]
+        await self.send_value(value=value)
 
 
 class _CustomProtocolSurface(_CommonProtocolSurface):
     """Protocol tail specific to ``CustomDp*`` data points."""
 
+    if TYPE_CHECKING:
+        # Host attributes the concrete ``CustomDp*`` twin provides (via
+        # ``CustomDataPoint`` + ``_CustomEntitySurface``).
+        summary: CustomDPSummary
+        device: Device | None
+
+        @property
+        def name(self) -> str: ...  # kwonly: disable
+        @property
+        def full_name(self) -> str: ...  # kwonly: disable
+
     @property
     def channel(self) -> Any:
-        device = self.device  # type: ignore[attr-defined]
+        device = self.device
         if device is None:
             return None
-        return device.get_channel(number=self.summary.channel_no)  # type: ignore[attr-defined]
+        return device.get_channel(number=self.summary.channel_no)
 
     @property
     def channel_group(self) -> Any:
@@ -400,9 +441,9 @@ class _CustomProtocolSurface(_CommonProtocolSurface):
     @property
     def name_data(self) -> _NameData:
         return _NameData(
-            parameter_name=self.name,  # type: ignore[attr-defined]
-            name=self.name,  # type: ignore[attr-defined]
-            full_name=self.full_name,  # type: ignore[attr-defined]
+            parameter_name=self.name,
+            name=self.name,
+            full_name=self.full_name,
         )
 
     @property
@@ -422,11 +463,11 @@ class _CustomProtocolSurface(_CommonProtocolSurface):
 
     @property
     def modified_at(self) -> Any:
-        return getattr(self.summary, "modified_at", None)  # type: ignore[attr-defined]
+        return getattr(self.summary, "modified_at", None)
 
     @property
     def refreshed_at(self) -> Any:
-        return getattr(self.summary, "last_seen_at", None)  # type: ignore[attr-defined]
+        return getattr(self.summary, "last_seen_at", None)
 
     @property
     def translated_name(self) -> str | None:
@@ -470,6 +511,15 @@ class _CustomProtocolSurface(_CommonProtocolSurface):
 class _HubProtocolSurface(_CommonProtocolSurface):
     """Protocol tail shared by hub (sysvar + program) data points."""
 
+    if TYPE_CHECKING:
+        # Shared by both hub kinds, whose summary types differ — declared as a
+        # union so the cross-kind reads below stay ``getattr`` (a sysvar-only
+        # field like ``value`` is absent on a program summary and vice versa).
+        summary: SysvarSummary | ProgramSummary
+
+        @property
+        def name(self) -> str: ...  # kwonly: disable
+
     @property
     def channel(self) -> Any:
         return None
@@ -480,63 +530,82 @@ class _HubProtocolSurface(_CommonProtocolSurface):
 
     @property
     def is_valid(self) -> bool:
-        return getattr(self.summary, "value", None) is not None  # type: ignore[attr-defined]
+        # ``value`` is a sysvar-only field — cross-kind probe over the hub union.
+        return getattr(self.summary, "value", None) is not None
 
     @property
     def full_name(self) -> str:
-        return self.name  # type: ignore[attr-defined,no-any-return]
+        return self.name
 
     @property
     def legacy_name(self) -> str:
-        return self.name  # type: ignore[attr-defined,no-any-return]
+        return self.name
 
     @property
     def modified_at(self) -> Any:
-        return getattr(self.summary, "modified_at", None)  # type: ignore[attr-defined]
+        # modified_at / last_seen_at are not on the hub summaries in the pinned
+        # wire schema — deliberate cross-version probes.
+        return getattr(self.summary, "modified_at", None)
 
     @property
     def refreshed_at(self) -> Any:
-        return getattr(self.summary, "last_seen_at", None)  # type: ignore[attr-defined]
+        return getattr(self.summary, "last_seen_at", None)
 
 
 class _SysvarProtocolSurface(_HubProtocolSurface):
     """Protocol tail specific to ``Sysvar*`` data points."""
 
+    if TYPE_CHECKING:
+        # Host attributes the concrete ``Sysvar*`` twin provides (via ``Sysvar``).
+        summary: SysvarSummary  # narrows the hub union
+
+        @property
+        def value_list(self) -> tuple[str, ...]: ...  # kwonly: disable
+
+        async def set_value(self, *, value: Any) -> None: ...  # kwonly: disable
+
     @property
     def vid(self) -> str:
-        return self.name  # type: ignore[attr-defined,no-any-return]
+        return self.name
 
     @property
     def is_extended(self) -> bool:
-        return bool(self.value_list)  # type: ignore[attr-defined]
+        return bool(self.value_list)
 
     @property
     def min(self) -> Any:
-        return getattr(self.summary, "min", None)  # type: ignore[attr-defined]
+        return self.summary.min
 
     @property
     def max(self) -> Any:
-        return getattr(self.summary, "max", None)  # type: ignore[attr-defined]
+        return self.summary.max
 
     @property
     def previous_value(self) -> Any:
-        return getattr(self.summary, "previous", None)  # type: ignore[attr-defined]
+        # ``previous`` is not on SysvarSummary in the pinned wire schema —
+        # deliberate cross-version probe (loud here if it ever lands typed).
+        return getattr(self.summary, "previous", None)
 
     async def write_value(self, *, value: Any, **_kwargs: Any) -> None:
         """Write the sysvar value through the store."""
-        await self.set_value(value)  # type: ignore[attr-defined]
+        await self.set_value(value=value)
 
 
 class _ProgramProtocolSurface(_HubProtocolSurface):
     """Protocol tail specific to ``Program*`` data points."""
 
+    if TYPE_CHECKING:
+        # Host attributes the concrete ``Program*`` twin provides (via ``Program``).
+        summary: ProgramSummary  # narrows the hub union
+        id: str
+
     @property
     def pid(self) -> str:
-        return self.id  # type: ignore[attr-defined,no-any-return]
+        return self.id
 
     @property
     def is_active(self) -> bool:
-        return bool(getattr(self.summary, "active", False))  # type: ignore[attr-defined]
+        return bool(self.summary.active)
 
     @property
     def is_internal(self) -> bool:
@@ -544,7 +613,9 @@ class _ProgramProtocolSurface(_HubProtocolSurface):
 
     @property
     def last_execute_time(self) -> Any:
-        return getattr(self.summary, "last_execute_time", None)  # type: ignore[attr-defined]
+        # aiohomematic exposes this as ``last_execute_time``; the daemon ships
+        # it as ``last_executed`` (was a silent None before typing surfaced it).
+        return self.summary.last_executed
 
     def update_data(self, *_args: Any, **_kwargs: Any) -> None:
         """No-op: program metadata updates arrive via summary replacement."""

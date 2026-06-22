@@ -61,15 +61,15 @@ class _GenericEntitySurface(_GenericProtocolSurface):
     @property
     def unique_id(self) -> str:
         return data_point_event_key(
-            serial_suffix=self._store.serial_suffix,  # type: ignore[attr-defined]
-            device_address=self.device_address,  # type: ignore[attr-defined]
-            channel=self.channel_number,  # type: ignore[attr-defined]
-            parameter=self.parameter,  # type: ignore[attr-defined]
+            serial_suffix=self._store.serial_suffix,
+            device_address=self.device_address,
+            channel=self.channel_number,
+            parameter=self.parameter,
         )
 
     @property
     def name(self) -> str:
-        return self.parameter_label or self.parameter  # type: ignore[attr-defined,no-any-return]
+        return self.parameter_label or self.parameter
 
     @property
     def translation_key(self) -> str:
@@ -80,12 +80,12 @@ class _GenericEntitySurface(_GenericProtocolSurface):
         parameter names are ASCII upper-snake, so lowercasing matches
         its slugify-based output ("STATE" → "state").
         """
-        return str(self.parameter).lower()  # type: ignore[attr-defined]
+        return str(self.parameter).lower()
 
     @property
     def full_name(self) -> str:
-        device = self.device  # type: ignore[attr-defined]
-        device_name = device.name if device is not None else self.device_address  # type: ignore[attr-defined]
+        device = self.device
+        device_name = device.name if device is not None else self.device_address
         return f"{device_name} {self.name}"
 
     @property
@@ -99,8 +99,8 @@ class _GenericEntitySurface(_GenericProtocolSurface):
 
     def _resolve_enum(self, *, raw: Any) -> Any:
         """Map an ENUM index to its ``value_list`` option string (mirrors aiohomematic)."""
-        value_list: tuple[str, ...] = self.value_list  # type: ignore[attr-defined]
-        is_enum: bool = self.type == "ENUM"  # type: ignore[attr-defined]
+        value_list: tuple[str, ...] = self.value_list
+        is_enum: bool = self.type == "ENUM"
         if is_enum and value_list and isinstance(raw, int) and 0 <= raw < len(value_list):
             return value_list[raw]
         return raw
@@ -128,7 +128,7 @@ class _GenericEntitySurface(_GenericProtocolSurface):
     @property
     def default(self) -> Any:
         """Return the parameter's default, ENUM-resolved (HA restores this when unset)."""
-        return self._resolve_enum(raw=getattr(self.summary, "default", None))  # type: ignore[attr-defined]
+        return self._resolve_enum(raw=self.summary.default)
 
     @property
     def is_valid(self) -> bool:
@@ -141,7 +141,7 @@ class _GenericEntitySurface(_GenericProtocolSurface):
 
     @property
     def available(self) -> bool:
-        device = self.device  # type: ignore[attr-defined]
+        device = self.device
         return bool(device.available) if device is not None else True
 
     @property
@@ -154,11 +154,11 @@ class _GenericEntitySurface(_GenericProtocolSurface):
 
     @property
     def hmtype(self) -> str | None:
-        return self.type  # type: ignore[attr-defined,no-any-return]
+        return self.type
 
     @property
     def values(self) -> tuple[str, ...]:
-        return self.value_list  # type: ignore[attr-defined,no-any-return]
+        return self.value_list
 
     @property
     def multiplier(self) -> float:
@@ -166,11 +166,11 @@ class _GenericEntitySurface(_GenericProtocolSurface):
 
     @property
     def modified_at(self) -> Any:
-        return getattr(self.summary, "modified_at", None)  # type: ignore[attr-defined]
+        return self.summary.modified_at
 
     @property
     def refreshed_at(self) -> Any:
-        return getattr(self.summary, "last_seen_at", None)  # type: ignore[attr-defined]
+        return self.summary.last_seen_at
 
     # ---- registration bookkeeping ----
 
@@ -188,11 +188,11 @@ class _GenericEntitySurface(_GenericProtocolSurface):
 
     async def load_data_point_value(self, *, call_source: Any = None) -> None:
         """Re-read this data point's value from the daemon."""
-        store: LoomStore = self._store  # type: ignore[attr-defined]
+        store: LoomStore = self._store
         await store.refresh_data_point(
-            address=self.device_address,  # type: ignore[attr-defined]
-            channel=self.channel_number,  # type: ignore[attr-defined]
-            parameter=self.parameter,  # type: ignore[attr-defined]
+            address=self.device_address,
+            channel=self.channel_number,
+            parameter=self.parameter,
         )
 
 
@@ -284,7 +284,7 @@ class DpBinarySensor(_GenericEntitySurface, DataPoint):
     @property
     def default(self) -> bool | None:
         """Return the parameter default as ``bool`` (HA restores this when unset)."""
-        return self._as_bool(raw=getattr(self.summary, "default", None))
+        return self._as_bool(raw=self.summary.default)
 
 
 class DpSensor(_GenericEntitySurface, DataPoint):
@@ -410,7 +410,7 @@ def make_generic_data_point(
 ) -> DataPoint:
     """Store data-point factory: build the categorised ``Dp*`` instance."""
     cls: type[DataPoint] | None = None
-    if category := getattr(summary, "category", None):
+    if category := summary.category:
         cls = _CLASS_BY_CATEGORY.get(str(category))
     if cls is None:
         ops = summary.operations

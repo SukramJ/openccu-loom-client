@@ -105,8 +105,12 @@ class HubSingletonDp(_HubEntitySurface, _SysvarProtocolSurface):
         """Return the HA translation key."""
         return self._translation_key
 
+    # Singletons reuse ``_SysvarProtocolSurface`` structurally but are not real
+    # sysvars: they hold no wire-side ``SysvarSummary`` (state comes from the
+    # hub-data-points aggregate, not a per-variable record). This deliberate
+    # divergence from the typed host contract is the one place it doesn't hold.
     @property
-    def summary(self) -> None:
+    def summary(self) -> None:  # type: ignore[override]
         """Return ``None`` — singletons have no wire-side summary record."""
         return None
 
