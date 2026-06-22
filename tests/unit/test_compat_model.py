@@ -93,7 +93,7 @@ async def _adapter():
     return await CentralConfig(name="home", host="loom.test", port=8080, tls=False, token="tok-1").create_central()
 
 
-def _cdp(*, name: str, category: str, kind: str) -> CustomDPSummary:
+def _cdp(*, name: str, category: str, kind: str, unique_id: str | None = None) -> CustomDPSummary:
     return CustomDPSummary.model_validate(
         {
             "name": name,
@@ -101,7 +101,7 @@ def _cdp(*, name: str, category: str, kind: str) -> CustomDPSummary:
             "channel_no": 1,
             "supported_operations": ["open", "close", "set_position"],
             "kind": kind,
-            "unique_id": f"loom_test_{name}",
+            "unique_id": unique_id or f"loom_test_{name}",
         }
     )
 
@@ -129,7 +129,7 @@ class TestCustomDataPointModel:
         )
         store.attach_custom_data_points(
             device_address="VCU1",
-            cdps=[_cdp(name="cover", category="cover", kind="cover_blind")],
+            cdps=[_cdp(name="cover", category="cover", kind="cover_blind", unique_id="loom_vcu1_1")],
         )
         store.apply_custom_data_point_state_changed(
             payload=CustomDataPointStateChangedPayload.model_validate(

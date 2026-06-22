@@ -476,7 +476,7 @@ class TestCalculatedDataPoints:
                         "category": "binary_sensor",
                         "value": False,
                         "observed": True,
-                        "unique_id": "loom_test_window_open",
+                        "unique_id": "loom_calculated_vcu7_1_window_open",
                     }
                 )
             ],

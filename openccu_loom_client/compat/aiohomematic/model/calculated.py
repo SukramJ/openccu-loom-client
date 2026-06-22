@@ -20,7 +20,6 @@ from typing import TYPE_CHECKING, Any
 
 from openccu_loom_types.rest import CalculatedDPSummary, DataPointSummary
 
-from openccu_loom_client.canonical import canonical_unique_id
 from openccu_loom_client.compat.aiohomematic.model.generic import DpBinarySensor, DpSensor
 from openccu_loom_client.model import DataPoint
 
@@ -58,13 +57,8 @@ class _CalculatedKeyMixin:
 
     @property
     def unique_id(self) -> str:
-        """Return ``loom_calculated_<address>_<channel>_<parameter>``."""
-        return canonical_unique_id(
-            serial_suffix=self._store.serial_suffix,
-            address=f"{self.device_address}:{self.channel_number}",
-            parameter=self.parameter,
-            prefix="calculated",
-        )
+        """Return the daemon-owned canonical key (``loom_calculated_…``), carried via the summary (J1)."""
+        return self.summary.unique_id
 
     async def load_data_point_value(self, *, call_source: Any = None) -> None:
         """Re-read this calculated DP from the daemon's calc-dps endpoint."""

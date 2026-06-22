@@ -25,7 +25,9 @@ from openccu_loom_client.compat.aiohomematic.central.adapter import _JsonRpcClie
 from tests.helpers import MockDaemon
 
 
-def _dp_summary(*, parameter: str, type_: str, read: bool, write: bool, value: object = None) -> DataPointSummary:
+def _dp_summary(
+    *, parameter: str, type_: str, read: bool, write: bool, value: object = None, unique_id: str | None = None
+) -> DataPointSummary:
     return DataPointSummary.model_validate(
         {
             "parameter": parameter,
@@ -33,7 +35,7 @@ def _dp_summary(*, parameter: str, type_: str, read: bool, write: bool, value: o
             "value": value,
             "observed": True,
             "operations": {"read": read, "write": write, "event": True},
-            "unique_id": f"loom_test_{parameter.lower()}",
+            "unique_id": unique_id or f"loom_test_{parameter.lower()}",
         }
     )
 
@@ -241,7 +243,7 @@ class TestGenericDataPointModel:
             device_address="VCU1",
             channel_number=1,
             data_points=[
-                _dp_summary(parameter="STATE", type_="BOOL", read=True, write=True),
+                _dp_summary(parameter="STATE", type_="BOOL", read=True, write=True, unique_id="loom_vcu1_1_state"),
                 _dp_summary(parameter="TEMPERATURE", type_="FLOAT", read=True, write=False),
             ],
         )
@@ -295,7 +297,7 @@ class TestHubDataPointModel:
                             "value_type": "LOGIC",
                             "value": True,
                             "observed": True,
-                            "unique_id": "loom_test_sysvar_alarm",
+                            "unique_id": "loom_11a0001234_sysvar_alarm",
                         }
                     ],
                     "programs": [{"id": "p1", "name": "All off", "active": True, "unique_id": "loom_test_p1"}],
