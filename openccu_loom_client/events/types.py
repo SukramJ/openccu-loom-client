@@ -34,6 +34,7 @@ from openccu_loom_types.ws import (
     HubConnectivityChangedPayload,
     HubCountChangedPayload,
     HubMetricChangedPayload,
+    HubSystemUpdateChangedPayload,
     InstallModeChangedPayload,
     MatterCommissioningProgressPayload,
     MatterCommissioningWindowResponse,
@@ -289,6 +290,19 @@ class HubConnectivityChangedEvent(LoomEvent):
 
 
 @dataclass(slots=True, kw_only=True)
+class HubSystemUpdateChangedEvent(LoomEvent):
+    """The CCU firmware/system-update state changed (daemon api ≥ 1.19.0)."""
+
+    payload: HubSystemUpdateChangedPayload
+    type_id: ClassVar[str] = "hub.system_update_changed"
+
+    def __post_init__(self) -> None:
+        """Default the routing key to the payload's central name."""
+        if self.event_key is None:
+            self.event_key = self.payload.central
+
+
+@dataclass(slots=True, kw_only=True)
 class DeviceCreatedEvent(LoomEvent):
     """
     A new device was paired and is now part of the registry.
@@ -445,6 +459,7 @@ _EVENT_REGISTRY: Final[dict[str, tuple[Callable[..., LoomEvent], type[BaseModel]
     HubInboxChangedEvent.type_id: (HubInboxChangedEvent, HubCountChangedPayload),
     HubMetricsChangedEvent.type_id: (HubMetricsChangedEvent, HubMetricChangedPayload),
     HubConnectivityChangedEvent.type_id: (HubConnectivityChangedEvent, HubConnectivityChangedPayload),
+    HubSystemUpdateChangedEvent.type_id: (HubSystemUpdateChangedEvent, HubSystemUpdateChangedPayload),
     DeviceCreatedEvent.type_id: (DeviceCreatedEvent, DeviceCreatedPayload),
     DeviceRemovedEvent.type_id: (DeviceRemovedEvent, DeviceRemovedPayload),
     DeviceTriggerEvent.type_id: (DeviceTriggerEvent, DeviceTriggerPayload),

@@ -197,9 +197,15 @@ class _GenericProtocolSurface(_CommonProtocolSurface):
 
     @property
     def function(self) -> str | None:
-        # Channel-level Gewerk is not on the wire yet (daemon serialises
-        # functions only at device level); stays None until it ships.
-        return None
+        """Resolve the channel's single Gewerk (the first daemon-supplied function)."""
+        device = getattr(self, "device", None)
+        if device is None:
+            return None
+        channel = device.get_channel(number=self.channel_number)  # type: ignore[attr-defined]
+        if channel is None:
+            return None
+        functions = channel.functions
+        return functions[0] if functions else None
 
     @property
     def service(self) -> str | None:
@@ -255,7 +261,8 @@ class _GenericProtocolSurface(_CommonProtocolSurface):
 
     @property
     def value_translations(self) -> dict[str, Any]:
-        return {}
+        """Localised display labels per raw ENUM value (daemon api ≥ 1.19.0)."""
+        return dict(getattr(self.summary, "value_translations", None) or {})  # type: ignore[attr-defined]
 
     @property
     def translation(self) -> str | None:
@@ -406,8 +413,12 @@ class _CustomProtocolSurface(_CommonProtocolSurface):
 
     @property
     def function(self) -> str | None:
-        # Channel-level Gewerk is not on the wire yet (device-level only).
-        return None
+        """Resolve the primary channel's single Gewerk (first daemon-supplied function)."""
+        channel = self.channel
+        if channel is None:
+            return None
+        functions = channel.functions
+        return functions[0] if functions else None
 
     @property
     def modified_at(self) -> Any:

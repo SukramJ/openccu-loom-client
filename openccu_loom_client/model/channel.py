@@ -118,6 +118,18 @@ class Channel:
         return getattr(self._summary, "room", None) or None
 
     @property
+    def functions(self) -> tuple[str, ...]:
+        """
+        Return the channel's resolved "Gewerk" (function) labels.
+
+        The channel-level twin of the device functions — the daemon
+        serialises ``ChannelSummary.functions`` from api 1.19.0
+        (openccu-loom v0.9.1). Empty when the channel carries no function
+        assignment or against an older daemon that omits the field.
+        """
+        return tuple(getattr(self._summary, "functions", None) or ())
+
+    @property
     def group_master(self) -> GroupMasterView | None:
         """
         Return the aiohomematic-shaped view of the channel group's master.

@@ -31,9 +31,9 @@ Scope of this adapter:
   ``get_event_groups`` and ``get_state_paths``. The hub singletons are
   seeded at bootstrap via ``fetch_hub_singleton_data`` (one aggregate
   ``GET /hub/data-points`` call) and kept live by the daemon's ``hub.*``
-  push broadcasts (see ``_HubCoordinator.install_push_routing``); a slow
-  reconcile loop backstops missed pushes and refreshes ``system_update``,
-  which the daemon does not broadcast.
+  push broadcasts (see ``_HubCoordinator.install_push_routing`` —
+  ``system_update`` included since daemon api 1.19.0); a slow reconcile
+  loop backstops missed pushes.
 """
 
 from __future__ import annotations
@@ -98,6 +98,7 @@ from openccu_loom_client.events import (
     HubInboxChangedEvent,
     HubMetricsChangedEvent,
     HubServiceMessageCountChangedEvent,
+    HubSystemUpdateChangedEvent,
     InstallModeChangedEvent,
 )
 
@@ -110,9 +111,9 @@ if TYPE_CHECKING:
 
 _LOGGER: Final = logging.getLogger(__name__)
 
-# Slow reconcile cadence. The hub singletons are push-driven (see
-# _HubCoordinator.install_push_routing); this backstops any missed push and
-# refreshes system_update, which the daemon does not broadcast. Deliberately
+# Slow reconcile cadence. Every hub singleton is now push-driven (see
+# _HubCoordinator.install_push_routing — system_update included since daemon
+# api 1.19.0); this loop is a general missed-push backstop only. Deliberately
 # coarse — ~70x slower than the retired 30 s poll.
 _HUB_RECONCILE_INTERVAL: Final = 300
 
@@ -467,8 +468,7 @@ class _HubCoordinator:
         bodies are refetched only when the count moved, and the firmware strings
         come from ``get_system_update``. Live updates between calls ride the push
         routing (:meth:`install_push_routing`); this runs at cold-start and as the
-        slow reconcile backstop (which also covers ``system_update`` — the one
-        singleton with no push). Changed singletons get their keyed HA
+        slow reconcile backstop. Changed singletons get their keyed HA
         state-changed event so the entities re-render.
         """
         del scheduled
@@ -582,14 +582,17 @@ class _HubCoordinator:
         lists are refetched lazily, and only when the count actually moved. The
         install-mode push is central-wide (no interface_id), so it applies to
         every interface sensor of this central. Subscribed on the supplied group
-        so a single ``group.cancel()`` tears them down. ``system_update`` has no
-        push and is refreshed at bootstrap / slow reconcile only.
+        so a single ``group.cancel()`` tears them down. ``system_update`` gained
+        its own ``hub.system_update_changed`` broadcast in daemon api 1.19.0
+        (openccu-loom v0.9.1) and now routes live like the rest; the slow
+        reconcile loop is kept purely as a general missed-push backstop.
         """
         group.subscribe(event_type=HubInboxChangedEvent, handler=self._on_inbox_push)
         group.subscribe(event_type=HubMetricsChangedEvent, handler=self._on_metrics_push)
         group.subscribe(event_type=HubConnectivityChangedEvent, handler=self._on_connectivity_push)
         group.subscribe(event_type=HubAlarmMessageCountChangedEvent, handler=self._on_alarm_push)
         group.subscribe(event_type=HubServiceMessageCountChangedEvent, handler=self._on_service_push)
+        group.subscribe(event_type=HubSystemUpdateChangedEvent, handler=self._on_system_update_push)
         group.subscribe(event_type=InstallModeChangedEvent, handler=self._on_install_mode_push)
 
     async def _publish_changed(self, *, dp: Any) -> None:
@@ -625,6 +628,13 @@ class _HubCoordinator:
         """Apply a ``connectivity.changed`` push to the per-interface sensor."""
         if self._matches_central(central=event.payload.central):
             await self._publish_each(dps=self._apply_connectivity(entries=[event.payload]))
+
+    async def _on_system_update_push(self, event: HubSystemUpdateChangedEvent, /) -> None:
+        """Apply a ``hub.system_update_changed`` push to the system-update singleton."""
+        if not self._matches_central(central=event.payload.central):
+            return
+        if (update_dp := self._update_dp) is not None and update_dp.update_from_push(payload=event.payload):
+            await self._publish_changed(dp=update_dp)
 
     async def _on_alarm_push(self, event: HubAlarmMessageCountChangedEvent, /) -> None:
         """Apply an ``hub.alarm_message`` count push (refetch the list on a count delta)."""
@@ -1190,9 +1200,9 @@ class LoomCentralAdapter:
             event_group_resolver=self.query_facade.find_event_group,
         )
         # Route the daemon's hub-singleton push broadcasts (alarm/service/inbox
-        # counts, metrics, connectivity, install-mode) straight onto the
-        # singletons — this replaces the old 30 s poll loop. The cold-start fetch
-        # above seeded the values once; the pushes keep them live.
+        # counts, metrics, connectivity, system-update, install-mode) straight
+        # onto the singletons — this replaces the old 30 s poll loop. The
+        # cold-start fetch above seeded the values once; the pushes keep them live.
         self.hub_coordinator.install_push_routing(group=self._refresh_group)
         # Announce every data point (generic + custom) in one batch *after*
         # the custom DPs are attached, so HA's platforms spawn entities for
@@ -1200,8 +1210,8 @@ class LoomCentralAdapter:
         # DataPointsCreatedEvent HA subscribes to.
         await self._emit_data_points_created()
         # Slow reconcile backstop: re-seed the singletons from the aggregate so
-        # a missed push can't drift, and so system_update (which the daemon does
-        # not broadcast) still refreshes.
+        # a missed push can't drift. Every singleton (system_update included) is
+        # push-driven now; this loop is pure resilience.
         self._hub_reconcile_task = asyncio.create_task(self._hub_reconcile_loop(), name="loom-hub-reconcile")
         self._state = CentralState.Running
 

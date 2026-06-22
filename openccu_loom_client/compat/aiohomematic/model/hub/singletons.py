@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from openccu_loom_types.rest import SystemUpdateEntry
+    from openccu_loom_types.ws import HubSystemUpdateChangedPayload
 
     from openccu_loom_client.operations.hub import HubOperations
     from openccu_loom_client.operations.system import SystemOperations
@@ -386,13 +387,33 @@ class SystemUpdateDp(HubSingletonDp):
         return self._in_progress
 
     def update_data(self, *, entry: SystemUpdateEntry) -> bool:
-        """Apply a fetched system-update entry; return whether anything changed."""
-        new = (
-            entry.current_firmware or "",
-            entry.available_firmware or "",
-            bool(entry.update_available),
-            bool(entry.in_progress),
+        """Apply a fetched ``GET /system/update`` entry; return whether anything changed."""
+        return self._apply(
+            current_firmware=entry.current_firmware or "",
+            available_firmware=entry.available_firmware or "",
+            update_available=bool(entry.update_available),
+            in_progress=bool(entry.in_progress),
         )
+
+    def update_from_push(self, *, payload: HubSystemUpdateChangedPayload) -> bool:
+        """Apply a ``hub.system_update_changed`` push (same fields as the REST entry)."""
+        return self._apply(
+            current_firmware=payload.current_firmware or "",
+            available_firmware=payload.available_firmware or "",
+            update_available=bool(payload.update_available),
+            in_progress=bool(payload.in_progress),
+        )
+
+    def _apply(
+        self,
+        *,
+        current_firmware: str,
+        available_firmware: str,
+        update_available: bool,
+        in_progress: bool,
+    ) -> bool:
+        """Set the firmware-update fields; return whether anything changed."""
+        new = (current_firmware, available_firmware, update_available, in_progress)
         old = (
             self._current_firmware,
             self._available_firmware,
