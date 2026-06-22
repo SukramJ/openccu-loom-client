@@ -79,7 +79,7 @@ class DataPoint:
         Passing through the wire default (0/False) would fabricate a
         plausible-looking measurement.
         """
-        if getattr(self._summary, "observed", None) is False:
+        if self._summary.observed is False:
             return None
         return self._summary.value
 
