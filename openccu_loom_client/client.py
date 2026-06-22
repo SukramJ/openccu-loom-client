@@ -315,7 +315,17 @@ class LoomClient:
     async def close(self) -> None:
         """Tear down WS, HTTP, and all bus subscriptions."""
         self._closing = True
-        # Cancel in-flight reconcile / re-bootstrap work before tearing
+        # Stop the dispatch loop FIRST: it is the only thing that spawns new
+        # reconcile tasks (on device.created), so cancelling it before draining
+        # _bg_tasks closes the race where a late publish enqueues an orphan task
+        # after the set was cleared.
+        if self._dispatch_task is not None:
+            self._dispatch_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._dispatch_task
+            self._dispatch_task = None
+        # Now cancel in-flight reconcile / re-bootstrap work — with the dispatch
+        # loop down, no new background task can appear — before tearing the
         # transports down, so nothing runs against a closed HTTP session.
         background = [*self._bg_tasks, self._rebootstrap_task]
         for task in background:
@@ -327,11 +337,6 @@ class LoomClient:
                     await task
         self._bg_tasks.clear()
         self._rebootstrap_task = None
-        if self._dispatch_task is not None:
-            self._dispatch_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._dispatch_task
-            self._dispatch_task = None
         if self._ws is not None:
             await self._ws.stop()
             if self._ws_transport_external is None:
