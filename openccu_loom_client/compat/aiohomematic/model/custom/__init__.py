@@ -863,24 +863,6 @@ class BaseCustomDpLock(_CustomEntitySurface):
 # ---- siren ----
 
 
-class PlaySoundArgs:
-    """Container for play-sound parameters; mirrors aiohomematic shape."""
-
-    def __init__(self, *, sound: str, duration: int | None = None) -> None:
-        """Store the sound name and optional duration."""
-        self.sound = sound
-        self.duration = duration
-
-
-class SirenOnArgs:
-    """Container for siren-on parameters."""
-
-    def __init__(self, *, sound: str | None = None, duration: int | None = None) -> None:
-        """Store the optional sound name and optional duration."""
-        self.sound = sound
-        self.duration = duration
-
-
 class BaseCustomDpSiren(_CustomEntitySurface):
     """Siren CDP."""
 
@@ -1116,8 +1098,6 @@ __all__ = [
     "CustomDpTextDisplay",
     "DataPointCategory",
     "LockState",
-    "PlaySoundArgs",
-    "SirenOnArgs",
     "canonical_unique_id",
     "custom_name_parts",
     "custom_unique_id",

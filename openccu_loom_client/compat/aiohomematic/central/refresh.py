@@ -159,8 +159,8 @@ def _wire_value_events(*, group: SubscriptionGroup, store: LoomStore, ha_bus: Ai
             ),
             # CustomDataPointStateChangedPayload carries a ``state`` dict, not a
             # scalar ``value`` — HA reads custom-DP state off the twin, so the
-            # unified state-changed event intentionally has no value here.
-            value=getattr(event.payload, "value", None),
+            # unified state-changed event has no value here.
+            value=None,
         )
 
     async def on_sysvar(event: SysvarChangedEvent) -> None:
