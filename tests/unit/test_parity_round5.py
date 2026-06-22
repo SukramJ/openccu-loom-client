@@ -410,6 +410,7 @@ def _week_profile_response(
     return WeekProfileResponse.model_validate(
         {
             "address": f"{address}:{channel}",
+            "unique_id": f"loom_week_profile_{address.lower()}_week_profile",
             "schedule_type": schedule_type,
             "min_temp": 4.5 if schedule_type == "climate" else 0,
             "max_temp": 30.5 if schedule_type == "climate" else 0,

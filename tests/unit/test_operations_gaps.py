@@ -56,6 +56,7 @@ class TestSchedulesOperations:
             "/api/v1/devices/VCU1/channels/1/week_profile",
             payload={
                 "address": "VCU1:1",
+                "unique_id": "loom_week_profile_vcu1_week_profile",
                 "schedule_type": "climate",
                 "min_temp": 5.0,
                 "max_temp": 30.5,
