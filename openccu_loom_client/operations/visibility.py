@@ -41,7 +41,7 @@ class VisibilityOperations(_OperationsBase):
         payload = await self._transport.request(
             method="PUT",
             path="/visibility/unignore",
-            json_body=request.model_dump(mode="json", exclude_none=True),
+            json_body=self._to_json_body(request),
             allow_retry=True,
         )
         return UnIgnoreUpdateResponse.model_validate(payload)

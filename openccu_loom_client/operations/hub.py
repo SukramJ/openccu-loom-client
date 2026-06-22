@@ -29,8 +29,7 @@ class HubOperations(_OperationsBase):
 
     async def list_programs(self) -> list[ProgramSummary]:
         """List all programs on the CCU. Wire: ``GET /programs``."""
-        payload = await self._transport.request(method="GET", path="/programs")
-        return [ProgramSummary.model_validate(p) for p in (payload or [])]
+        return await self._request_list(method="GET", path="/programs", model=ProgramSummary)
 
     async def execute_program(self, *, program_id: str) -> None:
         """Wire: ``POST /programs/{id}/execute``."""
@@ -58,8 +57,7 @@ class HubOperations(_OperationsBase):
 
     async def list_sysvars(self) -> list[SysvarSummary]:
         """List all system variables on the CCU. Wire: ``GET /sysvars``."""
-        payload = await self._transport.request(method="GET", path="/sysvars")
-        return [SysvarSummary.model_validate(s) for s in (payload or [])]
+        return await self._request_list(method="GET", path="/sysvars", model=SysvarSummary)
 
     async def create_sysvar(
         self,
@@ -183,8 +181,7 @@ class HubOperations(_OperationsBase):
 
     async def list_alarm_messages(self) -> list[AlarmMessage]:
         """List pending alarm messages. Wire: ``GET /alarm-messages``."""
-        payload = await self._transport.request(method="GET", path="/alarm-messages")
-        return [AlarmMessage.model_validate(m) for m in (payload or [])]
+        return await self._request_list(method="GET", path="/alarm-messages", model=AlarmMessage)
 
     async def ack_alarm_message(self, *, message_id: str) -> None:
         """
@@ -201,8 +198,7 @@ class HubOperations(_OperationsBase):
 
     async def list_service_messages(self) -> list[ServiceMessage]:
         """List pending service messages. Wire: ``GET /service-messages``."""
-        payload = await self._transport.request(method="GET", path="/service-messages")
-        return [ServiceMessage.model_validate(m) for m in (payload or [])]
+        return await self._request_list(method="GET", path="/service-messages", model=ServiceMessage)
 
     async def ack_service_message(self, *, message_id: str) -> None:
         """
@@ -224,8 +220,7 @@ class HubOperations(_OperationsBase):
 
         Wire: ``GET /rooms``.
         """
-        payload = await self._transport.request(method="GET", path="/rooms")
-        return [Room.model_validate(r) for r in (payload or [])]
+        return await self._request_list(method="GET", path="/rooms", model=Room)
 
     async def list_functions(self) -> list[Function]:
         """
@@ -233,8 +228,7 @@ class HubOperations(_OperationsBase):
 
         Wire: ``GET /functions``.
         """
-        payload = await self._transport.request(method="GET", path="/functions")
-        return [Function.model_validate(f) for f in (payload or [])]
+        return await self._request_list(method="GET", path="/functions", model=Function)
 
     async def list_inbox(self) -> list[dict[str, Any]]:
         """
@@ -270,8 +264,7 @@ class HubOperations(_OperationsBase):
         Wire: ``GET /install-mode/interfaces`` — one entry per CCU
         interface, across all centrals.
         """
-        payload = await self._transport.request(method="GET", path="/install-mode/interfaces")
-        return [InstallModeInterfaceEntry.model_validate(e) for e in (payload or [])]
+        return await self._request_list(method="GET", path="/install-mode/interfaces", model=InstallModeInterfaceEntry)
 
     async def set_install_mode_interface(self, *, interface: str, active: bool, seconds: int = 60) -> None:
         """
@@ -285,6 +278,6 @@ class HubOperations(_OperationsBase):
         await self._transport.request(
             method="POST",
             path="/install-mode/interfaces",
-            json_body=body.model_dump(mode="json", exclude_none=True),
+            json_body=self._to_json_body(body),
             allow_retry=False,
         )

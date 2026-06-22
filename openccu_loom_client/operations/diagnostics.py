@@ -225,5 +225,4 @@ class DiagnosticsOperations(_OperationsBase):
 
     async def list_audit(self) -> list[AuditEntry]:
         """Recent change history (FIFO buffer). Wire: ``GET /audit``."""
-        payload = await self._transport.request(method="GET", path="/audit")
-        return [AuditEntry.model_validate(a) for a in (payload or [])]
+        return await self._request_list(method="GET", path="/audit", model=AuditEntry)
