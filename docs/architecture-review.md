@@ -4,7 +4,8 @@
 > Bewertungsskala 1–10. Methodik: schichtweise Quellcode-Analyse (alle `openccu_loom_client/*`
 >
 > - `tests/`, ohne `build/lib/`) plus übergreifende Messungen (Kopplung, Typsicherheit, Stubs).
->   ~14,4k LOC Source, ~9,4k LOC Tests, 568 Tests (530 unit/compat + 38 e2e deselected), 6 xfail.
+>   ~14,4k LOC Source, ~9,4k LOC Tests, 577 Tests (539 unit/compat + 38 e2e deselected). **Re-baselined
+>   2026-06-22:** 0 Unit-`xfail` (die 6 `xfail` liegen alle in `tests/e2e/`, deselected); siehe §0.4.
 
 ---
 
@@ -51,6 +52,24 @@
 6. **N9 + N10 — Cleanups + Doku-Re-Baseline.**
 
 **Bewusst-nicht-Befunde** (für künftige Reviews überspringbar): die 10 `except Exception` im Adapter (alle `noqa`, keep-last-value an optionalen Endpoints), `events/types.py` Degrade-to-`UnknownLoomEvent` (gewollt), `_upstream.py` (saubere Seam), der Typed-Mixin-Refactor (netto _entfernte_ Maskierung), `custom/__init__.py` (kohäsiv).
+
+### 0.4 Umsetzung von N1–N10 (2026-06-22, Branch `refactor/re-review-fixes-n1-n10`)
+
+Alle zehn Re-Review-Befunde sind umgesetzt; `mypy --strict` sauber (81 Module), **577 Tests** grün
+(+9 neue Resilienz-/Index-Tests).
+
+| #       | Umsetzung                                                                                   | Commit-Thema                                  |
+| ------- | ------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| **N1**  | getattr → Direktzugriff in `channel.py`/`data_point.py`/`store.py` (7 Stellen)              | `refactor(core): getattr discipline …`        |
+| **N2**  | `_envelope_queue` gebounded (4096) + Overflow→`_trigger_resync`                             | `fix(ws): bound the envelope queue …`         |
+| **N3**  | Sekundärindex `(addr, channel_no) → CDP` (`_register_cdp`/`_drop_cdp`)                      | `perf(store): O(1) … by_channel`              |
+| **N4**  | Resilienz-Tests: Reconnect/Resume/Heartbeat/reauth/Queue/HTTP-Deadline + MockDaemon-`delay` | `test(transport): resilience coverage …`      |
+| **N5**  | Ein Gesamt-Deadline-Budget über alle Retries + Docstring                                    | `fix(http): single total-deadline budget …`   |
+| **N6**  | `reauth()` Ack-Future + Token-Mirroring + `on_auth_failed`                                  | `fix(ws): … complete the reauth handshake`    |
+| **N7**  | `_HubCoordinator` → eigenes Modul (`adapter.py` 1508→1023); `store._require_transport`      | `refactor(compat): extract _HubCoordinator …` |
+| **N8**  | `_request_list` / `_to_json_body` auf `_OperationsBase` (38 Sites)                          | `refactor(operations): … helpers`             |
+| **N9**  | Tote Klassen/getattr entfernt; `events()`-Task-Churn; `close()`-Reihenfolge                 | `cleanup: …` / `refactor(ws,client): …`       |
+| **N10** | Diese Re-Baseline (Metriken, §4.6 teilweise geschlossen)                                    | `docs(arch-review): …`                        |
 
 ---
 
