@@ -416,7 +416,7 @@ class LoomStore:
             self._cdps[key] = self._build_custom_data_point(
                 summary=summary,
                 device_address=device_address,
-                initial_state=getattr(summary, "state", None),
+                initial_state=summary.state,
             )
 
     # ---- bulk load (bootstrap) ----
