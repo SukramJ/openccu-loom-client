@@ -8,10 +8,11 @@ shim (integration form A1) is the chosen plug-in point. See `CLAUDE.md` →
 
 Status: the `LoomCentralAdapter` has **zero `NotImplementedError` stubs**;
 openccu-loom-types **0.1.26** pinned (daemon api 1.19.0 / v0.9.1). All
-daemon-blocked client work is now done — what remains is **reasoned deferrals**,
-**cross-repo `homematicip_local` follow-ups**, and **verify-on-real-CCU** notes
-(this file is kept _because_ those open items remain; it is not deleted while
-anything is still deferred).
+daemon-blocked client work and the **clean-architecture follow-ups** (§2.1
+import seam, §2.2 typed mixins / drift-masking removal) are now done. What
+remains is **cross-repo `homematicip_local` follow-ups** and
+**verify-on-real-CCU** notes, plus **G5** (deferred _by design_ — see below).
+The file is kept because those open items remain.
 
 ## P1 — keep the alternative-backend coupling robust (strategy follow-ups)
 
@@ -36,23 +37,34 @@ deliberately, keep the compat shim). Rationale: `docs/architecture-review.md`
       series leak in). aiohttp (`>=3.14.1`) / pydantic (`>=2.13.4`) floors match
       across both files. Bump the pin and the drift-guard snapshot together when
       adopting a new aiohomematic series.
-- [ ] **Bundle the aiohomematic imports in one module.** — DEFERRED (2026-06-21,
-      reasoned). The reused symbols (`generate_unique_id`, `async_support.Looper`,
-      `central.events.*`, `const.*`, `interfaces.*`) span ~9 files. _Why deferred:_
-      the **critical** surface — the bit-identical routing-key contract — is
-      already isolated in `canonical.py`; the remainder is ordinary library use
-      now guarded by the protocol drift-guard test + the `aiohomematic<2026.7`
-      cap. A re-export module would add indirection at every use site (provenance
-      lost) for a small blast-radius gain on a rarely-moving, version-capped
-      dependency. Revisit if the aiohomematic-internals surface starts churning.
-- [ ] **Roll back imitation in favour of selective reuse.** — DEFERRED (large).
-      Where an aiohomematic class/function works _without_ a live `CentralUnit`,
-      reuse it instead of mirroring — shrinks the ~50 % stub properties in
-      `_protocol_surface.py` and the 60 `type: ignore[attr-defined]` in the
-      compat model layer (`docs/architecture-review.md` §2.2). _Why deferred:_ a
-      multi-session, class-by-class rewrite of the compat model layer; the
-      drift-guard makes the current imitation safe in the meantime. Do it
-      incrementally when touching each model file for other reasons.
+- [x] **Bundle the aiohomematic imports in one module.** DONE (2026-06-22).
+      `compat/aiohomematic/_upstream.py` is now the single seam onto the
+      aiohomematic internals the compat layer reuses (`async_support.Looper`,
+      `central.events.*`, `const.*`, `model.custom.*`). All ~9 consumers import
+      from it; the bit-identical routing-key contract stays isolated in
+      `canonical.py` (the documented routing seam, deliberately not folded in).
+      One grep-able surface for the version bound + drift-guard + selective-reuse
+      reasoning.
+- [x] **Drift-masking removed; imitation is now typed, not blind (§2.2).** DONE
+      (2026-06-22). The original concern was the **brittleness**: ~74
+      `type: ignore[attr-defined]` + `getattr(model, "field", default)` on typed
+      pydantic models, which masked wire-schema drift as silent `None`/`False`
+      and defeated `mypy --strict`. Each protocol-surface / entity-surface mixin
+      now declares the host contract it depends on in an `if TYPE_CHECKING:`
+      block (typed against `DataPoint` / `CustomDataPoint` / `Sysvar` /
+      `Program`), so mypy checks the mixins properly: **type: ignore in compat
+      74 → 7** (remaining are genuine — cross-kind `data_point_type`, dynamic
+      `_value_override`/`_registered`, the singleton structural-reuse divergence,
+      all commented), and known-field `getattr` became direct typed access.
+      Surfaced + fixed two latent bugs the masking hid (sysvar `set_value`
+      called positionally against a kw-only signature; program `last_execute_time`
+      read a non-existent field — daemon ships `last_executed`).
+      _On "selective reuse of aiohomematic to shrink the ~50 % stubs": assessed
+      and **not pursued by design** — those stubs are protocol-tail members
+      (`config_payload`, `state_path`, `service_methods`, …) whose aiohomematic
+      implementations need a live `CentralUnit` / paramset descriptors the
+      daemon-mediated client doesn't hold, so their neutral defaults are correct.
+      The fix was making the imitation **typed/loud**, not removing it._
 
 ## P1/P2 — loom wire-gap follow-ups (daemon 0.8.0 / API 1.18.0)
 
@@ -124,16 +136,17 @@ Client-side (this repo) — sequence small → large:
         unconsumed central-wide `InstallModeChangedEvent` push was wired onto the
         install-mode sensors (it was poll-only before). Tests live in
         `test_compat_model.py` (`TestHubAggregateFetch`, `TestHubPushRouting`).
-- [ ] **G5 — enrich `get_event_groups()` from REST** — DEFERRED (2026-06-21,
-      reasoned). `get_event_groups` already builds groups locally (no
-      `NotImplementedError`); `last_triggered_event` is **live** (the refresh
-      bridge calls `record_trigger` on every `device.trigger` push) and
-      `available` tracks the device. _Why deferred:_ backing it with
-      `GET …/event-groups` means a per-trigger-channel fetch at bootstrap — the
-      exact N×M cost the project avoids (P3 below) — for marginal gain (a daemon
-      snapshot that is no fresher than the live trigger feed). Revisit only if
-      event-groups join a nested snapshot. The remaining client-visible part
-      (drop the `event.py` `NotImplementedError` fallback) is cross-repo
+- [ ] **G5 — enrich `get_event_groups()` from REST** — DEFERRED **by design,
+      not as a gap** (re-affirmed 2026-06-22). `get_event_groups` already builds
+      groups locally (no `NotImplementedError`); `last_triggered_event` is
+      **live** (the refresh bridge calls `record_trigger` on every
+      `device.trigger` push) and `available` tracks the device. Backing it with a
+      per-trigger-channel `GET …/event-groups` fetch at bootstrap is the **exact
+      N×M cost the project just eliminated** (P3 nested snapshot) — for a daemon
+      snapshot no fresher than the live trigger feed. Implementing it would make
+      the architecture _worse_; the deferral is the clean choice. Revisit only if
+      event-groups ever join the nested snapshot. The remaining client-visible
+      part (drop the `event.py` `NotImplementedError` fallback) is cross-repo
       (homematicip_local, below).
 - [ ] **G3 — sysvar `extended` marker** (VERIFY, no code). Wired end-to-end
       (`compat/aiohomematic/model/hub/__init__.py:225`); confirm on a real CCU
