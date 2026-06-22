@@ -40,12 +40,12 @@ class LinksOperations(_OperationsBase):
 
         Wire: ``GET /devices/{addr}/links?locale=``.
         """
-        payload = await self._transport.request(
+        return await self._request_list(
             method="GET",
             path=f"/devices/{address}/links",
             params={"locale": locale},
+            model=Link,
         )
-        return [Link.model_validate(link) for link in (payload or [])]
 
     async def add_link(
         self,
@@ -72,7 +72,7 @@ class LinksOperations(_OperationsBase):
         await self._transport.request(
             method="POST",
             path=f"/devices/{address}/links",
-            json_body=body.model_dump(mode="json", exclude_none=True),
+            json_body=self._to_json_body(body),
             allow_retry=False,
         )
 

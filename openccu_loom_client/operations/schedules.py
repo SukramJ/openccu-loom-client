@@ -70,7 +70,7 @@ class SchedulesOperations(_OperationsBase):
         await self._transport.request(
             method="PUT",
             path=f"/devices/{address}/channels/{channel}/schedule",
-            json_body=schedule.model_dump(mode="json", exclude_none=True),
+            json_body=self._to_json_body(schedule),
             allow_retry=True,
         )
 
@@ -127,7 +127,7 @@ class SchedulesOperations(_OperationsBase):
         await self._transport.request(
             method="PUT",
             path=f"/devices/{address}/schedule",
-            json_body=schedule.model_dump(mode="json", exclude_none=True),
+            json_body=self._to_json_body(schedule),
             allow_retry=True,
         )
 

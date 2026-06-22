@@ -20,8 +20,7 @@ class CentralsOperations(_OperationsBase):
 
     async def list_centrals(self) -> list[CentralRow]:
         """Wire: ``GET /centrals``."""
-        payload = await self._transport.request(method="GET", path="/centrals")
-        return [CentralRow.model_validate(c) for c in (payload or [])]
+        return await self._request_list(method="GET", path="/centrals", model=CentralRow)
 
     async def get_central(self, *, name: str) -> CentralRow:
         """Wire: ``GET /centrals/{name}``."""
@@ -33,7 +32,7 @@ class CentralsOperations(_OperationsBase):
         payload = await self._transport.request(
             method="POST",
             path="/centrals",
-            json_body=central.model_dump(mode="json", exclude_none=True),
+            json_body=self._to_json_body(central),
             allow_retry=False,
         )
         return CentralRow.model_validate(payload)
@@ -43,7 +42,7 @@ class CentralsOperations(_OperationsBase):
         await self._transport.request(
             method="PUT",
             path=f"/centrals/{name}",
-            json_body=central.model_dump(mode="json", exclude_none=True),
+            json_body=self._to_json_body(central),
             allow_retry=True,
         )
 
