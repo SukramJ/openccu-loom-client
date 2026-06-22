@@ -20,7 +20,32 @@ from aiohttp import web
 import pytest
 
 from openccu_loom_client import BearerAuth, LoomConfig
+from openccu_loom_client.exceptions import LoomTransportError
 from openccu_loom_client.transport import WsTransport
+import openccu_loom_client.transport.ws as ws_module
+
+
+def _envelope(*, seq: int, value: float = 0.0) -> str:
+    """Return a minimal valid value-changed envelope as a JSON string."""
+    return json.dumps(
+        {
+            "topic": "device.0001.channels.1.data_points.LEVEL",
+            "type": "datapoint.value_changed",
+            "ts": "2026-05-24T08:42:13Z",
+            "seq": seq,
+            "kind": "change",
+            "payload": {
+                "central": "home",
+                "device_address": "0001",
+                "channel": 1,
+                "parameter": "LEVEL",
+                "paramset_key": "VALUES",
+                "value": value,
+                "modified_at": "2026-05-24T08:42:13Z",
+            },
+        }
+    )
+
 
 # Helper to build a daemon-side handler that records every client
 # frame and lets the test script-send back canned frames.
@@ -221,3 +246,107 @@ class TestRuntimeSubscriptions:
         unsubs = [f for f in rx if f.get("op") == "unsubscribe"]
         assert len(unsubs) == 1
         assert unsubs[0]["topics"] == ["hub.*"]
+
+
+class TestResilience:
+    """N4: reconnect/resume, heartbeat-timeout, reauth ack/failure, queue overflow."""
+
+    async def test_reconnect_resumes_with_since_cursor(self, fake_daemon) -> None:
+        conns = {"n": 0}
+
+        async def script(ws: web.WebSocketResponse, rx: list[dict]) -> None:
+            conns["n"] += 1
+            if conns["n"] == 1:
+                await asyncio.sleep(0.15)  # let the client subscribe
+                await ws.send_str(_envelope(seq=42))  # advances last_seq
+                await asyncio.sleep(0.1)  # then the handler returns → daemon closes
+            else:
+                await asyncio.sleep(0.4)  # keep the resumed connection open
+
+        cfg, rx = await fake_daemon(script)
+        async with WsTransport(config=cfg, initial_subscriptions=["device.*"]):
+            await asyncio.sleep(1.3)  # 1st conn (~0.25s) + 0.5s backoff + 2nd conn
+
+        subs = [f for f in rx if f.get("op") == "subscribe"]
+        assert len(subs) >= 2, f"expected a reconnect subscribe, got {subs}"
+        assert "since" not in subs[0]
+        assert subs[1].get("since") == 42  # resume from the last seen seq
+
+    async def test_inbound_ping_timeout_forces_reconnect(self, fake_daemon, monkeypatch) -> None:
+        monkeypatch.setattr(ws_module, "_INBOUND_PING_DEADLINE_SECONDS", 0.3)
+        conns = {"n": 0}
+
+        async def script(ws: web.WebSocketResponse, _rx: list[dict]) -> None:
+            conns["n"] += 1
+            # Stay silent past the deadline on the first connection → the client
+            # treats the socket as dead and reconnects.
+            await asyncio.sleep(0.5 if conns["n"] == 1 else 0.4)
+
+        cfg, _rx = await fake_daemon(script)
+        async with WsTransport(config=cfg, initial_subscriptions=["device.*"]):
+            await asyncio.sleep(1.4)
+
+        assert conns["n"] >= 2, "silent socket past the deadline should have reconnected"
+
+    async def test_reauth_ok_mirrors_token_to_config(self, fake_daemon) -> None:
+        async def script(ws: web.WebSocketResponse, rx: list[dict]) -> None:
+            for _ in range(100):
+                if any(f.get("op") == "reauth" for f in rx):
+                    await ws.send_str(json.dumps({"op": "reauth_ok"}))
+                    break
+                await asyncio.sleep(0.02)
+            await asyncio.sleep(0.2)
+
+        cfg, _rx = await fake_daemon(script)
+        transport = WsTransport(config=cfg)
+        async with transport:
+            await asyncio.sleep(0.1)
+            await transport.reauth(token="rotated-token")
+        assert isinstance(cfg.auth, BearerAuth)
+        assert cfg.auth.token == "rotated-token"  # mirrored for reconnects
+
+    async def test_reauth_failed_raises_and_fires_callback(self, fake_daemon) -> None:
+        async def script(ws: web.WebSocketResponse, rx: list[dict]) -> None:
+            for _ in range(100):
+                if any(f.get("op") == "reauth" for f in rx):
+                    await ws.send_str(json.dumps({"op": "reauth_failed"}))
+                    break
+                await asyncio.sleep(0.02)
+            await asyncio.sleep(0.2)
+
+        cfg, _rx = await fake_daemon(script)
+        auth_failed: list[bool] = []
+
+        async def on_auth_failed() -> None:
+            auth_failed.append(True)
+
+        transport = WsTransport(config=cfg, on_auth_failed=on_auth_failed)
+        async with transport:
+            await asyncio.sleep(0.1)
+            with pytest.raises(LoomTransportError):
+                await transport.reauth(token="bad-token")
+            await asyncio.sleep(0.05)
+        assert auth_failed == [True]
+        assert isinstance(cfg.auth, BearerAuth)
+        assert cfg.auth.token == "t"  # NOT mirrored on rejection
+
+    async def test_queue_overflow_forces_resync(self, fake_daemon, monkeypatch) -> None:
+        monkeypatch.setattr(ws_module, "_ENVELOPE_QUEUE_MAXSIZE", 3)
+        resyncs: list[int] = []
+
+        async def on_replay_lost(oldest_seq: int) -> None:
+            resyncs.append(oldest_seq)
+
+        async def script(ws: web.WebSocketResponse, _rx: list[dict]) -> None:
+            await asyncio.sleep(0.15)
+            # No consumer drains the queue → maxsize=3 fills, the rest overflow.
+            for i in range(8):
+                await ws.send_str(_envelope(seq=i))
+            await asyncio.sleep(0.3)
+
+        cfg, _rx = await fake_daemon(script)
+        async with WsTransport(config=cfg, on_replay_lost=on_replay_lost):
+            await asyncio.sleep(0.7)
+
+        assert resyncs, "queue overflow should have forced a resync"
+        assert resyncs[0] == -1  # the overflow sentinel

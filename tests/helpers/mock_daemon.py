@@ -23,6 +23,7 @@ body / header / query assertions.
 
 from __future__ import annotations
 
+import asyncio
 from collections import deque
 from dataclasses import dataclass
 import json
@@ -56,6 +57,7 @@ class _StubResponse:
     payload: Any = None
     body: bytes | None = None
     content_type: str = "application/json"
+    delay: float = 0.0
 
 
 class MockDaemon:
@@ -83,11 +85,12 @@ class MockDaemon:
         status: int = 200,
         body: bytes | None = None,
         content_type: str = "application/json",
+        delay: float = 0.0,
     ) -> None:
-        """Queue a response for the next call to ``method path``."""
+        """Queue a response for the next call to ``method path`` (``delay`` s server-side)."""
         key = (method.upper(), path)
         self._responses.setdefault(key, deque()).append(
-            _StubResponse(status=status, payload=payload, body=body, content_type=content_type)
+            _StubResponse(status=status, payload=payload, body=body, content_type=content_type, delay=delay)
         )
 
     def get(self, path: str, **kwargs: Any) -> None:
@@ -164,6 +167,8 @@ class MockDaemon:
                 status=404,
             )
         stub = queue.popleft() if len(queue) > 1 else queue[0]
+        if stub.delay:
+            await asyncio.sleep(stub.delay)
         if stub.payload is not None:
             return web.json_response(stub.payload, status=stub.status)
         if stub.body is not None:
