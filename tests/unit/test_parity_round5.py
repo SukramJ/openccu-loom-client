@@ -56,6 +56,7 @@ def _dp_summary(**overrides: Any) -> DataPointSummary:
         "category": "sensor",
     }
     payload.update(overrides)
+    payload.setdefault("unique_id", f"loom_test_{str(payload['parameter']).lower()}")
     return DataPointSummary.model_validate(payload)
 
 
@@ -68,6 +69,7 @@ def _cdp_summary(**overrides: Any) -> CustomDPSummary:
         "kind": "climate_hmip",
     }
     payload.update(overrides)
+    payload.setdefault("unique_id", f"loom_test_{str(payload['name']).lower()}")
     return CustomDPSummary.model_validate(payload)
 
 
@@ -198,6 +200,7 @@ def _switch_cdp_summary(**overrides: Any) -> CustomDPSummary:
         "kind": "switch",
     }
     payload.update(overrides)
+    payload.setdefault("unique_id", f"loom_test_{str(payload['name']).lower()}")
     return CustomDPSummary.model_validate(payload)
 
 
@@ -295,6 +298,7 @@ class TestRefreshBridgePingsChannelCdp:
                         "paramset_key": "VALUES",
                         "value": 22.0,
                         "modified_at": "2026-06-12T08:00:00Z",
+                        "unique_id": "loom_vcu1_1_actual_temperature",
                     }
                 ),
             )
@@ -660,6 +664,7 @@ class TestCentralIdInference:
                         "value": 1.0,
                         "observed": True,
                         "central": central_tag,
+                        "unique_id": f"loom_test_{name.lower()}",
                     }
                 )
             )
@@ -978,6 +983,7 @@ class TestCalculatedTranslatedName:
                 "value": 12.5,
                 "observed": True,
                 "translated_name": "Taupunkt",
+                "unique_id": "loom_test_dew_point",
             }
         )
         assert synthesize_summary(calc=calc).translated_name == "Taupunkt"
@@ -1002,6 +1008,7 @@ class TestCalculatedTranslatedName:
                 "value": 12.5,
                 "observed": True,
                 "translated_name": "HEATING_CLIMATECONTROL_TRANSCEIVER Dew Point",
+                "unique_id": "loom_test_dew_point",
             }
         )
         dp = make_calculated_data_point(summary=calc, device_address="VCU0000001", channel_number=1, store=LoomStore())
@@ -1016,7 +1023,13 @@ class TestCalculatedTranslatedName:
         from openccu_loom_client.store import LoomStore
 
         calc = CalculatedDPSummary.model_validate(
-            {"name": "ENTHALPY", "category": "sensor", "value": 1.0, "observed": True}
+            {
+                "name": "ENTHALPY",
+                "category": "sensor",
+                "value": 1.0,
+                "observed": True,
+                "unique_id": "loom_test_enthalpy",
+            }
         )
         dp = make_calculated_data_point(summary=calc, device_address="VCU0000001", channel_number=1, store=LoomStore())
         assert dp.name == "ENTHALPY"
@@ -1026,7 +1039,7 @@ class TestCalculatedTranslatedName:
 
         from openccu_loom_client.compat.aiohomematic.model.combined import _synthesize_summary
 
-        value_dp = SimpleNamespace(min=0, max=600)
+        value_dp = SimpleNamespace(min=0, max=600, summary=SimpleNamespace(unique_id="loom_test_duration"))
         summary = _synthesize_summary(value_dp=value_dp, translated_name="Zeitdauer")
         assert summary.translated_name == "Zeitdauer"
         assert summary.parameter == "DURATION"

@@ -63,6 +63,7 @@ def _dp_summary(*, parameter: str, value: Any = None) -> DataPointSummary:
             "value": value,
             "observed": value is not None,
             "operations": Operations(read=True, write=True, event=True).model_dump(),
+            "unique_id": f"loom_test_{parameter.lower()}",
         }
     )
 
@@ -257,6 +258,7 @@ class TestLiveUpdates:
                 "paramset_key": "VALUES",
                 "value": 0.8,
                 "modified_at": "2026-05-24T08:42:13Z",
+                "unique_id": "loom_test_vcu0001_1_level",
             }
         )
         populated.apply_value_changed(payload=payload)
@@ -275,6 +277,7 @@ class TestLiveUpdates:
                 "paramset_key": "VALUES",
                 "value": 1.0,
                 "modified_at": "2026-05-24T08:42:13Z",
+                "unique_id": "loom_test_vcu9999_1_never_heard_of",
             }
         )
         populated.apply_value_changed(payload=payload)
@@ -353,6 +356,7 @@ def _dp_payload(*, parameter: str, value: Any, modified_at: str) -> dict[str, An
         "observed": True,
         "operations": Operations(read=True, write=True, event=True).model_dump(),
         "modified_at": modified_at,
+        "unique_id": f"loom_test_{parameter.lower()}",
     }
 
 
@@ -386,6 +390,7 @@ class TestRefreshStaleGuard:
                     "paramset_key": "VALUES",
                     "value": value,
                     "modified_at": modified_at,
+                    "unique_id": "loom_test_vcu0001_1_state",
                 }
             )
         )
@@ -526,6 +531,7 @@ def _cdp_summary(*, name: str, channel_no: int) -> CustomDPSummary:
             "category": "switch",
             "channel_no": channel_no,
             "supported_operations": ["turn_on", "turn_off"],
+            "unique_id": f"loom_test_{name.lower()}_{channel_no}",
         }
     )
 

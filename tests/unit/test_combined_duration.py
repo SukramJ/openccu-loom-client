@@ -45,6 +45,7 @@ def _dp_summary(*, parameter: str, value: Any, type_: str = "FLOAT") -> DataPoin
             "min": 0,
             "max": 60,
             "operations": {"read": True, "write": True, "event": True},
+            "unique_id": f"loom_test_{parameter.lower()}",
         }
     )
 

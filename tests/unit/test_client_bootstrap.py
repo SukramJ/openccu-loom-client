@@ -83,12 +83,14 @@ _DATA_POINTS = [
         "value": False,
         "observed": True,
         "operations": {"read": True, "write": True, "event": True},
+        "unique_id": "loom_test_vcu0001_1_state",
     },
     {
         "parameter": "LEVEL",
         "value": 0.0,
         "observed": True,
         "operations": {"read": True, "write": True, "event": True},
+        "unique_id": "loom_test_vcu0001_1_level",
     },
 ]
 
@@ -240,6 +242,7 @@ class TestWsBridge:
                         "paramset_key": "VALUES",
                         "value": 0.75,
                         "modified_at": "2026-05-24T08:42:13Z",
+                        "unique_id": "loom_test_vcu0001_1_level",
                     }
                 ),
             )
@@ -292,6 +295,7 @@ _NEW_DEVICE_DATA_POINTS = [
         "value": False,
         "observed": True,
         "operations": {"read": True, "write": False, "event": True},
+        "unique_id": "loom_test_vcu0002_1_state",
     },
 ]
 

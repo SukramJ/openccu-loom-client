@@ -15,7 +15,15 @@ from openccu_loom_client.store import LoomStore
 
 
 def _program_summary(*, program_id: str = "p1") -> ProgramSummary:
-    return ProgramSummary.model_validate({"id": program_id, "name": "All off", "description": "", "active": True})
+    return ProgramSummary.model_validate(
+        {
+            "id": program_id,
+            "name": "All off",
+            "description": "",
+            "active": True,
+            "unique_id": f"loom_test_{program_id}",
+        }
+    )
 
 
 def _sysvar_summary(*, name: str = "temp", value: Any = 21.5) -> SysvarSummary:
@@ -27,6 +35,7 @@ def _sysvar_summary(*, name: str = "temp", value: Any = 21.5) -> SysvarSummary:
             "value_type": "FLOAT",
             "value": value,
             "observed": True,
+            "unique_id": f"loom_test_{name.lower()}",
         }
     )
 
@@ -83,7 +92,11 @@ class TestSnapshotLoad:
         assert original is not None
         store.load_snapshot(
             snapshot=_snapshot(
-                programs=[ProgramSummary.model_validate({"id": "p1", "name": "Renamed", "active": False})]
+                programs=[
+                    ProgramSummary.model_validate(
+                        {"id": "p1", "name": "Renamed", "active": False, "unique_id": "loom_test_p1"}
+                    )
+                ]
             )
         )
         same = store.get_program(program_id="p1")
@@ -108,6 +121,7 @@ class TestSysvarValueUpdate:
                     "value_type": "FLOAT",
                     "value": 22.0,
                     "previous": 21.5,
+                    "unique_id": "loom_test_temp",
                 }
             )
         )
@@ -122,6 +136,7 @@ class TestSysvarValueUpdate:
                     "name": "GHOST",
                     "value_type": "FLOAT",
                     "value": 1.0,
+                    "unique_id": "loom_test_ghost",
                 }
             )
         )

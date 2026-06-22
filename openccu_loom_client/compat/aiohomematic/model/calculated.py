@@ -93,6 +93,9 @@ def synthesize_summary(*, calc: CalculatedDPSummary) -> DataPointSummary:
     return DataPointSummary.model_validate(
         {
             "parameter": calc.name,
+            # The daemon ships the canonical key on the calculated record (J1);
+            # carry it through so the projected summary keys identically.
+            "unique_id": calc.unique_id,
             "value": calc.value,
             "observed": calc.observed,
             "modified_at": calc.modified_at,

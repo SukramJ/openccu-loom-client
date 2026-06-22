@@ -47,6 +47,7 @@ def _dp_summary(**overrides: Any) -> DataPointSummary:
         "category": "binary_sensor",
     }
     payload.update(overrides)
+    payload.setdefault("unique_id", f"loom_test_{str(payload['parameter']).lower()}")
     return DataPointSummary.model_validate(payload)
 
 
@@ -133,6 +134,7 @@ def _cdp_summary(**overrides: Any) -> CustomDPSummary:
         "kind": "climate_hmip",
     }
     payload.update(overrides)
+    payload.setdefault("unique_id", f"loom_test_{str(payload['name']).lower()}")
     return CustomDPSummary.model_validate(payload)
 
 
@@ -474,6 +476,7 @@ class TestCalculatedDataPoints:
                         "category": "binary_sensor",
                         "value": False,
                         "observed": True,
+                        "unique_id": "loom_test_window_open",
                     }
                 )
             ],
@@ -496,7 +499,13 @@ class TestCalculatedDataPoints:
             channel_number=1,
             calculated=[
                 CalculatedDPSummary.model_validate(
-                    {"name": "DEW_POINT", "category": "sensor", "value": 0, "observed": False}
+                    {
+                        "name": "DEW_POINT",
+                        "category": "sensor",
+                        "value": 0,
+                        "observed": False,
+                        "unique_id": "loom_test_dew_point",
+                    }
                 )
             ],
         )
@@ -519,6 +528,7 @@ class TestCalculatedDataPoints:
                         "category": "binary_sensor",
                         "value": False,
                         "observed": True,
+                        "unique_id": "loom_test_window_open",
                     }
                 )
             ],
@@ -533,6 +543,7 @@ class TestCalculatedDataPoints:
                     "paramset_key": "VALUES",
                     "value": True,
                     "modified_at": "2026-06-11T10:00:00Z",
+                    "unique_id": "loom_test_window_open",
                 }
             )
         )
@@ -577,6 +588,7 @@ def _sysvar_summary(**overrides: Any) -> SysvarSummary:
         "observed": True,
     }
     payload.update(overrides)
+    payload.setdefault("unique_id", f"loom_test_{str(payload['name']).lower()}")
     return SysvarSummary.model_validate(payload)
 
 
