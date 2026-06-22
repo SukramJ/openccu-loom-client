@@ -94,6 +94,17 @@ class Channel:
         return bool(self._summary.is_group_master)
 
     @property
+    def is_custom_dp_primary(self) -> bool | None:
+        """
+        Return the daemon's primary-channel marker for custom data points (K1).
+
+        ``True``/``False`` when the daemon knows the device profile (it
+        owns the profile knowledge), ``None`` when unmarked — the naming
+        layer then falls back to the lowest same-category CDP channel.
+        """
+        return self._summary.is_custom_dp_primary
+
+    @property
     def is_in_multi_group(self) -> bool:
         """
         Return whether the channel's group has more than one member.

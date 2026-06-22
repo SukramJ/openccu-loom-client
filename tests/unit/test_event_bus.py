@@ -40,6 +40,7 @@ def _dpv_event(*, seq: int = 1, value: Any = 1.0) -> DataPointValueChangedEvent:
                 "paramset_key": "VALUES",
                 "value": value,
                 "modified_at": "2026-05-24T08:42:13Z",
+                "unique_id": "loom_test_level",
             }
         ),
     )

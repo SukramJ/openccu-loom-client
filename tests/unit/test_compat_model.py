@@ -93,7 +93,7 @@ async def _adapter():
     return await CentralConfig(name="home", host="loom.test", port=8080, tls=False, token="tok-1").create_central()
 
 
-def _cdp(*, name: str, category: str, kind: str) -> CustomDPSummary:
+def _cdp(*, name: str, category: str, kind: str, unique_id: str | None = None) -> CustomDPSummary:
     return CustomDPSummary.model_validate(
         {
             "name": name,
@@ -101,6 +101,7 @@ def _cdp(*, name: str, category: str, kind: str) -> CustomDPSummary:
             "channel_no": 1,
             "supported_operations": ["open", "close", "set_position"],
             "kind": kind,
+            "unique_id": unique_id or f"loom_test_{name}",
         }
     )
 
@@ -128,7 +129,7 @@ class TestCustomDataPointModel:
         )
         store.attach_custom_data_points(
             device_address="VCU1",
-            cdps=[_cdp(name="cover", category="cover", kind="cover_blind")],
+            cdps=[_cdp(name="cover", category="cover", kind="cover_blind", unique_id="loom_vcu1_1")],
         )
         store.apply_custom_data_point_state_changed(
             payload=CustomDataPointStateChangedPayload.model_validate(
@@ -138,6 +139,7 @@ class TestCustomDataPointModel:
                     "channel": 1,
                     "name": "cover",
                     "state": {"state": "open", "current_position": 42},
+                    "unique_id": "loom_test_vcu1_1_cover",
                 }
             )
         )
@@ -167,6 +169,7 @@ class TestCustomDataPointModel:
                     "channel": 1,
                     "name": "climate",
                     "state": {"hvac_mode": "heat", "set_temperature": 21.5},
+                    "unique_id": "loom_test_vcu2_1_climate",
                 }
             )
         )
@@ -200,6 +203,7 @@ def _cdp_instance(*, kind, category, capabilities=None, state=None, supported=("
                     "supported_operations": list(supported),
                     "kind": kind,
                     "capabilities": capabilities or {},
+                    "unique_id": f"loom_test_{category}",
                 }
             )
         ],
@@ -213,6 +217,7 @@ def _cdp_instance(*, kind, category, capabilities=None, state=None, supported=("
                     "channel": 1,
                     "name": category,
                     "state": state,
+                    "unique_id": f"loom_test_{category}",
                 }
             )
         )
@@ -324,6 +329,7 @@ class TestGenericSetOnTime:
                     "value": False,
                     "observed": True,
                     "operations": {"read": True, "write": True, "event": True},
+                    "unique_id": "loom_test_state",
                 }
             )
         ]
@@ -336,6 +342,7 @@ class TestGenericSetOnTime:
                         "value": 0.0,
                         "observed": True,
                         "operations": {"read": True, "write": True, "event": True},
+                        "unique_id": "loom_test_on_time",
                     }
                 )
             )
@@ -402,6 +409,7 @@ class TestProtocolSurfacePresentation:
             "value": False,
             "observed": True,
             "operations": {"read": True, "write": True, "event": True},
+            "unique_id": "loom_test_state",
         }
         if value_translations is not None:
             dp["value_translations"] = value_translations
@@ -745,6 +753,7 @@ class TestRefreshBridge:
                         "paramset_key": "VALUES",
                         "value": True,
                         "modified_at": "2026-05-24T08:00:00Z",
+                        "unique_id": "",
                     }
                 ),
             )
@@ -800,6 +809,7 @@ class TestRefreshBridge:
                         "channel": 1,
                         "name": "cover",
                         "state": {"current_position": 10},
+                        "unique_id": "",
                     }
                 ),
             )
@@ -809,7 +819,9 @@ class TestRefreshBridge:
                 seq=3,
                 kind=Kind.change,
                 ts="2026-05-24T08:00:00Z",
-                payload=SysvarChangedPayload.model_validate({"central": "home", "name": "My Var", "value": 1.0}),
+                payload=SysvarChangedPayload.model_validate(
+                    {"central": "home", "name": "My Var", "value": 1.0, "unique_id": ""}
+                ),
             )
         )
         # Rebuilt canonical keys: a custom DP keys on its primary channel
@@ -845,6 +857,7 @@ class TestRefreshBridge:
                         "reason": "timeout",
                         "sent": 0.8,
                         "present": 0.5,
+                        "unique_id": "loom_test_vcu1_1_level",
                     }
                 ),
             )
@@ -896,6 +909,7 @@ class TestEventBridge:
                         "event_type": "keypress",  # daemon short token
                         "parameter": "PRESS_SHORT",
                         "value": True,
+                        "unique_id": "loom_test_vcu1_1_press_short",
                     }
                 ),
             )
@@ -992,6 +1006,7 @@ class TestEventBridge:
                         "value": True,
                         "observed": True,
                         "operations": {"read": True, "write": False, "event": True},
+                        "unique_id": "loom_test_state",
                     }
                 )
             ],
@@ -1030,6 +1045,7 @@ class TestGenericDataPointFactory:
                         "value": "CLOSED",
                         "observed": True,
                         "operations": {"read": True, "write": False, "event": True},
+                        "unique_id": "loom_test_state",
                     }
                 )
             ],
@@ -1054,6 +1070,7 @@ class TestGenericDataPointFactory:
                         "value": 21.5,
                         "observed": True,
                         "operations": {"read": True, "write": False, "event": True},
+                        "unique_id": "loom_test_temperature",
                     }
                 )
             ],
@@ -1079,6 +1096,7 @@ class TestGenericDataPointFactory:
                         "value": False,
                         "observed": True,
                         "operations": {"read": True, "write": False, "event": True},
+                        "unique_id": "loom_test_low_bat",
                     }
                 ),
                 DataPointSummary.model_validate(
@@ -1091,6 +1109,7 @@ class TestGenericDataPointFactory:
                         "value": "CLOSED",
                         "observed": True,
                         "operations": {"read": True, "write": False, "event": True},
+                        "unique_id": "loom_test_state_2",
                     }
                 ),
             ],

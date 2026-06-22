@@ -73,25 +73,33 @@ def _store() -> LoomStore:
 
 
 def _generic_instance(class_name: str) -> Any:
-    summary = DataPointSummary(parameter="STATE", observed=True, operations=_OPS, type="BOOL", value=True)
+    summary = DataPointSummary(
+        parameter="STATE", observed=True, operations=_OPS, type="BOOL", value=True, unique_id="loom_test_state"
+    )
     cls = getattr(_generic, class_name)
     return cls(summary=summary, device_address=_DEVICE, channel_number=1, store=_store())
 
 
 def _custom_instance(class_name: str) -> Any:
-    summary = CustomDPSummary(name="cdp", category=DataPointCategory.Switch, channel_no=1, supported_operations=["set"])
+    summary = CustomDPSummary(
+        name="cdp",
+        category=DataPointCategory.Switch,
+        channel_no=1,
+        supported_operations=["set"],
+        unique_id="loom_test_cdp",
+    )
     cls = getattr(_custom, class_name)
     return cls(summary=summary, device_address=_DEVICE, store=_store())
 
 
 def _sysvar_instance(class_name: str) -> Any:
-    summary = SysvarSummary(name="sv", value_type="BOOL", observed=True, value=True)
+    summary = SysvarSummary(name="sv", value_type="BOOL", observed=True, value=True, unique_id="loom_test_sv")
     cls = getattr(_hub, class_name)
     return cls(summary=summary, store=_store())
 
 
 def _program_instance(class_name: str) -> Any:
-    summary = ProgramSummary(id="1000", name="prog")
+    summary = ProgramSummary(id="1000", name="prog", unique_id="loom_test_prog")
     cls = getattr(_hub, class_name)
     return cls(summary=summary, store=_store())
 

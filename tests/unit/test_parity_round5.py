@@ -56,6 +56,7 @@ def _dp_summary(**overrides: Any) -> DataPointSummary:
         "category": "sensor",
     }
     payload.update(overrides)
+    payload.setdefault("unique_id", f"loom_test_{str(payload['parameter']).lower()}")
     return DataPointSummary.model_validate(payload)
 
 
@@ -68,6 +69,7 @@ def _cdp_summary(**overrides: Any) -> CustomDPSummary:
         "kind": "climate_hmip",
     }
     payload.update(overrides)
+    payload.setdefault("unique_id", f"loom_test_{str(payload['name']).lower()}")
     return CustomDPSummary.model_validate(payload)
 
 
@@ -117,7 +119,14 @@ def _store_with_device(
     return store
 
 
-def _channel(*, address: str, number: int, name: str, channel_type: str | None = None) -> dict[str, Any]:
+def _channel(
+    *,
+    address: str,
+    number: int,
+    name: str,
+    channel_type: str | None = None,
+    is_custom_dp_primary: bool | None = None,
+) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "address": f"{address}:{number}",
         "number": number,
@@ -127,6 +136,8 @@ def _channel(*, address: str, number: int, name: str, channel_type: str | None =
     }
     if channel_type is not None:
         payload["type"] = channel_type
+    if is_custom_dp_primary is not None:
+        payload["is_custom_dp_primary"] = is_custom_dp_primary
     return payload
 
 
@@ -198,6 +209,7 @@ def _switch_cdp_summary(**overrides: Any) -> CustomDPSummary:
         "kind": "switch",
     }
     payload.update(overrides)
+    payload.setdefault("unique_id", f"loom_test_{str(payload['name']).lower()}")
     return CustomDPSummary.model_validate(payload)
 
 
@@ -295,6 +307,7 @@ class TestRefreshBridgePingsChannelCdp:
                         "paramset_key": "VALUES",
                         "value": 22.0,
                         "modified_at": "2026-06-12T08:00:00Z",
+                        "unique_id": "loom_vcu1_1_actual_temperature",
                     }
                 ),
             )
@@ -660,6 +673,7 @@ class TestCentralIdInference:
                         "value": 1.0,
                         "observed": True,
                         "central": central_tag,
+                        "unique_id": f"loom_test_{name.lower()}",
                     }
                 )
             )
@@ -756,9 +770,9 @@ class TestCustomNameParts:
             model="HMIP-PSM",
             name="Weinkühlschrank",
             channels=[
-                _channel(address="VCU1", number=3, name="Weinkühlschrank:3"),
-                _channel(address="VCU1", number=4, name="Weinkühlschrank:4"),
-                _channel(address="VCU1", number=5, name="Weinkühlschrank:5"),
+                _channel(address="VCU1", number=3, name="Weinkühlschrank:3", is_custom_dp_primary=True),
+                _channel(address="VCU1", number=4, name="Weinkühlschrank:4", is_custom_dp_primary=False),
+                _channel(address="VCU1", number=5, name="Weinkühlschrank:5", is_custom_dp_primary=False),
             ],
         )
         store.attach_custom_data_points(
@@ -786,8 +800,8 @@ class TestCustomNameParts:
             model="HmIP-DRSI4",
             name="Schalter Dachboden",
             channels=[
-                _channel(address="VCU1", number=6, name="Schalter Dachboden:6"),
-                _channel(address="VCU1", number=10, name="Schalter Dachboden:10"),
+                _channel(address="VCU1", number=6, name="Schalter Dachboden:6", is_custom_dp_primary=True),
+                _channel(address="VCU1", number=10, name="Schalter Dachboden:10", is_custom_dp_primary=True),
             ],
         )
         store.attach_custom_data_points(
@@ -978,6 +992,7 @@ class TestCalculatedTranslatedName:
                 "value": 12.5,
                 "observed": True,
                 "translated_name": "Taupunkt",
+                "unique_id": "loom_test_dew_point",
             }
         )
         assert synthesize_summary(calc=calc).translated_name == "Taupunkt"
@@ -1002,6 +1017,7 @@ class TestCalculatedTranslatedName:
                 "value": 12.5,
                 "observed": True,
                 "translated_name": "HEATING_CLIMATECONTROL_TRANSCEIVER Dew Point",
+                "unique_id": "loom_test_dew_point",
             }
         )
         dp = make_calculated_data_point(summary=calc, device_address="VCU0000001", channel_number=1, store=LoomStore())
@@ -1016,7 +1032,13 @@ class TestCalculatedTranslatedName:
         from openccu_loom_client.store import LoomStore
 
         calc = CalculatedDPSummary.model_validate(
-            {"name": "ENTHALPY", "category": "sensor", "value": 1.0, "observed": True}
+            {
+                "name": "ENTHALPY",
+                "category": "sensor",
+                "value": 1.0,
+                "observed": True,
+                "unique_id": "loom_test_enthalpy",
+            }
         )
         dp = make_calculated_data_point(summary=calc, device_address="VCU0000001", channel_number=1, store=LoomStore())
         assert dp.name == "ENTHALPY"
@@ -1026,7 +1048,7 @@ class TestCalculatedTranslatedName:
 
         from openccu_loom_client.compat.aiohomematic.model.combined import _synthesize_summary
 
-        value_dp = SimpleNamespace(min=0, max=600)
+        value_dp = SimpleNamespace(min=0, max=600, summary=SimpleNamespace(unique_id="loom_test_duration"))
         summary = _synthesize_summary(value_dp=value_dp, translated_name="Zeitdauer")
         assert summary.translated_name == "Zeitdauer"
         assert summary.parameter == "DURATION"

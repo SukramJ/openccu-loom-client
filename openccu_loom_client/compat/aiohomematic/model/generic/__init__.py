@@ -60,12 +60,9 @@ class _GenericEntitySurface(_GenericProtocolSurface):
 
     @property
     def unique_id(self) -> str:
-        return data_point_event_key(
-            serial_suffix=self._store.serial_suffix,
-            device_address=self.device_address,
-            channel=self.channel_number,
-            parameter=self.parameter,
-        )
+        # J1: the daemon owns the canonical key and ships it (required) on every
+        # summary — consume it instead of recomputing via canonical.py.
+        return self.summary.unique_id
 
     @property
     def name(self) -> str:

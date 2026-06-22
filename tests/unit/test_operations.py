@@ -111,7 +111,7 @@ class TestHubOperations:
     async def test_list_programs(self, mock_daemon: MockDaemon, http: HttpTransport) -> None:
         mock_daemon.get(
             "/api/v1/programs",
-            payload=[{"id": "p1", "name": "All off"}],
+            payload=[{"id": "p1", "name": "All off", "unique_id": "loom_test_p1"}],
         )
         programs = await HubOperations(transport=http).list_programs()
         assert len(programs) == 1

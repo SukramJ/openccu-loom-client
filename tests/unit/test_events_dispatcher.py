@@ -123,6 +123,7 @@ class TestDispatch:
                 "paramset_key": "VALUES",
                 "value": 0.5,
                 "modified_at": "2026-05-24T08:42:13Z",
+                "unique_id": "loom_test_level",
             },
         )
         ev = event_from_envelope(envelope=env)
@@ -204,6 +205,7 @@ class TestDispatch:
                 "value_type": "FLOAT",
                 "value": 42.0,
                 "previous": 41.0,
+                "unique_id": "loom_test_my_var",
             },
         )
         ev = event_from_envelope(envelope=env)
@@ -245,6 +247,7 @@ class TestDispatch:
                     "channel": 1,
                     "name": "main",
                     "state": {"on": True},
+                    "unique_id": "loom_test_main",
                 },
                 CustomDataPointStateChangedEvent,
             ),
@@ -257,6 +260,7 @@ class TestDispatch:
                     "channel": 1,
                     "event_type": "homematic.keypress",
                     "parameter": "PRESS_SHORT",
+                    "unique_id": "loom_event_0001_1_press_short",
                 },
                 DeviceTriggerEvent,
             ),
@@ -271,6 +275,7 @@ class TestDispatch:
                     "reason": "timeout",
                     "sent": 0.8,
                     "present": 0.5,
+                    "unique_id": "loom_test_level",
                 },
                 DataPointOptimisticRolledBackEvent,
             ),

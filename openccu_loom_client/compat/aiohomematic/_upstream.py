@@ -37,8 +37,6 @@ from aiohomematic.central.events import (
     OptimisticRollbackEvent,
 )
 from aiohomematic.const import (
-    HMIP_FIRMWARE_UPDATE_IN_PROGRESS_STATES,
-    HMIP_FIRMWARE_UPDATE_READY_STATES,
     HUB_ADDRESS,
     INSTALL_MODE_ADDRESS,
     PROGRAM_ADDRESS,
@@ -50,11 +48,9 @@ from aiohomematic.const import (
     DeviceTriggerEventType,
     ParamsetKey,
 )
-from aiohomematic.model.custom import ClimateMode, ClimateProfile, DeviceProfileRegistry
+from aiohomematic.model.custom import ClimateMode, ClimateProfile
 
 __all__ = [
-    "HMIP_FIRMWARE_UPDATE_IN_PROGRESS_STATES",
-    "HMIP_FIRMWARE_UPDATE_READY_STATES",
     "HUB_ADDRESS",
     "INSTALL_MODE_ADDRESS",
     "PROGRAM_ADDRESS",
@@ -70,7 +66,6 @@ __all__ = [
     "DataPointsCreatedEvent",
     "DeviceLifecycleEvent",
     "DeviceLifecycleEventType",
-    "DeviceProfileRegistry",
     "DeviceTriggerEvent",
     "DeviceTriggerEventType",
     "EventBus",

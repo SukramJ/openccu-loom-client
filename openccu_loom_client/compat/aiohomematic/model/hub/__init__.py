@@ -67,11 +67,8 @@ class _SysvarEntitySurface(_HubEntitySurface, _SysvarProtocolSurface):
 
     @property
     def unique_id(self) -> str:
-        """Return the canonical HA unique id for this sysvar."""
-        return sysvar_unique_id(
-            serial_suffix=self._store.serial_suffix,
-            name=self.name,
-        )
+        """Return the daemon-owned canonical HA unique id for this sysvar (J1)."""
+        return self.summary.unique_id
 
     @property
     def data_type(self) -> str | None:
@@ -154,8 +151,8 @@ class ProgramDpButton(_HubEntitySurface, _ProgramProtocolSurface, Program):
 
     @property
     def unique_id(self) -> str:
-        """Return the canonical HA unique id for this program."""
-        return program_unique_id(serial_suffix=self._store.serial_suffix, name=self.name)
+        """Return the daemon-owned canonical HA unique id for this program (J1)."""
+        return self.summary.unique_id
 
     async def press(self) -> None:
         """Trigger the program (HA button press)."""
@@ -169,8 +166,8 @@ class ProgramDpSwitch(_HubEntitySurface, _ProgramProtocolSurface, Program):
 
     @property
     def unique_id(self) -> str:
-        """Return the canonical HA unique id for this program."""
-        return program_unique_id(serial_suffix=self._store.serial_suffix, name=self.name)
+        """Return the daemon-owned canonical HA unique id for this program (J1)."""
+        return self.summary.unique_id
 
 
 # ---- updates ----

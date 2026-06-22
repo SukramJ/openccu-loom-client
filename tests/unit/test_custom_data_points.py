@@ -25,6 +25,7 @@ def _cdp_summary(*, name: str = "main", kind: str = "switch") -> CustomDPSummary
             "kind": kind,
             "channels": [1],
             "capabilities": {"on_off": True},
+            "unique_id": f"loom_test_{name.lower()}",
         }
     )
 
@@ -84,6 +85,7 @@ class TestStateUpdates:
                 "name": "main",
                 "kind": "switch",
                 "state": {"on": True, "level": 1.0},
+                "unique_id": "loom_test_vcu0001_1_main",
             }
         )
         store.apply_custom_data_point_state_changed(payload=payload)
@@ -98,6 +100,7 @@ class TestStateUpdates:
                 "name": "main",
                 "kind": "switch",
                 "state": {"on": False},
+                "unique_id": "loom_test_vcu0001_1_main",
             }
         )
         store.apply_custom_data_point_state_changed(payload=payload2)
@@ -115,6 +118,7 @@ class TestStateUpdates:
                     "channel": 1,
                     "name": "main",
                     "state": {"on": True},
+                    "unique_id": "loom_test_vcu0001_1_main",
                 }
             )
         )
@@ -134,6 +138,7 @@ class TestStateUpdates:
                     "channel": 1,
                     "name": "ghost",
                     "state": {},
+                    "unique_id": "loom_test_unknown_1_ghost",
                 }
             )
         )

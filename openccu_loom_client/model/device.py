@@ -177,6 +177,19 @@ class Device:
         return self._firmware.UpdateState if self._firmware is not None else None
 
     @property
+    def update_status(self) -> str | None:
+        """
+        Return the daemon's derived firmware update status, or ``None`` (K3).
+
+        One of ``up_to_date`` / ``update_available`` / ``installing``. The
+        daemon collapses the raw, interface-specific CCU firmware phases
+        (``DeriveDeviceUpdateStatus``), so the client no longer classifies
+        the raw state tokens itself.
+        """
+        status = self._summary.update_status
+        return status.value if status is not None else None
+
+    @property
     def central_info(self) -> SimpleNamespace:
         """Return the owning central, exposing its HA-facing ``name`` (the via-device)."""
         return SimpleNamespace(name=self._store.central_name)

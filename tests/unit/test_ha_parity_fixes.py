@@ -47,6 +47,7 @@ def _dp_summary(**overrides: Any) -> DataPointSummary:
         "category": "binary_sensor",
     }
     payload.update(overrides)
+    payload.setdefault("unique_id", f"loom_test_{str(payload['parameter']).lower()}")
     return DataPointSummary.model_validate(payload)
 
 
@@ -133,6 +134,7 @@ def _cdp_summary(**overrides: Any) -> CustomDPSummary:
         "kind": "climate_hmip",
     }
     payload.update(overrides)
+    payload.setdefault("unique_id", f"loom_test_{str(payload['name']).lower()}")
     return CustomDPSummary.model_validate(payload)
 
 
@@ -336,6 +338,7 @@ class TestCustomTranslatedName:
                             "name": "Küchenstrahler:4",
                             "paramset_key": "VALUES",
                             "data_points_count": 3,
+                            "is_custom_dp_primary": True,
                         },
                         {
                             "address": "VCU1:5",
@@ -343,6 +346,7 @@ class TestCustomTranslatedName:
                             "name": "Küchenstrahler:5",
                             "paramset_key": "VALUES",
                             "data_points_count": 3,
+                            "is_custom_dp_primary": False,
                         },
                         {
                             "address": "VCU1:6",
@@ -350,6 +354,7 @@ class TestCustomTranslatedName:
                             "name": "Küchenstrahler:6",
                             "paramset_key": "VALUES",
                             "data_points_count": 3,
+                            "is_custom_dp_primary": False,
                         },
                     ],
                 }
@@ -382,26 +387,24 @@ class TestCustomTranslatedName:
 class TestUpdateDataPoint:
     """Per-device firmware-update data points (aiohomematic DpUpdate twin)."""
 
-    def _device(self, store: LoomStore, firmware: dict[str, Any] | None = None) -> Any:
+    def _device(
+        self, store: LoomStore, firmware: dict[str, Any] | None = None, update_status: str | None = None
+    ) -> Any:
         from openccu_loom_types.rest import DeviceDetail, Snapshot
 
+        device_entry: dict[str, Any] = {
+            "address": "VCU9",
+            "interface": "HmIP-RF",
+            "model": "HmIP-PSM",
+            "name": "Steckdose",
+            "available": True,
+            "channels_count": 1,
+            "updatable": True,
+        }
+        if update_status is not None:
+            device_entry["update_status"] = update_status
         store.load_snapshot(
-            snapshot=Snapshot.model_validate(
-                {
-                    "generated_at": "2026-06-11T08:00:00Z",
-                    "devices": [
-                        {
-                            "address": "VCU9",
-                            "interface": "HmIP-RF",
-                            "model": "HmIP-PSM",
-                            "name": "Steckdose",
-                            "available": True,
-                            "channels_count": 1,
-                            "updatable": True,
-                        }
-                    ],
-                }
-            )
+            snapshot=Snapshot.model_validate({"generated_at": "2026-06-11T08:00:00Z", "devices": [device_entry]})
         )
         detail = {
             "address": "VCU9",
@@ -414,6 +417,8 @@ class TestUpdateDataPoint:
         }
         if firmware is not None:
             detail["firmware"] = firmware
+        if update_status is not None:
+            detail["update_status"] = update_status
         store.attach_device_detail(detail=DeviceDetail.model_validate(detail))
         return store.get_device(address="VCU9")
 
@@ -425,6 +430,7 @@ class TestUpdateDataPoint:
         device = self._device(
             store,
             firmware={"Current": "1.2.3", "Available": "1.3.0", "UpdateState": "READY_FOR_UPDATE"},
+            update_status="update_available",
         )
         dp = make_update_data_point(device=device, store=store)
         # Device addresses carry no central prefix (ccu reference:
@@ -474,6 +480,7 @@ class TestCalculatedDataPoints:
                         "category": "binary_sensor",
                         "value": False,
                         "observed": True,
+                        "unique_id": "loom_calculated_vcu7_1_window_open",
                     }
                 )
             ],
@@ -496,7 +503,13 @@ class TestCalculatedDataPoints:
             channel_number=1,
             calculated=[
                 CalculatedDPSummary.model_validate(
-                    {"name": "DEW_POINT", "category": "sensor", "value": 0, "observed": False}
+                    {
+                        "name": "DEW_POINT",
+                        "category": "sensor",
+                        "value": 0,
+                        "observed": False,
+                        "unique_id": "loom_test_dew_point",
+                    }
                 )
             ],
         )
@@ -519,6 +532,7 @@ class TestCalculatedDataPoints:
                         "category": "binary_sensor",
                         "value": False,
                         "observed": True,
+                        "unique_id": "loom_test_window_open",
                     }
                 )
             ],
@@ -533,6 +547,7 @@ class TestCalculatedDataPoints:
                     "paramset_key": "VALUES",
                     "value": True,
                     "modified_at": "2026-06-11T10:00:00Z",
+                    "unique_id": "loom_test_window_open",
                 }
             )
         )
@@ -577,6 +592,7 @@ def _sysvar_summary(**overrides: Any) -> SysvarSummary:
         "observed": True,
     }
     payload.update(overrides)
+    payload.setdefault("unique_id", f"loom_test_{str(payload['name']).lower()}")
     return SysvarSummary.model_validate(payload)
 
 

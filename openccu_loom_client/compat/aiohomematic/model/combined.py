@@ -50,6 +50,10 @@ def _synthesize_summary(*, value_dp: DataPoint, translated_name: str | None = No
     return DataPointSummary.model_validate(
         {
             "parameter": "DURATION",
+            # Internal scaffolding only — CombinedDurationDp.unique_id computes
+            # the real `loom_combined_…` key (no daemon key for this synthetic
+            # entity). A valid non-empty key satisfies the required field.
+            "unique_id": value_dp.summary.unique_id,
             "type": "FLOAT",
             "unit": "s",
             "min": value_dp.min,

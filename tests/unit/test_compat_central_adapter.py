@@ -25,7 +25,9 @@ from openccu_loom_client.compat.aiohomematic.central.adapter import _JsonRpcClie
 from tests.helpers import MockDaemon
 
 
-def _dp_summary(*, parameter: str, type_: str, read: bool, write: bool, value: object = None) -> DataPointSummary:
+def _dp_summary(
+    *, parameter: str, type_: str, read: bool, write: bool, value: object = None, unique_id: str | None = None
+) -> DataPointSummary:
     return DataPointSummary.model_validate(
         {
             "parameter": parameter,
@@ -33,6 +35,7 @@ def _dp_summary(*, parameter: str, type_: str, read: bool, write: bool, value: o
             "value": value,
             "observed": True,
             "operations": {"read": read, "write": write, "event": True},
+            "unique_id": unique_id or f"loom_test_{parameter.lower()}",
         }
     )
 
@@ -240,7 +243,7 @@ class TestGenericDataPointModel:
             device_address="VCU1",
             channel_number=1,
             data_points=[
-                _dp_summary(parameter="STATE", type_="BOOL", read=True, write=True),
+                _dp_summary(parameter="STATE", type_="BOOL", read=True, write=True, unique_id="loom_vcu1_1_state"),
                 _dp_summary(parameter="TEMPERATURE", type_="FLOAT", read=True, write=False),
             ],
         )
@@ -294,9 +297,10 @@ class TestHubDataPointModel:
                             "value_type": "LOGIC",
                             "value": True,
                             "observed": True,
+                            "unique_id": "loom_11a0001234_sysvar_alarm",
                         }
                     ],
-                    "programs": [{"id": "p1", "name": "All off", "active": True}],
+                    "programs": [{"id": "p1", "name": "All off", "active": True, "unique_id": "loom_test_p1"}],
                 }
             )
         )
@@ -345,6 +349,7 @@ class TestInternalSysvarInclusion:
                             "value": 1.0,
                             "observed": True,
                             "is_internal": True,
+                            "unique_id": "loom_test_sysvar_energycounter",
                         },
                         # ${...} variables back dedicated hub singletons —
                         # never a generic sysvar entity.
@@ -354,6 +359,7 @@ class TestInternalSysvarInclusion:
                             "value": 0.0,
                             "observed": True,
                             "is_internal": True,
+                            "unique_id": "loom_test_sysvar_alarmmessages",
                         },
                         # Plain user variable: included, disabled (no markers).
                         {
@@ -361,6 +367,7 @@ class TestInternalSysvarInclusion:
                             "value_type": "FLOAT",
                             "value": 21.5,
                             "observed": True,
+                            "unique_id": "loom_test_sysvar_temperatur_garten",
                         },
                     ],
                 }
@@ -391,6 +398,7 @@ class TestInternalSysvarInclusion:
                             "value": 1.0,
                             "observed": True,
                             "enabled_default": True,
+                            "unique_id": "loom_test_sysvar_marked",
                         },
                         {
                             "name": "Unmarked",
@@ -398,6 +406,7 @@ class TestInternalSysvarInclusion:
                             "value": 2.0,
                             "observed": True,
                             "enabled_default": False,
+                            "unique_id": "loom_test_sysvar_unmarked",
                         },
                     ],
                 }
@@ -429,6 +438,7 @@ class TestInternalSysvarInclusion:
                             "value": 1.0,
                             "observed": True,
                             "is_internal": True,
+                            "unique_id": "loom_test_sysvar_oldval",
                         },
                         {
                             "name": "pcCCUID",
@@ -436,6 +446,7 @@ class TestInternalSysvarInclusion:
                             "value": "x",
                             "observed": True,
                             "is_internal": True,
+                            "unique_id": "loom_test_sysvar_pcccuid",
                         },
                         # Fixed CCU IDs 40/41 back the alarm/service-message
                         # hub singletons (IGNORE_SYSVARS_BY_ID).
@@ -446,6 +457,7 @@ class TestInternalSysvarInclusion:
                             "observed": True,
                             "is_internal": True,
                             "vid": 40,
+                            "unique_id": "loom_test_sysvar_alarmmeldungen",
                         },
                         {
                             "name": "Servicemeldungen",
@@ -454,6 +466,7 @@ class TestInternalSysvarInclusion:
                             "observed": True,
                             "is_internal": True,
                             "vid": 41,
+                            "unique_id": "loom_test_sysvar_servicemeldungen",
                         },
                         # Control: a plain internal counter stays included.
                         {
@@ -463,6 +476,7 @@ class TestInternalSysvarInclusion:
                             "observed": True,
                             "is_internal": True,
                             "vid": 14179,
+                            "unique_id": "loom_test_sysvar_energycounter_ctrl",
                         },
                     ],
                 }

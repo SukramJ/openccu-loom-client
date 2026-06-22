@@ -137,12 +137,8 @@ class _CustomEntitySurface(_CustomProtocolSurface, CustomDataPoint):
 
     @property
     def unique_id(self) -> str:
-        """Return the canonical HA unique id derived from the primary channel address."""
-        return custom_unique_id(
-            serial_suffix=self._store.serial_suffix,
-            device_address=self._device_address,
-            channel_no=self._summary.channel_no,
-        )
+        """Return the daemon-owned canonical HA unique id (J1)."""
+        return self.summary.unique_id
 
     @property
     def full_name(self) -> str:

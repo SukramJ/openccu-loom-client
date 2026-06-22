@@ -18,10 +18,6 @@ from typing import TYPE_CHECKING, Any, ClassVar, Final
 from openccu_loom_types.enums import DataPointCategory
 
 from openccu_loom_client.canonical import canonical_unique_id
-from openccu_loom_client.compat.aiohomematic._upstream import (
-    HMIP_FIRMWARE_UPDATE_IN_PROGRESS_STATES,
-    HMIP_FIRMWARE_UPDATE_READY_STATES,
-)
 
 if TYPE_CHECKING:
     from openccu_loom_client.model import Device
@@ -94,29 +90,22 @@ class DpUpdate:
 
     @property
     def in_progress(self) -> bool:
-        """Return whether a firmware update is currently installing."""
-        if self._device.interface == "HmIP-RF":
-            return self._device.firmware_update_state in HMIP_FIRMWARE_UPDATE_IN_PROGRESS_STATES
-        return False
+        """Return whether a firmware update is currently installing (K3)."""
+        # The daemon's derived update_status collapses the raw, interface-
+        # specific CCU phases — consume it instead of classifying state tokens.
+        return self._device.update_status == "installing"
 
     @property
     def latest_firmware(self) -> str | None:
         """
-        Return the latest installable firmware (aiohomematic semantics).
+        Return the latest installable firmware (K3).
 
-        HmIP devices only advertise the available version once the CCU
-        reports a ready state; BidCos devices advertise it directly.
-        Falls back to the installed version so HA renders "up to date".
+        The daemon reports ``update_available`` once an install is offered
+        (collapsing the HmIP "ready state" vs. BidCos "direct" difference);
+        otherwise fall back to the installed version so HA renders "up to date".
         """
-        available = self._device.available_firmware
-        if available and (
-            (
-                self._device.interface == "HmIP-RF"
-                and self._device.firmware_update_state in HMIP_FIRMWARE_UPDATE_READY_STATES
-            )
-            or self._device.interface in ("BidCos-RF", "BidCos-Wired")
-        ):
-            return available
+        if self._device.update_status == "update_available":
+            return self._device.available_firmware or self._device.firmware
         return self._device.firmware
 
     @property
