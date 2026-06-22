@@ -5,7 +5,9 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import logging
+import time
 
 import openccu_loom_types
 import pytest
@@ -256,3 +258,24 @@ class TestLifecycle:
             assert t.info is not None
         # After __aexit__, info should be cleared.
         assert t.info is None
+
+
+class TestDeadlineBudget:
+    """N5: retries share one total-deadline budget, not N × per-request timeout."""
+
+    async def test_request_is_bounded_by_the_total_deadline(self, mock_daemon: MockDaemon) -> None:
+        mock_daemon.get("/api/v1/info", payload=_INFO_RESPONSE)
+        # An endpoint that hangs far past the budget — each attempt would time
+        # out on its own; the budget must stop the retries well before N × it.
+        mock_daemon.get("/api/v1/devices", payload={"items": []}, delay=1.0)
+        cfg = replace(mock_daemon.config, request_timeout_seconds=0.4)
+        transport = HttpTransport(config=cfg, backoff_sequence=(0.1, 0.1))
+        await transport.connect()
+        start = time.monotonic()
+        with pytest.raises(LoomTransportError):
+            await transport.request(method="GET", path="/devices")
+        elapsed = time.monotonic() - start
+        await transport.close()
+        # Budget ≈ 0.4 s. Without it: 3 × 0.4 + 0.2 backoff ≈ 1.4 s. Assert the
+        # total stays near the single budget (generous CI slack).
+        assert elapsed < 1.0, f"deadline budget not enforced: {elapsed:.2f}s"

@@ -553,6 +553,7 @@ fixture-parentheses = false # Don't require parentheses for fixtures without par
 # design (see CLAUDE.md conventions) — that coupling is the point.
 "openccu_loom_client/store.py" = ["SLF001"]
 "openccu_loom_client/compat/aiohomematic/central/adapter.py" = ["SLF001"]
+"openccu_loom_client/compat/aiohomematic/central/hub_coordinator.py" = ["SLF001"]
 "tests/**" = [
     "D100", "D101", "D102", "D103", "D107", # docstring requirements
     "TRY002", # too-broad exception guidance

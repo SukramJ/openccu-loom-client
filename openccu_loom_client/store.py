@@ -94,6 +94,10 @@ class LoomStore:
         self._channels: dict[tuple[str, int], Channel] = {}
         self._data_points: dict[tuple[str, int, str], DataPoint] = {}
         self._cdps: dict[tuple[str, str], CustomDataPoint] = {}
+        # Secondary index (address, primary-channel-no) → CDP, kept in lock-step
+        # with ``_cdps`` so the refresh bridge's per-value-event channel lookup
+        # (``get_custom_data_point_by_channel``) is O(1) instead of a scan.
+        self._cdp_by_channel: dict[tuple[str, int], CustomDataPoint] = {}
         self._programs: dict[str, Program] = {}
         self._sysvars: dict[str, Sysvar] = {}
         # Optional hook: a callable that builds a DataPoint (or a
@@ -169,6 +173,15 @@ class LoomStore:
     @property
     def transport(self) -> HttpTransport | None:
         """Return the bound transport, or ``None`` if none is attached yet."""
+        return self._transport
+
+    def _require_transport(self) -> HttpTransport:
+        """Return the bound transport, raising if none is set (write-back path)."""
+        if self._transport is None:
+            msg = (
+                "LoomStore has no transport bound — set one via set_transport() or construct the store with transport=…"
+            )
+            raise RuntimeError(msg)
         return self._transport
 
     def set_data_point_factory(self, *, factory: Callable[..., DataPoint] | None) -> None:
@@ -336,11 +349,19 @@ class LoomStore:
         )
 
     def get_custom_data_point_by_channel(self, *, address: str, channel_no: int) -> CustomDataPoint | None:
-        """Return the CDP whose primary channel is ``channel_no``, or ``None``."""
-        for (cdp_address, _name), cdp in self._cdps.items():
-            if cdp_address == address and cdp.summary.channel_no == channel_no:
-                return cdp
-        return None
+        """Return the CDP whose primary channel is ``channel_no``, or ``None`` (O(1))."""
+        return self._cdp_by_channel.get((address, channel_no))
+
+    def _register_cdp(self, *, key: tuple[str, str], cdp: CustomDataPoint) -> None:
+        """Add a CDP to both the name-keyed map and the channel-keyed index."""
+        self._cdps[key] = cdp
+        self._cdp_by_channel[(key[0], cdp.summary.channel_no)] = cdp
+
+    def _drop_cdp(self, *, key: tuple[str, str]) -> None:
+        """Remove a CDP from both maps, keeping the channel index in lock-step."""
+        cdp = self._cdps.pop(key, None)
+        if cdp is not None:
+            self._cdp_by_channel.pop((key[0], cdp.summary.channel_no), None)
 
     # ---- week-profile data points ----
 
@@ -406,17 +427,20 @@ class LoomStore:
         """
         stale = [k for k in self._cdps if k[0] == device_address]
         for k in stale:
-            del self._cdps[k]
+            self._drop_cdp(key=k)
         for summary in cdps:
             key = (device_address, summary.name)
             # Seed the live state from the summary's snapshot (daemon
             # >= 0.x includes it in GET .../cdps) so entities start on
             # the real state instead of defaults until the first WS
             # ``custom_data_point.state_changed`` push arrives.
-            self._cdps[key] = self._build_custom_data_point(
-                summary=summary,
-                device_address=device_address,
-                initial_state=getattr(summary, "state", None),
+            self._register_cdp(
+                key=key,
+                cdp=self._build_custom_data_point(
+                    summary=summary,
+                    device_address=device_address,
+                    initial_state=summary.state,
+                ),
             )
 
     # ---- bulk load (bootstrap) ----
@@ -605,7 +629,7 @@ class LoomStore:
         # CDPs are device-scoped, not channel-scoped — drop them too.
         stale_cdps = [cdp_key for cdp_key in self._cdps if cdp_key[0] == addr]
         for cdp_key in stale_cdps:
-            del self._cdps[cdp_key]
+            self._drop_cdp(key=cdp_key)
 
     def apply_sysvar_changed(self, *, payload: SysvarChangedPayload) -> None:
         """
@@ -667,16 +691,12 @@ class LoomStore:
         priority: str | None = None,
     ) -> None:
         """Translate a domain ``send_value`` into a daemon REST call."""
-        if self._transport is None:
-            msg = (
-                "LoomStore has no transport bound — set one via set_transport() or construct the store with transport=…"
-            )
-            raise RuntimeError(msg)
+        transport = self._require_transport()
         body: dict[str, Any] = {"value": value}
         if priority is not None:
             body["priority"] = priority
         path = f"/devices/{address}/channels/{channel}/data-points/{parameter}/value"
-        await self._transport.request(
+        await transport.request(
             method="PUT",
             path=path,
             json_body=body,
@@ -689,10 +709,8 @@ class LoomStore:
 
         Wire: ``PUT /sysvars/{name}``.
         """
-        if self._transport is None:
-            msg = "LoomStore has no transport bound — set one via set_transport()"
-            raise RuntimeError(msg)
-        await self._transport.request(
+        transport = self._require_transport()
+        await transport.request(
             method="PUT",
             path=f"/sysvars/{name}",
             json_body={"value": value},
@@ -707,10 +725,8 @@ class LoomStore:
         can have side effects (cover open, notification send) where
         a double-invocation is the wrong default.
         """
-        if self._transport is None:
-            msg = "LoomStore has no transport bound — set one via set_transport()"
-            raise RuntimeError(msg)
-        await self._transport.request(
+        transport = self._require_transport()
+        await transport.request(
             method="POST",
             path=f"/programs/{program_id}/execute",
             allow_retry=False,
@@ -726,11 +742,7 @@ class LoomStore:
         priority: str | None = None,
     ) -> None:
         """Translate a domain ``CustomDataPoint.invoke`` into a CDP-invoke REST call."""
-        if self._transport is None:
-            msg = (
-                "LoomStore has no transport bound — set one via set_transport() or construct the store with transport=…"
-            )
-            raise RuntimeError(msg)
+        transport = self._require_transport()
         body: dict[str, Any] = {}
         if params is not None:
             body["params"] = params
@@ -739,7 +751,7 @@ class LoomStore:
         # Always send a JSON body: the daemon parses the body strictly and
         # rejects an empty payload with 400 "Invalid JSON: EOF", so a bare
         # operation (turn_on without params) must POST ``{}``.
-        await self._transport.request(
+        await transport.request(
             method="POST",
             path=f"/devices/{address}/cdps/{name}/{operation}",
             json_body=body,
@@ -829,10 +841,8 @@ class LoomStore:
         Wire: ``POST /devices/{addr}/firmware/update``. Never retried —
         a duplicated trigger could double-flash the device.
         """
-        if self._transport is None:
-            msg = "LoomStore has no transport bound — set one via set_transport()"
-            raise RuntimeError(msg)
-        await self._transport.request(
+        transport = self._require_transport()
+        await transport.request(
             method="POST",
             path=f"/devices/{address}/firmware/update",
             allow_retry=False,

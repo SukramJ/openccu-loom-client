@@ -133,8 +133,6 @@ _HOMEMATICIP_LOCAL_IMPORTS: list[tuple[str, list[str]]] = [
             "CustomDpSwitch",
             "CustomDpTextDisplay",
             "LockState",
-            "PlaySoundArgs",
-            "SirenOnArgs",
         ],
     ),
     (

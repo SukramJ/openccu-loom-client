@@ -14,7 +14,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from openccu_loom_types.rest import ChannelSummary, DataPointSummary, DeviceDetail, DeviceSummary, Operations, Snapshot
+from openccu_loom_types.rest import (
+    ChannelSummary,
+    CustomDPSummary,
+    DataPointSummary,
+    DeviceDetail,
+    DeviceSummary,
+    Operations,
+    Snapshot,
+)
 from openccu_loom_types.ws import DataPointValueChangedPayload, DeviceCreatedPayload, DeviceRemovedPayload
 import pytest
 
@@ -509,3 +517,53 @@ class TestModelNavigation:
         assert dp is not None
         assert dp.channel is store.get_channel(address="VCU0001", number=1)
         assert dp.device is store.get_device(address="VCU0001")
+
+
+def _cdp_summary(*, name: str, channel_no: int) -> CustomDPSummary:
+    return CustomDPSummary.model_validate(
+        {
+            "name": name,
+            "category": "switch",
+            "channel_no": channel_no,
+            "supported_operations": ["turn_on", "turn_off"],
+        }
+    )
+
+
+class TestCustomDataPointChannelIndex:
+    """N3: get_custom_data_point_by_channel is an O(1) index kept in lock-step."""
+
+    def _store(self) -> LoomStore:
+        store = LoomStore()
+        store.attach_custom_data_points(
+            device_address="VCU0001",
+            cdps=[_cdp_summary(name="Switch1", channel_no=1), _cdp_summary(name="Switch3", channel_no=3)],
+        )
+        return store
+
+    def test_lookup_hit_and_miss(self) -> None:
+        store = self._store()
+        cdp1 = store.get_custom_data_point_by_channel(address="VCU0001", channel_no=1)
+        cdp3 = store.get_custom_data_point_by_channel(address="VCU0001", channel_no=3)
+        assert cdp1 is not None and cdp1.summary.channel_no == 1
+        assert cdp3 is not None and cdp3.summary.channel_no == 3
+        # Miss: unknown channel, unknown device.
+        assert store.get_custom_data_point_by_channel(address="VCU0001", channel_no=2) is None
+        assert store.get_custom_data_point_by_channel(address="VCU9999", channel_no=1) is None
+
+    def test_reattach_drops_stale_index_entries(self) -> None:
+        store = self._store()
+        # Re-attach a smaller catalogue (channel 3 gone) — its index entry must clear.
+        store.attach_custom_data_points(device_address="VCU0001", cdps=[_cdp_summary(name="Switch1", channel_no=1)])
+        assert store.get_custom_data_point_by_channel(address="VCU0001", channel_no=1) is not None
+        assert store.get_custom_data_point_by_channel(address="VCU0001", channel_no=3) is None
+
+    def test_device_removal_clears_index(self) -> None:
+        store = self._store()
+        store.apply_device_removed(
+            payload=DeviceRemovedPayload.model_validate(
+                {"central": "home", "interface_id": "home:HmIP-RF", "device_address": "VCU0001"}
+            )
+        )
+        assert store.get_custom_data_point_by_channel(address="VCU0001", channel_no=1) is None
+        assert store.get_custom_data_point_by_channel(address="VCU0001", channel_no=3) is None

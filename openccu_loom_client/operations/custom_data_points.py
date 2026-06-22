@@ -24,8 +24,7 @@ class CustomDataPointsOperations(_OperationsBase):
 
     async def list_for_device(self, *, address: str) -> list[CustomDPSummary]:
         """Wire: ``GET /devices/{addr}/cdps``."""
-        payload = await self._transport.request(method="GET", path=f"/devices/{address}/cdps")
-        return [CustomDPSummary.model_validate(c) for c in (payload or [])]
+        return await self._request_list(method="GET", path=f"/devices/{address}/cdps", model=CustomDPSummary)
 
     async def get(self, *, address: str, name: str) -> CustomDPSummary:
         """Wire: ``GET /devices/{addr}/cdps/{name}``."""

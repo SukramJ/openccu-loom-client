@@ -80,8 +80,7 @@ class DevicesOperations(_OperationsBase):
 
         Wire: ``GET /devices/{addr}/channels``.
         """
-        payload = await self._transport.request(method="GET", path=f"/devices/{address}/channels")
-        return [ChannelSummary.model_validate(c) for c in (payload or [])]
+        return await self._request_list(method="GET", path=f"/devices/{address}/channels", model=ChannelSummary)
 
     async def list_data_points(
         self,
@@ -94,11 +93,11 @@ class DevicesOperations(_OperationsBase):
 
         Wire: ``GET /devices/{addr}/channels/{n}/data-points``.
         """
-        payload = await self._transport.request(
+        return await self._request_list(
             method="GET",
             path=f"/devices/{address}/channels/{channel}/data-points",
+            model=DataPointSummary,
         )
-        return [DataPointSummary.model_validate(dp) for dp in (payload or [])]
 
     async def get_data_point(
         self,
@@ -126,11 +125,11 @@ class DevicesOperations(_OperationsBase):
 
         Wire: ``GET /devices/{addr}/channels/{n}/calc-dps``.
         """
-        payload = await self._transport.request(
+        return await self._request_list(
             method="GET",
             path=f"/devices/{address}/channels/{channel}/calc-dps",
+            model=CalculatedDPSummary,
         )
-        return [CalculatedDPSummary.model_validate(c) for c in (payload or [])]
 
     async def get_calculated_data_point(self, *, address: str, channel: int, name: str) -> CalculatedDPDetail:
         """
@@ -280,6 +279,6 @@ class DevicesOperations(_OperationsBase):
         await self._transport.request(
             method="POST",
             path=f"/devices/{address}/channels/{channel}/config/import",
-            json_body=configuration.model_dump(mode="json", exclude_none=True),
+            json_body=self._to_json_body(configuration),
             allow_retry=False,
         )

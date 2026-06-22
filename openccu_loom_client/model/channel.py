@@ -85,13 +85,13 @@ class Channel:
         channel number). The daemon omits the field for ungrouped
         channels, which this property maps to ``None``.
         """
-        group_no = getattr(self._summary, "group_no", None)
+        group_no = self._summary.group_no
         return group_no or None
 
     @property
     def is_group_master(self) -> bool:
         """Return whether this channel is the master of its channel group."""
-        return bool(getattr(self._summary, "is_group_master", False))
+        return bool(self._summary.is_group_master)
 
     @property
     def is_in_multi_group(self) -> bool:
@@ -102,7 +102,7 @@ class Channel:
         integration uses it to decide whether a data point moves onto a
         sub-device of the parent device.
         """
-        return bool(getattr(self._summary, "is_in_multi_group", False))
+        return bool(self._summary.is_in_multi_group)
 
     @property
     def room(self) -> str | None:
@@ -115,7 +115,7 @@ class Channel:
         field; the property degrades to ``None`` (callers fall back to
         the device room).
         """
-        return getattr(self._summary, "room", None) or None
+        return self._summary.room or None
 
     @property
     def functions(self) -> tuple[str, ...]:
@@ -127,7 +127,7 @@ class Channel:
         (openccu-loom v0.9.1). Empty when the channel carries no function
         assignment or against an older daemon that omits the field.
         """
-        return tuple(getattr(self._summary, "functions", None) or ())
+        return tuple(self._summary.functions or ())
 
     @property
     def group_master(self) -> GroupMasterView | None:

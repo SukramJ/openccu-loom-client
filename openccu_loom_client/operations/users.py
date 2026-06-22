@@ -15,15 +15,14 @@ class UsersOperations(_OperationsBase):
 
     async def list_users(self) -> list[UserSummary]:
         """Wire: ``GET /users``."""
-        payload = await self._transport.request(method="GET", path="/users")
-        return [UserSummary.model_validate(u) for u in (payload or [])]
+        return await self._request_list(method="GET", path="/users", model=UserSummary)
 
     async def create_user(self, *, user: UserCreate) -> UserSummary:
         """Create a new user. Wire: ``POST /users``."""
         payload = await self._transport.request(
             method="POST",
             path="/users",
-            json_body=user.model_dump(mode="json", exclude_none=True),
+            json_body=self._to_json_body(user),
             allow_retry=False,
         )
         return UserSummary.model_validate(payload)
@@ -33,7 +32,7 @@ class UsersOperations(_OperationsBase):
         await self._transport.request(
             method="PATCH",
             path=f"/users/{subject}",
-            json_body=update.model_dump(mode="json", exclude_none=True),
+            json_body=self._to_json_body(update),
             allow_retry=False,
         )
 

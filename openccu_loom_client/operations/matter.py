@@ -58,7 +58,7 @@ class MatterOperations(_OperationsBase):
         await self._transport.request(
             method="PUT",
             path="/matter/exposable",
-            json_body=update.model_dump(mode="json", exclude_none=True),
+            json_body=self._to_json_body(update),
             allow_retry=True,
         )
 
@@ -71,7 +71,7 @@ class MatterOperations(_OperationsBase):
         payload = await self._transport.request(
             method="POST",
             path="/matter/exposable/bulk",
-            json_body=updates.model_dump(mode="json", exclude_none=True),
+            json_body=self._to_json_body(updates),
             allow_retry=False,
         )
         return dict(payload or {})
@@ -84,7 +84,7 @@ class MatterOperations(_OperationsBase):
 
         Wire: ``POST /matter/commissioning/window``.
         """
-        body = request.model_dump(mode="json", exclude_none=True) if request is not None else None
+        body = self._to_json_body(request) if request is not None else None
         payload = await self._transport.request(
             method="POST",
             path="/matter/commissioning/window",
@@ -109,7 +109,7 @@ class MatterOperations(_OperationsBase):
 
         Wire: ``POST /matter/share``.
         """
-        body = request.model_dump(mode="json", exclude_none=True) if request is not None else None
+        body = self._to_json_body(request) if request is not None else None
         payload = await self._transport.request(method="POST", path="/matter/share", json_body=body, allow_retry=False)
         return MatterCommissioningWindowResponse.model_validate(payload)
 

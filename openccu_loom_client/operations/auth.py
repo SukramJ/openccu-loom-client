@@ -58,15 +58,13 @@ class AuthOperations(_OperationsBase):
 
     async def list_users(self) -> list[UserListEntry]:
         """List configured Basic-auth users. Wire: ``GET /auth/users``."""
-        payload = await self._transport.request(method="GET", path="/auth/users")
-        return [UserListEntry.model_validate(u) for u in (payload or [])]
+        return await self._request_list(method="GET", path="/auth/users", model=UserListEntry)
 
     # ---- API tokens (legacy) ----
 
     async def list_tokens(self) -> list[TokenListEntry]:
         """List API tokens. Wire: ``GET /auth/tokens``."""
-        payload = await self._transport.request(method="GET", path="/auth/tokens")
-        return [TokenListEntry.model_validate(tok) for tok in (payload or [])]
+        return await self._request_list(method="GET", path="/auth/tokens", model=TokenListEntry)
 
     async def create_token(self, *, subject: str, role: str) -> CreateTokenResponse:
         """
@@ -95,15 +93,14 @@ class AuthOperations(_OperationsBase):
 
         Wire: ``GET /auth/tokens/v2``.
         """
-        payload = await self._transport.request(method="GET", path="/auth/tokens/v2")
-        return [TokenSummary.model_validate(tok) for tok in (payload or [])]
+        return await self._request_list(method="GET", path="/auth/tokens/v2", model=TokenSummary)
 
     async def create_token_v2(self, *, token: TokenCreate) -> TokenCreated:
         """Issue a new bearer token (v2). Wire: ``POST /auth/tokens/v2``."""
         payload = await self._transport.request(
             method="POST",
             path="/auth/tokens/v2",
-            json_body=token.model_dump(mode="json", exclude_none=True),
+            json_body=self._to_json_body(token),
             allow_retry=False,
         )
         return TokenCreated.model_validate(payload)

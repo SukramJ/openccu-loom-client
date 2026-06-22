@@ -78,8 +78,7 @@ class SystemOperations(_OperationsBase):
 
     async def list_interfaces(self) -> list[InterfaceState]:
         """List all CCU interfaces and their state. Wire: ``GET /interfaces``."""
-        payload = await self._transport.request(method="GET", path="/interfaces")
-        return [InterfaceState.model_validate(i) for i in (payload or [])]
+        return await self._request_list(method="GET", path="/interfaces", model=InterfaceState)
 
     async def reconnect_interface(self, *, interface_id: str) -> None:
         """Wire: ``POST /interfaces/{id}/reconnect``."""
@@ -98,8 +97,7 @@ class SystemOperations(_OperationsBase):
         Wire: ``GET /system/update``. Firmware fields stay ``None``
         until the daemon has observed the CCU's update endpoint.
         """
-        payload = await self._transport.request(method="GET", path="/system/update")
-        return [SystemUpdateEntry.model_validate(e) for e in (payload or [])]
+        return await self._request_list(method="GET", path="/system/update", model=SystemUpdateEntry)
 
     async def install_system_update(self, *, central: str | None = None) -> None:
         """
@@ -123,8 +121,7 @@ class SystemOperations(_OperationsBase):
         Wire: ``GET /system/metrics``. Metric fields are ``None`` until
         the daemon has observed them.
         """
-        payload = await self._transport.request(method="GET", path="/system/metrics")
-        return [HubMetricsEntry.model_validate(m) for m in (payload or [])]
+        return await self._request_list(method="GET", path="/system/metrics", model=HubMetricsEntry)
 
     async def get_hub_data_points(self) -> list[HubDataPoints]:
         """
@@ -136,8 +133,7 @@ class SystemOperations(_OperationsBase):
         list endpoints) and ``update`` the flags only (firmware strings stay on
         ``get_system_update``).
         """
-        payload = await self._transport.request(method="GET", path="/hub/data-points")
-        return [HubDataPoints.model_validate(e) for e in (payload or [])]
+        return await self._request_list(method="GET", path="/hub/data-points", model=HubDataPoints)
 
     # ---- CCU repair surface ----
 
@@ -186,7 +182,7 @@ class SystemOperations(_OperationsBase):
         payload = await self._transport.request(
             method="PUT",
             path="/system/startup-capture",
-            json_body=config.model_dump(mode="json", exclude_none=True),
+            json_body=self._to_json_body(config),
             allow_retry=True,
         )
         return StartupCaptureConfig.model_validate(payload)
