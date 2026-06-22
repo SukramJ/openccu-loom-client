@@ -47,7 +47,6 @@ _MAX_CLIMATE_ENTRIES: Final = 13 * 7 * 6
 _MAX_SIMPLE_ENTRIES: Final = 24
 
 _SCHEDULE_KIND_CLIMATE: Final = "climate"
-_WEEK_PROFILE_PARAMETER: Final = "WEEK_PROFILE"
 
 
 class _ScheduleEntityBase(_HubEntitySurface, _CommonProtocolSurface):
@@ -123,13 +122,8 @@ class WeekProfileDp(_ScheduleEntityBase):
 
     @property
     def unique_id(self) -> str:
-        """Return the canonical key ``loom_week_profile_<addr>_week_profile``."""
-        return canonical_unique_id(
-            serial_suffix=self._store.serial_suffix,
-            address=self._device.address,
-            parameter=_WEEK_PROFILE_PARAMETER,
-            prefix="week_profile",
-        )
+        """Return the daemon-owned canonical key ``loom_week_profile_<addr>_week_profile`` (J5)."""
+        return self._week_profile.unique_id
 
     @property
     def name(self) -> str:
@@ -171,6 +165,27 @@ class WeekProfileDp(_ScheduleEntityBase):
         if targets and (info := targets.get(channel_key)) is not None:
             return info.name
         return None
+
+    def target_channel_unique_id(self, *, channel_key: str) -> str:
+        """
+        Return the schedule-channel-switch ``unique_id`` for a lock key (J5).
+
+        Prefers the daemon-owned key from ``available_target_channels`` (required
+        per entry since types 0.1.29 / daemon 0.11.0). Switches are spawned per
+        ``schedule_enabled`` key, which can lack a target entry (older daemon /
+        partial mapping); there the canonical key is synthesised as a fallback,
+        so the entity identity stays stable either way (mirrors the refresh
+        bridge's prefer-daemon-key/rebuild pattern).
+        """
+        targets = self._week_profile.available_target_channels or {}
+        if (info := targets.get(channel_key)) is not None:
+            return info.unique_id
+        return canonical_unique_id(
+            serial_suffix=self._store.serial_suffix,
+            address=self._device.address,
+            parameter=f"SCHEDULE_CHANNEL_LOCK_{channel_key}",
+            prefix="schedule_channel_switch",
+        )
 
     def update_from(self, *, schedule: Schedule) -> None:
         """Recompute the entry count from a fetched channel schedule."""
@@ -297,13 +312,8 @@ class ScheduleChannelSwitch(_ScheduleEntityBase):
 
     @property
     def unique_id(self) -> str:
-        """Return ``loom_schedule_channel_switch_<addr>_schedule_channel_lock_<key>``."""
-        return canonical_unique_id(
-            serial_suffix=self._store.serial_suffix,
-            address=self._device.address,
-            parameter=f"SCHEDULE_CHANNEL_LOCK_{self._channel_key}",
-            prefix="schedule_channel_switch",
-        )
+        """Return the daemon-owned ``loom_schedule_channel_switch_<addr>_…`` key (J5)."""
+        return self._week_profile_dp.target_channel_unique_id(channel_key=self._channel_key)
 
     @property
     def channel_key(self) -> str:

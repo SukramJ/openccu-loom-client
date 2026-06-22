@@ -43,6 +43,7 @@ def _week_profile(
     return WeekProfileResponse.model_validate(
         {
             "address": f"{_ADDRESS}:1",
+            "unique_id": "loom_week_profile_vcu0000001_week_profile",
             "schedule_type": schedule_type,
             "min_temp": 4.5,
             "max_temp": 30.5,
@@ -180,9 +181,52 @@ class TestScheduleChannelSwitch:
         )
         return switch, wp_dp, ops
 
-    def test_unique_id(self) -> None:
+    def test_unique_id_falls_back_when_no_target_entry(self) -> None:
+        # _build()'s week profile carries no available_target_channels for "1_1",
+        # so the switch synthesises the canonical key (older-daemon fallback).
         switch, _wp_dp, _ops = self._build()
         assert switch.unique_id == "loom_schedule_channel_switch_vcu0000001_schedule_channel_lock_1_1"
+
+    def test_unique_id_consumes_daemon_target_key(self) -> None:
+        # J5: when the daemon ships the target entry, the switch consumes its
+        # unique_id verbatim (here a sentinel distinct from the canonical key,
+        # proving consumption rather than recomputation).
+        store, device = _store_with_device()
+        wp_dp = WeekProfileDp(
+            store=store,
+            device=device,
+            channel_no=1,
+            week_profile=WeekProfileResponse.model_validate(
+                {
+                    "address": f"{_ADDRESS}:1",
+                    "unique_id": "loom_week_profile_vcu0000001_week_profile",
+                    "schedule_type": "default",
+                    "min_temp": 0,
+                    "max_temp": 0,
+                    "profile_count": 1,
+                    "has_climate_schedule": False,
+                    "schedule_enabled": {"1_1": True},
+                    "available_target_channels": {
+                        "1_1": {
+                            "channel_no": 4,
+                            "channel_address": f"{_ADDRESS}:4",
+                            "name": "SHUTTER_VIRTUAL_RECEIVER",
+                            "channel_type": "primary",
+                            "unique_id": "loom_daemon_supplied_switch_key",
+                        },
+                    },
+                }
+            ),
+        )
+        switch = ScheduleChannelSwitch(
+            store=store,
+            device=device,
+            channel_no=1,
+            channel_key="1_1",
+            week_profile_dp=wp_dp,
+            schedules_ops=_FakeSchedulesOps(),  # type: ignore[arg-type]
+        )
+        assert switch.unique_id == "loom_daemon_supplied_switch_key"
 
     def test_value_reads_schedule_enabled(self) -> None:
         switch, _wp_dp, _ops = self._build()
@@ -199,6 +243,7 @@ class TestScheduleChannelSwitch:
             week_profile=WeekProfileResponse.model_validate(
                 {
                     "address": f"{_ADDRESS}:1",
+                    "unique_id": "loom_week_profile_vcu0000001_week_profile",
                     "schedule_type": "default",
                     "min_temp": 0,
                     "max_temp": 0,
@@ -211,6 +256,7 @@ class TestScheduleChannelSwitch:
                             "channel_address": f"{_ADDRESS}:4",
                             "name": "SHUTTER_VIRTUAL_RECEIVER",
                             "channel_type": "primary",
+                            "unique_id": "loom_schedule_channel_switch_vcu0000001_schedule_channel_lock_1_1",
                         },
                     },
                 }
