@@ -44,15 +44,15 @@ from datetime import UTC, datetime
 import logging
 from typing import TYPE_CHECKING, Any, Final
 
-from aiohomematic.async_support import Looper
-from aiohomematic.central.events import (
+from openccu_loom_types.enums import CentralState, DataPointCategory
+
+from openccu_loom_client.compat.aiohomematic._upstream import (
+    DataPointCategory as AioDataPointCategory,
     DataPointsCreatedEvent as AioDataPointsCreatedEvent,
     DataPointStateChangedEvent as AioDataPointStateChangedEvent,
     EventBus as AioEventBus,
+    Looper,
 )
-from aiohomematic.const import DataPointCategory as AioDataPointCategory
-from openccu_loom_types.enums import CentralState, DataPointCategory
-
 from openccu_loom_client.compat.aiohomematic.central.configurable_devices import (
     ConfigurableDevice,
     build_configurable_devices,
@@ -104,6 +104,8 @@ from openccu_loom_client.events import (
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterable
+
+    from openccu_loom_types.rest import ProgramSummary, SysvarSummary
 
     from openccu_loom_client.client import LoomClient
     from openccu_loom_client.events import EventBus, SubscriptionGroup
@@ -269,7 +271,7 @@ class _HubCoordinator:
         store = self._client.store
         return not central or central in (store.central_name, store.central_id)
 
-    def _is_local(self, *, summary: Any) -> bool:
+    def _is_local(self, *, summary: SysvarSummary | ProgramSummary) -> bool:
         """
         Return whether a sysvar/program belongs to this central.
 
@@ -277,10 +279,10 @@ class _HubCoordinator:
         foreign central's variables here would leak entities (with the
         wrong serial in their unique_id) into this HA entry.
         """
-        return self._matches_central(central=getattr(summary, "central", None))
+        return self._matches_central(central=summary.central)
 
     @staticmethod
-    def _is_excluded_sysvar(summary: Any) -> bool:
+    def _is_excluded_sysvar(summary: SysvarSummary) -> bool:
         """
         Return whether a sysvar never spawns a generic entity.
 
@@ -290,12 +292,12 @@ class _HubCoordinator:
         ``OldVal``/``pcCCUID`` tokens (hub.py ``_EXCLUDED``) are CCU
         calculation scratch values.
         """
-        name = str(getattr(summary, "name", ""))
+        name = str(summary.name)
         if name.startswith("${"):
             return True
         if any(token in name for token in ("OldVal", "pcCCUID")):
             return True
-        return getattr(summary, "vid", None) in (40, 41)
+        return summary.vid in (40, 41)
 
     def _all_hub_data_points(self) -> list[Any]:
         """Build (and cache) categorised hub data points from the store."""
@@ -312,7 +314,7 @@ class _HubCoordinator:
             sv_dp: Any = make_sysvar_data_point(
                 summary=sysvar.summary,
                 store=self._client.store,
-                enabled_default=bool(getattr(sysvar.summary, "enabled_default", False)),
+                enabled_default=bool(sysvar.summary.enabled_default),
             )
             live[sv_dp.unique_id] = sv_dp
         for program in self._client.store.programs:
@@ -321,7 +323,7 @@ class _HubCoordinator:
             for pr_dp in make_program_data_points(
                 summary=program.summary,
                 store=self._client.store,
-                enabled_default=bool(getattr(program.summary, "enabled_default", False)),
+                enabled_default=bool(program.summary.enabled_default),
             ):
                 # Button and switch share the canonical key; HA scopes
                 # unique_ids per platform, the cache needs both.
@@ -1237,7 +1239,7 @@ class LoomCentralAdapter:
         update_dps = [
             make_update_data_point(device=device, store=self._client.store)
             for device in self._client.store.devices
-            if getattr(device.summary, "updatable", True)
+            if device.summary.updatable
         ]
         event_groups = self.query_facade.get_event_groups(registered=False)
         for dp in (
@@ -1302,7 +1304,7 @@ class LoomCentralAdapter:
                 # calculated DURATION sensor (the ccu twin has none) —
                 # but its locale-aware label names the combined number.
                 for calc in calculated:
-                    if calc.name in _SUPPRESSED_CALCULATED_NAMES and getattr(calc, "translated_name", None):
+                    if calc.name in _SUPPRESSED_CALCULATED_NAMES and calc.translated_name:
                         self._suppressed_calc_labels[(device.address, channel.number)] = str(calc.translated_name)
                 calculated = [calc for calc in calculated if calc.name not in _SUPPRESSED_CALCULATED_NAMES]
                 if calculated:

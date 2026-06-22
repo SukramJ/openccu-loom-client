@@ -36,16 +36,18 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
-from aiohomematic.central.events import (
+from openccu_loom_client.compat.aiohomematic._upstream import (
+    CentralState,
     CentralStateChangedEvent,
+    DataPointKey,
     DataPointStateChangedEvent,
     DeviceLifecycleEvent,
     DeviceLifecycleEventType,
     DeviceTriggerEvent,
+    DeviceTriggerEventType,
     OptimisticRollbackEvent,
+    ParamsetKey,
 )
-from aiohomematic.const import CentralState, DataPointKey, DeviceTriggerEventType, ParamsetKey
-
 from openccu_loom_client.compat.aiohomematic.model.custom import custom_unique_id
 from openccu_loom_client.compat.aiohomematic.model.hub import sysvar_unique_id
 from openccu_loom_client.events import (
@@ -63,8 +65,7 @@ from openccu_loom_client.events.types import (
 )
 
 if TYPE_CHECKING:
-    from aiohomematic.central.events import EventBus as AioEventBus
-
+    from openccu_loom_client.compat.aiohomematic._upstream import EventBus as AioEventBus
     from openccu_loom_client.events import SubscriptionGroup
     from openccu_loom_client.store import LoomStore
 
@@ -126,7 +127,7 @@ def _wire_value_events(*, group: SubscriptionGroup, store: LoomStore, ha_bus: Ai
                 channel=event.payload.channel,
                 parameter=event.payload.parameter,
             ),
-            value=getattr(event.payload, "value", None),
+            value=event.payload.value,
         )
         # aiohomematic re-renders a channel's custom data point on every
         # member field-DP event (a climate card updates when
@@ -156,6 +157,9 @@ def _wire_value_events(*, group: SubscriptionGroup, store: LoomStore, ha_bus: Ai
                 device_address=event.payload.device_address,
                 channel_no=event.payload.channel,
             ),
+            # CustomDataPointStateChangedPayload carries a ``state`` dict, not a
+            # scalar ``value`` — HA reads custom-DP state off the twin, so the
+            # unified state-changed event intentionally has no value here.
             value=getattr(event.payload, "value", None),
         )
 
@@ -164,7 +168,7 @@ def _wire_value_events(*, group: SubscriptionGroup, store: LoomStore, ha_bus: Ai
             ts=event.ts,
             event_key=event.payload.unique_id
             or sysvar_unique_id(serial_suffix=store.serial_suffix, name=event.payload.name),
-            value=getattr(event.payload, "value", None),
+            value=event.payload.value,
         )
 
     group.subscribe(event_type=DataPointValueChangedEvent, handler=on_value)

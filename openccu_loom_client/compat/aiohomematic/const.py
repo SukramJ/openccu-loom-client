@@ -188,7 +188,7 @@ class SystemInformation:
         if ccu_type is None:
             # aiohomematic's CCUType (distinct from the openccu_loom_types enum
             # re-exported above) is the one that carries ``OPENCCU``.
-            from aiohomematic.const import CCUType as _AiohCCUType  # noqa: PLC0415
+            from openccu_loom_client.compat.aiohomematic._upstream import CCUType as _AiohCCUType  # noqa: PLC0415
 
             ccu_type = _AiohCCUType.OPENCCU
         self.ccu_type = ccu_type

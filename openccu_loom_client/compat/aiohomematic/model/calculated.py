@@ -31,6 +31,15 @@ if TYPE_CHECKING:
 class _CalculatedKeyMixin:
     """unique_id override: the ``calculated`` prefix segregates the keys."""
 
+    if TYPE_CHECKING:
+        # Host attributes the concrete ``CalculatedDp*`` twin provides (via
+        # ``DpSensor`` / ``DpBinarySensor`` → ``DataPoint``).
+        summary: DataPointSummary
+        parameter: str
+        device_address: str
+        channel_number: int
+        _store: LoomStore
+
     @property
     def name(self) -> str:
         """
@@ -44,25 +53,25 @@ class _CalculatedKeyMixin:
         name — so the calc entity would read ``… DEW_POINT`` where the
         direct-CCU twin reads ``… Dew Point``.
         """
-        translated = getattr(self.summary, "translated_name", None)  # type: ignore[attr-defined]
-        return translated or self.parameter  # type: ignore[attr-defined,no-any-return]
+        translated = self.summary.translated_name
+        return translated or self.parameter
 
     @property
     def unique_id(self) -> str:
         """Return ``loom_calculated_<address>_<channel>_<parameter>``."""
         return canonical_unique_id(
-            serial_suffix=self._store.serial_suffix,  # type: ignore[attr-defined]
-            address=f"{self.device_address}:{self.channel_number}",  # type: ignore[attr-defined]
-            parameter=self.parameter,  # type: ignore[attr-defined]
+            serial_suffix=self._store.serial_suffix,
+            address=f"{self.device_address}:{self.channel_number}",
+            parameter=self.parameter,
             prefix="calculated",
         )
 
     async def load_data_point_value(self, *, call_source: Any = None) -> None:
         """Re-read this calculated DP from the daemon's calc-dps endpoint."""
-        await self._store.refresh_calculated_data_point(  # type: ignore[attr-defined]
-            address=self.device_address,  # type: ignore[attr-defined]
-            channel=self.channel_number,  # type: ignore[attr-defined]
-            name=self.parameter,  # type: ignore[attr-defined]
+        await self._store.refresh_calculated_data_point(
+            address=self.device_address,
+            channel=self.channel_number,
+            name=self.parameter,
         )
 
 
@@ -93,7 +102,7 @@ def synthesize_summary(*, calc: CalculatedDPSummary) -> DataPointSummary:
             # daemon api 1.5.0 ships the locale-aware label for calc DPs
             # (same chain as generic DPs); the generic naming path picks
             # it up like any other daemon label.
-            "translated_name": getattr(calc, "translated_name", None),
+            "translated_name": calc.translated_name,
         }
     )
 

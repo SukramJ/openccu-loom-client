@@ -17,18 +17,21 @@ value is read straight off the store-held model.
 
 from __future__ import annotations
 
-from typing import Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
-from aiohomematic.const import PROGRAM_ADDRESS, SYSVAR_ADDRESS
 from openccu_loom_types.enums import DataPointCategory
 
 from openccu_loom_client.canonical import canonical_unique_id, hub_slug
+from openccu_loom_client.compat.aiohomematic._upstream import PROGRAM_ADDRESS, SYSVAR_ADDRESS
 from openccu_loom_client.compat.aiohomematic.model._protocol_surface import (
     _ProgramProtocolSurface,
     _SysvarProtocolSurface,
 )
 from openccu_loom_client.compat.aiohomematic.model.hub._surface import _HubEntitySurface
 from openccu_loom_client.model import Program, Sysvar
+
+if TYPE_CHECKING:
+    from openccu_loom_client.store import LoomStore
 
 
 def sysvar_unique_id(*, serial_suffix: str, name: str) -> str:
@@ -56,23 +59,29 @@ def program_unique_id(*, serial_suffix: str, name: str) -> str:
 
 
 class _SysvarEntitySurface(_HubEntitySurface, _SysvarProtocolSurface):
+    if TYPE_CHECKING:
+        # Host attributes from ``Sysvar`` not already declared on the protocol
+        # mixins (name / value_list / set_value come from _SysvarProtocolSurface).
+        _store: LoomStore
+        value_type: str | None
+
     @property
     def unique_id(self) -> str:
         """Return the canonical HA unique id for this sysvar."""
         return sysvar_unique_id(
-            serial_suffix=self._store.serial_suffix,  # type: ignore[attr-defined]
-            name=self.name,  # type: ignore[attr-defined]
+            serial_suffix=self._store.serial_suffix,
+            name=self.name,
         )
 
     @property
     def data_type(self) -> str | None:
         """Return the sysvar value type."""
-        return self.value_type  # type: ignore[attr-defined,no-any-return]
+        return self.value_type
 
     @property
     def values(self) -> tuple[str, ...]:
         """Return the allowed value list for an enum sysvar."""
-        return self.value_list  # type: ignore[attr-defined,no-any-return]
+        return self.value_list
 
     @property
     def value(self) -> Any:
@@ -84,7 +93,7 @@ class _SysvarEntitySurface(_HubEntitySurface, _SysvarProtocolSurface):
         mapped to its option (mirroring aiohomematic).
         """
         raw = Sysvar.value.fget(self)  # type: ignore[attr-defined]
-        value_list: tuple[str, ...] = self.value_list  # type: ignore[attr-defined]
+        value_list: tuple[str, ...] = self.value_list
         if value_list and raw is not None:
             try:
                 idx = int(raw)
@@ -96,7 +105,7 @@ class _SysvarEntitySurface(_HubEntitySurface, _SysvarProtocolSurface):
 
     async def send_variable(self, *, value: Any) -> None:
         """Write a new value back to the sysvar."""
-        await self.set_value(value)  # type: ignore[attr-defined]
+        await self.set_value(value=value)
 
 
 class SysvarDpSwitch(_SysvarEntitySurface, Sysvar):
