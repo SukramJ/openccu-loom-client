@@ -94,6 +94,10 @@ class LoomStore:
         self._channels: dict[tuple[str, int], Channel] = {}
         self._data_points: dict[tuple[str, int, str], DataPoint] = {}
         self._cdps: dict[tuple[str, str], CustomDataPoint] = {}
+        # Secondary index (address, primary-channel-no) → CDP, kept in lock-step
+        # with ``_cdps`` so the refresh bridge's per-value-event channel lookup
+        # (``get_custom_data_point_by_channel``) is O(1) instead of a scan.
+        self._cdp_by_channel: dict[tuple[str, int], CustomDataPoint] = {}
         self._programs: dict[str, Program] = {}
         self._sysvars: dict[str, Sysvar] = {}
         # Optional hook: a callable that builds a DataPoint (or a
@@ -336,11 +340,19 @@ class LoomStore:
         )
 
     def get_custom_data_point_by_channel(self, *, address: str, channel_no: int) -> CustomDataPoint | None:
-        """Return the CDP whose primary channel is ``channel_no``, or ``None``."""
-        for (cdp_address, _name), cdp in self._cdps.items():
-            if cdp_address == address and cdp.summary.channel_no == channel_no:
-                return cdp
-        return None
+        """Return the CDP whose primary channel is ``channel_no``, or ``None`` (O(1))."""
+        return self._cdp_by_channel.get((address, channel_no))
+
+    def _register_cdp(self, *, key: tuple[str, str], cdp: CustomDataPoint) -> None:
+        """Add a CDP to both the name-keyed map and the channel-keyed index."""
+        self._cdps[key] = cdp
+        self._cdp_by_channel[(key[0], cdp.summary.channel_no)] = cdp
+
+    def _drop_cdp(self, *, key: tuple[str, str]) -> None:
+        """Remove a CDP from both maps, keeping the channel index in lock-step."""
+        cdp = self._cdps.pop(key, None)
+        if cdp is not None:
+            self._cdp_by_channel.pop((key[0], cdp.summary.channel_no), None)
 
     # ---- week-profile data points ----
 
@@ -406,17 +418,20 @@ class LoomStore:
         """
         stale = [k for k in self._cdps if k[0] == device_address]
         for k in stale:
-            del self._cdps[k]
+            self._drop_cdp(key=k)
         for summary in cdps:
             key = (device_address, summary.name)
             # Seed the live state from the summary's snapshot (daemon
             # >= 0.x includes it in GET .../cdps) so entities start on
             # the real state instead of defaults until the first WS
             # ``custom_data_point.state_changed`` push arrives.
-            self._cdps[key] = self._build_custom_data_point(
-                summary=summary,
-                device_address=device_address,
-                initial_state=summary.state,
+            self._register_cdp(
+                key=key,
+                cdp=self._build_custom_data_point(
+                    summary=summary,
+                    device_address=device_address,
+                    initial_state=summary.state,
+                ),
             )
 
     # ---- bulk load (bootstrap) ----
@@ -605,7 +620,7 @@ class LoomStore:
         # CDPs are device-scoped, not channel-scoped — drop them too.
         stale_cdps = [cdp_key for cdp_key in self._cdps if cdp_key[0] == addr]
         for cdp_key in stale_cdps:
-            del self._cdps[cdp_key]
+            self._drop_cdp(key=cdp_key)
 
     def apply_sysvar_changed(self, *, payload: SysvarChangedPayload) -> None:
         """
