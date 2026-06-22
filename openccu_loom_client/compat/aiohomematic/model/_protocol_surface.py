@@ -135,7 +135,7 @@ class _CommonProtocolSurface:
     def service_methods(self) -> dict[str, Any]:
         return {}
 
-    # ---- presentation (daemon does not ship rooms/translations yet) ----
+    # ---- presentation ----
 
     @property
     def additional_information(self) -> dict[str, Any]:
@@ -143,11 +143,15 @@ class _CommonProtocolSurface:
 
     @property
     def room(self) -> str | None:
+        # Default for kinds with no channel (hub sysvars / programs). The
+        # generic + custom surfaces override this to resolve the channel's
+        # daemon-supplied room.
         return None
 
     @property
     def rooms(self) -> set[str]:
-        return set()
+        room = self.room
+        return {room} if room else set()
 
     @property
     def translation_key(self) -> str | None:
@@ -183,8 +187,25 @@ class _GenericProtocolSurface(_CommonProtocolSurface):
         return None
 
     @property
+    def room(self) -> str | None:
+        """Resolve the channel's daemon-supplied room (``None`` if unknown)."""
+        device = getattr(self, "device", None)
+        if device is None:
+            return None
+        channel = device.get_channel(number=self.channel_number)  # type: ignore[attr-defined]
+        return channel.room if channel is not None else None
+
+    @property
     def function(self) -> str | None:
-        return None
+        """Resolve the channel's single Gewerk (the first daemon-supplied function)."""
+        device = getattr(self, "device", None)
+        if device is None:
+            return None
+        channel = device.get_channel(number=self.channel_number)  # type: ignore[attr-defined]
+        if channel is None:
+            return None
+        functions = channel.functions
+        return functions[0] if functions else None
 
     @property
     def service(self) -> str | None:
@@ -240,7 +261,8 @@ class _GenericProtocolSurface(_CommonProtocolSurface):
 
     @property
     def value_translations(self) -> dict[str, Any]:
-        return {}
+        """Localised display labels per raw ENUM value (daemon api ≥ 1.19.0)."""
+        return dict(getattr(self.summary, "value_translations", None) or {})  # type: ignore[attr-defined]
 
     @property
     def translation(self) -> str | None:
@@ -384,8 +406,19 @@ class _CustomProtocolSurface(_CommonProtocolSurface):
         )
 
     @property
+    def room(self) -> str | None:
+        """Resolve the primary channel's daemon-supplied room (``None`` if unknown)."""
+        channel = self.channel
+        return channel.room if channel is not None else None
+
+    @property
     def function(self) -> str | None:
-        return None
+        """Resolve the primary channel's single Gewerk (first daemon-supplied function)."""
+        channel = self.channel
+        if channel is None:
+            return None
+        functions = channel.functions
+        return functions[0] if functions else None
 
     @property
     def modified_at(self) -> Any:

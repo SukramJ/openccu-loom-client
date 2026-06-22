@@ -26,7 +26,14 @@ from aiohomematic.const import (
     ParamsetKey,
 )
 from openccu_loom_types.enums import DataPointType
-from openccu_loom_types.rest import CustomDPSummary, DataPointSummary, HubDataPoints, Kind1 as Kind, Snapshot
+from openccu_loom_types.rest import (
+    CustomDPSummary,
+    DataPointSummary,
+    DeviceDetail,
+    HubDataPoints,
+    Kind1 as Kind,
+    Snapshot,
+)
 from openccu_loom_types.ws import (
     CentralStateChangedPayload,
     CustomDataPointStateChangedPayload,
@@ -37,6 +44,7 @@ from openccu_loom_types.ws import (
     HubConnectivityChangedPayload,
     HubCountChangedPayload,
     HubMetricChangedPayload,
+    HubSystemUpdateChangedPayload,
     InstallModeChangedPayload,
     OptimisticRollbackPayload,
     SysvarChangedPayload,
@@ -70,6 +78,7 @@ from openccu_loom_client.events import (
     HubConnectivityChangedEvent,
     HubInboxChangedEvent,
     HubMetricsChangedEvent,
+    HubSystemUpdateChangedEvent,
     InstallModeChangedEvent,
     SysvarChangedEvent,
 )
@@ -351,6 +360,97 @@ class TestGenericSetOnTime:
         assert transport.calls == []  # no write attempted
 
 
+class TestProtocolSurfacePresentation:
+    """The generic twin surfaces the channel's daemon-supplied room / function / value labels."""
+
+    def _store(
+        self,
+        *,
+        room: str | None = None,
+        functions: list[str] | None = None,
+        value_translations: dict[str, str] | None = None,
+    ) -> LoomStore:
+        store = LoomStore(transport=_FakeTransport())  # type: ignore[arg-type]
+        store.set_data_point_factory(factory=make_generic_data_point)
+        channel: dict[str, Any] = {
+            "address": "VCU1:1",
+            "number": 1,
+            "paramset_key": "VALUES",
+            "data_points_count": 1,
+        }
+        if room is not None:
+            channel["room"] = room
+        if functions is not None:
+            channel["functions"] = functions
+        store.attach_device_detail(
+            detail=DeviceDetail.model_validate(
+                {
+                    "address": "VCU1",
+                    "interface": "home:HmIP-RF",
+                    "interface_id": "home:HmIP-RF",
+                    "model": "HmIP-PSM",
+                    "name": "Lamp",
+                    "available": True,
+                    "channels_count": 1,
+                    "channels": [channel],
+                }
+            )
+        )
+        dp: dict[str, Any] = {
+            "parameter": "STATE",
+            "type": "BOOL",
+            "value": False,
+            "observed": True,
+            "operations": {"read": True, "write": True, "event": True},
+        }
+        if value_translations is not None:
+            dp["value_translations"] = value_translations
+        store.attach_channel_data_points(
+            device_address="VCU1",
+            channel_number=1,
+            data_points=[DataPointSummary.model_validate(dp)],
+        )
+        return store
+
+    def test_room_and_rooms_populate_from_channel(self) -> None:
+        store = self._store(room="Wohnzimmer")
+        dp = store.get_data_point(address="VCU1", channel=1, parameter="STATE")
+        assert isinstance(dp, DpSwitch)
+        assert dp.room == "Wohnzimmer"
+        assert dp.rooms == {"Wohnzimmer"}
+
+    def test_room_none_when_channel_has_no_room(self) -> None:
+        store = self._store(room=None)
+        dp = store.get_data_point(address="VCU1", channel=1, parameter="STATE")
+        assert isinstance(dp, DpSwitch)
+        assert dp.room is None
+        assert dp.rooms == set()
+
+    def test_function_resolves_first_channel_function(self) -> None:
+        store = self._store(functions=["Licht", "Zentrale"])
+        dp = store.get_data_point(address="VCU1", channel=1, parameter="STATE")
+        assert isinstance(dp, DpSwitch)
+        assert dp.function == "Licht"
+
+    def test_function_none_when_channel_has_no_function(self) -> None:
+        store = self._store(functions=None)
+        dp = store.get_data_point(address="VCU1", channel=1, parameter="STATE")
+        assert isinstance(dp, DpSwitch)
+        assert dp.function is None
+
+    def test_value_translations_populate_from_summary(self) -> None:
+        store = self._store(value_translations={"OPEN": "Offen", "CLOSED": "Geschlossen"})
+        dp = store.get_data_point(address="VCU1", channel=1, parameter="STATE")
+        assert isinstance(dp, DpSwitch)
+        assert dp.value_translations == {"OPEN": "Offen", "CLOSED": "Geschlossen"}
+
+    def test_value_translations_empty_when_absent(self) -> None:
+        store = self._store(value_translations=None)
+        dp = store.get_data_point(address="VCU1", channel=1, parameter="STATE")
+        assert isinstance(dp, DpSwitch)
+        assert dp.value_translations == {}
+
+
 class _FakeHubOps:
     """Stand-in for ``client.hub`` recording how often the message lists are fetched."""
 
@@ -490,6 +590,31 @@ class TestHubPushRouting:
         entry = coord._connectivity_dps["HmIP-RF"]
         assert entry.sensor.value is False
         assert seen == [entry.sensor.unique_id]
+
+    async def test_system_update_push_updates_singleton_and_emits(self) -> None:
+        coord, loom_bus, group, looper, seen = self._coordinator()
+        await coord._ensure_singletons()
+        coord.install_push_routing(group=group)
+        await loom_bus.publish(
+            event=HubSystemUpdateChangedEvent(
+                seq=1,
+                kind=Kind.change,
+                ts="2026-06-21T08:00:00Z",
+                payload=HubSystemUpdateChangedPayload(
+                    central="home",
+                    current_firmware="1.2",
+                    available_firmware="1.3",
+                    update_available=True,
+                    in_progress=False,
+                ),
+            )
+        )
+        await looper.block_till_done()
+        assert coord._update_dp is not None
+        assert coord._update_dp.update_available is True
+        assert coord._update_dp.current_firmware == "1.2"
+        assert coord._update_dp.available_firmware == "1.3"
+        assert seen == [coord._update_dp.unique_id]
 
     async def test_alarm_count_push_refetches_then_skips_when_unchanged(self) -> None:
         hub = _FakeHubOps(alarms=[SimpleNamespace(central="home", name="Low battery", device_name="Sensor")])

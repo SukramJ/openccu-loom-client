@@ -157,6 +157,49 @@ class TestConnectAndBootstrap:
             assert list(channels[0].data_points) == []
 
 
+# Nested snapshot (``?include=data_points``): channels + DPs arrive inline
+# under ``device_channels``, so bootstrap needs no per-channel REST call.
+_SNAPSHOT_NESTED = {
+    **_SNAPSHOT,
+    "device_channels": [
+        {
+            "device_address": "VCU0001",
+            "channels": [
+                {
+                    "address": "VCU0001:1",
+                    "number": 1,
+                    "paramset_key": "VALUES",
+                    "data_points_count": 2,
+                    "data_points": _DATA_POINTS,
+                }
+            ],
+        }
+    ],
+}
+
+
+class TestNestedSnapshotBootstrap:
+    """The nested snapshot fast-path attaches DPs without per-channel calls."""
+
+    async def test_bootstrap_uses_nested_snapshot_no_per_channel_fetch(self, mock_daemon: MockDaemon) -> None:
+        mock_daemon.get("/api/v1/info", payload=_INFO)
+        mock_daemon.get("/api/v1/snapshot", payload=_SNAPSHOT_NESTED)
+        mock_daemon.get("/api/v1/devices/VCU0001", payload=_DEVICE_DETAIL)
+        # Deliberately NOT registering the /data-points endpoint: if the
+        # bootstrap falls back to the per-channel fetch it would 404.
+
+        async with LoomClient(config=mock_daemon.config) as client:
+            await client.bootstrap()
+            dps = list(client.store.get_device(address="VCU0001").channels)[0].data_points  # type: ignore[union-attr]
+            assert {dp.parameter for dp in dps} == {"STATE", "LEVEL"}
+
+        # The snapshot was requested with ?include=data_points …
+        snapshot_reqs = [r for r in mock_daemon.requests if r.path == "/api/v1/snapshot"]
+        assert snapshot_reqs and snapshot_reqs[0].query.get("include") == "data_points"
+        # … and no per-channel data-points endpoint was ever called.
+        assert not [r for r in mock_daemon.requests if r.path.endswith("/data-points")]
+
+
 class TestWsBridge:
     async def test_value_changed_event_updates_store(self, mock_daemon: MockDaemon) -> None:
         """

@@ -130,6 +130,36 @@ class TestConfigOperations:
         ack = await ConfigOperations(transport=t).put_section(section="north", values={"port": 9090})
         assert ack["version"] == 3
 
+    async def test_get_schema_parses_daemon_shape(self, http) -> None:
+        """
+        The daemon's ``{sections, fields}`` schema validates against SchemaResponse.
+
+        Mirrors the real ``GET /config/schema`` payload, including the
+        per-field ``default`` the daemon emits but ``openapi.yaml`` does
+        not yet document — Pydantic ignores the extra key, so the parse
+        succeeds. (Confirms the formerly-xfail e2e case is now sound.)
+        """
+        t, mock = http
+        mock.get(
+            "/api/v1/config/schema",
+            payload={
+                "sections": ["north", "ccu"],
+                "fields": [
+                    {
+                        "path": "north.port",
+                        "class": "basic",
+                        "go_type": "int",
+                        "restart_required": True,
+                        "default": 8080,
+                    }
+                ],
+            },
+        )
+        schema = await ConfigOperations(transport=t).get_schema()
+        assert schema.sections == ["north", "ccu"]
+        assert schema.fields[0].path == "north.port"
+        assert schema.fields[0].restart_required is True
+
 
 class TestDiagnosticsOperations:
     async def test_values_cache_stats(self, http) -> None:
