@@ -233,7 +233,7 @@ def build_event_groups(
             for dp in channel.data_points:
                 if not dp.emits_events:
                     continue
-                if getattr(dp.summary, "usage", None) in _SUPPRESSED_USAGES:
+                if dp.summary.usage in _SUPPRESSED_USAGES:
                     continue
                 resolved = _trigger_type(parameter=dp.parameter)
                 if resolved is None:
