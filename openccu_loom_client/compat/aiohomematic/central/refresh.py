@@ -36,16 +36,18 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
-from aiohomematic.central.events import (
+from openccu_loom_client.compat.aiohomematic._upstream import (
+    CentralState,
     CentralStateChangedEvent,
+    DataPointKey,
     DataPointStateChangedEvent,
     DeviceLifecycleEvent,
     DeviceLifecycleEventType,
     DeviceTriggerEvent,
+    DeviceTriggerEventType,
     OptimisticRollbackEvent,
+    ParamsetKey,
 )
-from aiohomematic.const import CentralState, DataPointKey, DeviceTriggerEventType, ParamsetKey
-
 from openccu_loom_client.compat.aiohomematic.model.custom import custom_unique_id
 from openccu_loom_client.compat.aiohomematic.model.hub import sysvar_unique_id
 from openccu_loom_client.events import (
@@ -63,8 +65,7 @@ from openccu_loom_client.events.types import (
 )
 
 if TYPE_CHECKING:
-    from aiohomematic.central.events import EventBus as AioEventBus
-
+    from openccu_loom_client.compat.aiohomematic._upstream import EventBus as AioEventBus
     from openccu_loom_client.events import SubscriptionGroup
     from openccu_loom_client.store import LoomStore
 

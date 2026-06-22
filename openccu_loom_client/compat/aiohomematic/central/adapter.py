@@ -44,15 +44,15 @@ from datetime import UTC, datetime
 import logging
 from typing import TYPE_CHECKING, Any, Final
 
-from aiohomematic.async_support import Looper
-from aiohomematic.central.events import (
+from openccu_loom_types.enums import CentralState, DataPointCategory
+
+from openccu_loom_client.compat.aiohomematic._upstream import (
+    DataPointCategory as AioDataPointCategory,
     DataPointsCreatedEvent as AioDataPointsCreatedEvent,
     DataPointStateChangedEvent as AioDataPointStateChangedEvent,
     EventBus as AioEventBus,
+    Looper,
 )
-from aiohomematic.const import DataPointCategory as AioDataPointCategory
-from openccu_loom_types.enums import CentralState, DataPointCategory
-
 from openccu_loom_client.compat.aiohomematic.central.configurable_devices import (
     ConfigurableDevice,
     build_configurable_devices,

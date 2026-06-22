@@ -27,8 +27,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Final
 
-from aiohomematic.const import DataPointCategory as AioDataPointCategory
-from aiohomematic.model.custom import DeviceProfileRegistry
+from openccu_loom_client.compat.aiohomematic._upstream import (
+    DataPointCategory as AioDataPointCategory,
+    DeviceProfileRegistry,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
