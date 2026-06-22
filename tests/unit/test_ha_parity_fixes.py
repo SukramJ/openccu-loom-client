@@ -384,26 +384,24 @@ class TestCustomTranslatedName:
 class TestUpdateDataPoint:
     """Per-device firmware-update data points (aiohomematic DpUpdate twin)."""
 
-    def _device(self, store: LoomStore, firmware: dict[str, Any] | None = None) -> Any:
+    def _device(
+        self, store: LoomStore, firmware: dict[str, Any] | None = None, update_status: str | None = None
+    ) -> Any:
         from openccu_loom_types.rest import DeviceDetail, Snapshot
 
+        device_entry: dict[str, Any] = {
+            "address": "VCU9",
+            "interface": "HmIP-RF",
+            "model": "HmIP-PSM",
+            "name": "Steckdose",
+            "available": True,
+            "channels_count": 1,
+            "updatable": True,
+        }
+        if update_status is not None:
+            device_entry["update_status"] = update_status
         store.load_snapshot(
-            snapshot=Snapshot.model_validate(
-                {
-                    "generated_at": "2026-06-11T08:00:00Z",
-                    "devices": [
-                        {
-                            "address": "VCU9",
-                            "interface": "HmIP-RF",
-                            "model": "HmIP-PSM",
-                            "name": "Steckdose",
-                            "available": True,
-                            "channels_count": 1,
-                            "updatable": True,
-                        }
-                    ],
-                }
-            )
+            snapshot=Snapshot.model_validate({"generated_at": "2026-06-11T08:00:00Z", "devices": [device_entry]})
         )
         detail = {
             "address": "VCU9",
@@ -416,6 +414,8 @@ class TestUpdateDataPoint:
         }
         if firmware is not None:
             detail["firmware"] = firmware
+        if update_status is not None:
+            detail["update_status"] = update_status
         store.attach_device_detail(detail=DeviceDetail.model_validate(detail))
         return store.get_device(address="VCU9")
 
@@ -427,6 +427,7 @@ class TestUpdateDataPoint:
         device = self._device(
             store,
             firmware={"Current": "1.2.3", "Available": "1.3.0", "UpdateState": "READY_FOR_UPDATE"},
+            update_status="update_available",
         )
         dp = make_update_data_point(device=device, store=store)
         # Device addresses carry no central prefix (ccu reference:

@@ -37,8 +37,6 @@ from aiohomematic.central.events import (
     OptimisticRollbackEvent,
 )
 from aiohomematic.const import (
-    HMIP_FIRMWARE_UPDATE_IN_PROGRESS_STATES,
-    HMIP_FIRMWARE_UPDATE_READY_STATES,
     HUB_ADDRESS,
     INSTALL_MODE_ADDRESS,
     PROGRAM_ADDRESS,
@@ -53,8 +51,6 @@ from aiohomematic.const import (
 from aiohomematic.model.custom import ClimateMode, ClimateProfile, DeviceProfileRegistry
 
 __all__ = [
-    "HMIP_FIRMWARE_UPDATE_IN_PROGRESS_STATES",
-    "HMIP_FIRMWARE_UPDATE_READY_STATES",
     "HUB_ADDRESS",
     "INSTALL_MODE_ADDRESS",
     "PROGRAM_ADDRESS",
