@@ -338,6 +338,7 @@ class TestCustomTranslatedName:
                             "name": "Küchenstrahler:4",
                             "paramset_key": "VALUES",
                             "data_points_count": 3,
+                            "is_custom_dp_primary": True,
                         },
                         {
                             "address": "VCU1:5",
@@ -345,6 +346,7 @@ class TestCustomTranslatedName:
                             "name": "Küchenstrahler:5",
                             "paramset_key": "VALUES",
                             "data_points_count": 3,
+                            "is_custom_dp_primary": False,
                         },
                         {
                             "address": "VCU1:6",
@@ -352,6 +354,7 @@ class TestCustomTranslatedName:
                             "name": "Küchenstrahler:6",
                             "paramset_key": "VALUES",
                             "data_points_count": 3,
+                            "is_custom_dp_primary": False,
                         },
                     ],
                 }

@@ -119,7 +119,14 @@ def _store_with_device(
     return store
 
 
-def _channel(*, address: str, number: int, name: str, channel_type: str | None = None) -> dict[str, Any]:
+def _channel(
+    *,
+    address: str,
+    number: int,
+    name: str,
+    channel_type: str | None = None,
+    is_custom_dp_primary: bool | None = None,
+) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "address": f"{address}:{number}",
         "number": number,
@@ -129,6 +136,8 @@ def _channel(*, address: str, number: int, name: str, channel_type: str | None =
     }
     if channel_type is not None:
         payload["type"] = channel_type
+    if is_custom_dp_primary is not None:
+        payload["is_custom_dp_primary"] = is_custom_dp_primary
     return payload
 
 
@@ -761,9 +770,9 @@ class TestCustomNameParts:
             model="HMIP-PSM",
             name="Weinkühlschrank",
             channels=[
-                _channel(address="VCU1", number=3, name="Weinkühlschrank:3"),
-                _channel(address="VCU1", number=4, name="Weinkühlschrank:4"),
-                _channel(address="VCU1", number=5, name="Weinkühlschrank:5"),
+                _channel(address="VCU1", number=3, name="Weinkühlschrank:3", is_custom_dp_primary=True),
+                _channel(address="VCU1", number=4, name="Weinkühlschrank:4", is_custom_dp_primary=False),
+                _channel(address="VCU1", number=5, name="Weinkühlschrank:5", is_custom_dp_primary=False),
             ],
         )
         store.attach_custom_data_points(
@@ -791,8 +800,8 @@ class TestCustomNameParts:
             model="HmIP-DRSI4",
             name="Schalter Dachboden",
             channels=[
-                _channel(address="VCU1", number=6, name="Schalter Dachboden:6"),
-                _channel(address="VCU1", number=10, name="Schalter Dachboden:10"),
+                _channel(address="VCU1", number=6, name="Schalter Dachboden:6", is_custom_dp_primary=True),
+                _channel(address="VCU1", number=10, name="Schalter Dachboden:10", is_custom_dp_primary=True),
             ],
         )
         store.attach_custom_data_points(

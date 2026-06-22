@@ -15,8 +15,10 @@ strings aiohomematic's ``model/support.py`` produces:
 * custom DPs — ``get_custom_data_point_name``: the channel name with a
   ``ch<no>``/``vch<no>`` marker for primary/secondary channels of a
   channel group; the device's *only* primary channel collapses to the
-  bare device name. Primary channels come from aiohomematic's
-  ``DeviceProfileRegistry`` (the same source the ccu twin uses).
+  bare device name. Primary channels come from the daemon's
+  ``ChannelSummary.is_custom_dp_primary`` marker (K1 — the daemon owns
+  the device profile), falling back to the lowest same-category CDP
+  channel when the daemon leaves it unmarked.
 
 All helpers strip the device-name prefix exactly like aiohomematic's
 ``DataPointNameData`` so HA's ``has_entity_name`` rendering matches the
@@ -27,14 +29,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Final
 
-from openccu_loom_client.compat.aiohomematic._upstream import (
-    DataPointCategory as AioDataPointCategory,
-    DeviceProfileRegistry,
-)
-
 if TYPE_CHECKING:
-    from collections.abc import Iterable
-
     from openccu_loom_client.model import Device
     from openccu_loom_client.store import LoomStore
 
@@ -137,36 +132,6 @@ def generic_translated_name(
     return None
 
 
-def _registry_channel_info(
-    *,
-    model: str,
-    category_token: str,
-    channel_no: int,
-    fallback_channels: Iterable[int],
-) -> tuple[bool, bool]:
-    """
-    Return ``(is_primary, is_multi_channel)`` for one CDP channel.
-
-    Primary channels come from aiohomematic's ``DeviceProfileRegistry``
-    (the configured channels per (model, category) — the exact source of
-    the ccu twin's ``CDP_PRIMARY`` usage). Unknown models fall back to
-    treating the lowest same-category CDP channel as primary.
-    """
-    channels: list[int] = []
-    try:
-        category = AioDataPointCategory(category_token)
-    except ValueError:
-        category = None
-    if category is not None:
-        for config in DeviceProfileRegistry.get_configs(model=model, category=category):
-            channels.extend(ch for ch in config.channels if ch is not None)
-    if channels:
-        return channel_no in channels, len(channels) > 1
-    fallback = sorted(set(fallback_channels))
-    is_primary = bool(fallback) and channel_no == fallback[0]
-    return is_primary, len(fallback) > 1
-
-
 def custom_name_parts(
     *,
     store: LoomStore,
@@ -199,12 +164,26 @@ def custom_name_parts(
         for cdp in store.custom_data_points_of(address=device.address)
         if str(getattr(cdp.category, "value", cdp.category) or "") == category_token
     ]
-    is_primary, is_multi = _registry_channel_info(
-        model=device.model,
-        category_token=category_token,
-        channel_no=channel_no,
-        fallback_channels=fallback_channels,
-    )
+    # K1: the daemon owns the device profile and marks the primary CDP channel
+    # (ChannelSummary.is_custom_dp_primary), replacing aiohomematic's
+    # DeviceProfileRegistry. ``is_multi`` is whether the category has more than
+    # one *primary* channel (the registry's len(configs) > 1), NOT the raw CDP
+    # count. When the daemon leaves the channel unmarked (unknown profile), fall
+    # back to treating the lowest same-category CDP channel as the sole primary.
+    channel = store.get_channel(address=device.address, number=channel_no)
+    primary_marker = channel.is_custom_dp_primary if channel is not None else None
+    if primary_marker is None:
+        sorted_channels = sorted(set(fallback_channels))
+        is_primary = bool(sorted_channels) and channel_no == sorted_channels[0]
+        is_multi = len(sorted_channels) > 1
+    else:
+        is_primary = primary_marker
+        primary_channels = [
+            ch
+            for ch in set(fallback_channels)
+            if (c := store.get_channel(address=device.address, number=ch)) is not None and c.is_custom_dp_primary
+        ]
+        is_multi = len(primary_channels) > 1
     if (is_primary and not is_multi) or ignore_multiple_channels_for_name:
         parameter_name = postfix_title
     else:

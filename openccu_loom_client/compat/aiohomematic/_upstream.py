@@ -48,7 +48,7 @@ from aiohomematic.const import (
     DeviceTriggerEventType,
     ParamsetKey,
 )
-from aiohomematic.model.custom import ClimateMode, ClimateProfile, DeviceProfileRegistry
+from aiohomematic.model.custom import ClimateMode, ClimateProfile
 
 __all__ = [
     "HUB_ADDRESS",
@@ -66,7 +66,6 @@ __all__ = [
     "DataPointsCreatedEvent",
     "DeviceLifecycleEvent",
     "DeviceLifecycleEventType",
-    "DeviceProfileRegistry",
     "DeviceTriggerEvent",
     "DeviceTriggerEventType",
     "EventBus",
