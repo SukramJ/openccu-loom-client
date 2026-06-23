@@ -1,0 +1,54 @@
+# Dependabot configuration for automated dependency updates
+# See: https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+
+version: 2
+updates:
+  # Update GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    cooldown:
+      default-days: 7
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:00"
+      timezone: "Europe/Berlin"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "SukramJ"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    groups:
+      # Group all GitHub Actions updates together
+      github-actions:
+        patterns:
+          - "*"
+
+  # Update Python dependencies
+  - package-ecosystem: "pip"
+    directory: "/"
+    cooldown:
+      default-days: 7
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:00"
+      timezone: "Europe/Berlin"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "SukramJ"
+    labels:
+      - "dependencies"
+      - "python"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    groups:
+      # Group all pip dependency updates together
+      python-dependencies:
+        patterns:
+          - "*"
