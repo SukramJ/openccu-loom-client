@@ -1,11 +1,12 @@
 # Architektur-Bewertung — openccu-loom-client
 
-> Tiefenreview aller Schichten, Stand `2026.6.22` (Branch `feat/device-client-shim-schedules`).
-> Bewertungsskala 1–10. Methodik: schichtweise Quellcode-Analyse (alle `openccu_loom_client/*`
+> Tiefenreview aller Schichten, Stand `2026-06-23` (released `2026.6.22`; gegen Daemon **0.11.0** /
+> `openccu-loom-types` **0.1.29**). Bewertungsskala 1–10. Methodik: schichtweise Quellcode-Analyse
+> (alle `openccu_loom_client/*`
 >
 > - `tests/`, ohne `build/lib/`) plus übergreifende Messungen (Kopplung, Typsicherheit, Stubs).
->   ~14,4k LOC Source, ~9,4k LOC Tests, 577 Tests (539 unit/compat + 38 e2e deselected). **Re-baselined
->   2026-06-22:** 0 Unit-`xfail` (die 6 `xfail` liegen alle in `tests/e2e/`, deselected); siehe §0.4.
+>   ~14,4k LOC Source, ~9,4k LOC Tests, **578 Tests** (540 unit/compat + 38 e2e deselected), 0 Unit-`xfail`.
+>   **Aktueller Stand: §0.5** (Daemon-Field-Consumption, Gesamtnote **8,0**); Historie §0.1–§0.4, §1–§5.
 
 ---
 
@@ -71,11 +72,53 @@ Alle zehn Re-Review-Befunde sind umgesetzt; `mypy --strict` sauber (81 Module), 
 | **N9**  | Tote Klassen/getattr entfernt; `events()`-Task-Churn; `close()`-Reihenfolge                 | `cleanup: …` / `refactor(ws,client): …`       |
 | **N10** | Diese Re-Baseline (Metriken, §4.6 teilweise geschlossen)                                    | `docs(arch-review): …`                        |
 
+### 0.5 Daemon-Field-Consumption: Wellen J/K/J5 (2026-06-23, released `2026.6.22`)
+
+> Der größte Kopplungs-Rückbau seit Projektstart. Gegen Daemon **0.11.0** /
+> `openccu-loom-types` **0.1.29** **konsumiert** der Client jetzt die
+> daemon-eigenen Identitäts- und Ableitungsfelder, statt sie via `aiohomematic`
+> nachzurechnen (PRs #36 + #37, released `2026.6.22`). **Aktualisierte
+> Gesamtnote: 8,0 / 10** — die in §1/§2.1 als #1-Schwäche markierte
+> aiohomematic-Laufzeitkopplung ist damit substanziell abgebaut.
+
+Der Daemon besitzt jetzt den Routing-Key **und** die CCU-Domänen-Ableitung; der Client liest sie:
+
+| Welle  | Vorher — Client rechnete via aiohomematic            | Jetzt — Client konsumiert das Daemon-Feld                                                |
+| ------ | ---------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| **J1** | `canonical_unique_id(...)` je Modell                 | `summary.unique_id` (generic/custom/sysvar/program/calculated/event_group + WS-Payloads) |
+| **K1** | `DeviceProfileRegistry.get_configs(...)`             | `ChannelSummary.is_custom_dp_primary` — **`DeviceProfileRegistry` ganz entfernt**        |
+| **K3** | `HMIP_FIRMWARE_UPDATE_*_STATES`-Klassifikation       | `DeviceSummary.update_status` — **Konstanten-Mengen entfernt**                           |
+| **J5** | `canonical_unique_id(… "week_profile"/"schedule_…")` | `WeekProfileResponse.unique_id` / `available_target_channels[k].unique_id`               |
+
+**Messbarer Effekt (verifiziert):**
+
+- **aiohomematic-Imports im KERN: 2** (beide in `canonical.py`: `ConfigProviderProtocol` +
+  `generate_unique_id`/`generate_channel_unique_id`) — nur noch **Fallback** + für die rein
+  client-synthetisierten Entities ohne Daemon-Pendant.
+- **`type: ignore` gesamt: 74 → 9.** `DeviceProfileRegistry` und `HMIP_FIRMWARE_UPDATE_*` sind
+  **vollständig aus dem Code** (nur noch Kommentar-Erwähnungen).
+- Damit ist der §2.1-Ask „Imitation durch selektive Wiederverwendung zurückbauen" **substanziell
+  geliefert** — nicht durch client-seitigen Umbau, sondern durch **Verlagerung der Ableitung in den
+  Daemon** (`asks.md` Wellen J/K/J5; daemon 0.10.0 → 0.11.0). Jeder Konsum-Pfad hat einen
+  bit-identischen Cross-Repo-Parity-Guard (daemon `routing_key_parity.py`).
+
+**Bewusst verbleibende Kopplung (kein offener Befund):**
+
+- `canonical.py` bleibt **Fallback** (Schedule-`schedule_enabled`↔`available_target_channels`-Divergenz,
+  Refresh-Bridge) und Quelle für die client-synthetisierten Reste ohne Daemon-Entity: combined-Duration
+  (Merge zweier DPs), per-Trigger-Typ-Event-Gruppen (eine `EventGroupSummary` → N Entities),
+  Install-Mode-Hub-Singleton.
+- `ClimateMode`/`ClimateProfile` + der `_upstream`-Seam (Events, Pseudo-Adressen, Dispatch-Enums)
+  bleiben — HA dispatcht über deren **Enum-/Typ-Identität**. Fällt erst mit dem
+  `homematicip_local`-Native-Schritt (`docs/homematicip-loom-konzept.md` §10).
+
 ---
 
 ## 1. Gesamturteil
 
-**Gesamtnote: 7,4 / 10** — _„Solide geschichtete Architektur mit exzellentem Tooling; das eigentliche Risiko liegt nicht im Kern, sondern im Compat-Shim und in der Transport-Resilienz."_
+**Gesamtnote: 7,4 / 10** (Erst-Review; _aktuell_ **8,0** nach N1–N10 + Daemon-Field-Consumption — siehe §0.4/§0.5) — _„Solide geschichtete Architektur mit exzellentem Tooling; das eigentliche Risiko liegt nicht im Kern, sondern im Compat-Shim und in der Transport-Resilienz."_
+
+> **Trajektorie:** 7,4 (Erst-Review) → 7,6 (§0, B1–B8 + §2.1/§2.2) → ~7,8 (§0.4, N1–N10: Kern-/Transport-Risiken geschlossen) → **8,0** (§0.5, J/K/J5: aiohomematic-Laufzeitkopplung abgebaut). Die drei in §1 genannten Schwächen (Compat-Kopplung, Transport-Resilienz, Drift-Brüchigkeit) sind damit alle **substanziell** adressiert.
 
 Der Kern (Transport → Store → Events → Model → Operations) ist sauber entkoppelt, gut dokumentiert
 und größtenteils korrekt — die in `CLAUDE.md` beschriebene Einbahn-Datenflussarchitektur ist real
@@ -89,15 +132,15 @@ umgesetzt, nicht nur behauptet. Die Schwächen konzentrieren sich an drei Stelle
 
 ### Bewertungsmatrix
 
-| Schicht                                                                   |  Note   | Kernaussage                                                                                                          |
-| ------------------------------------------------------------------------- | :-----: | -------------------------------------------------------------------------------------------------------------------- |
-| Transport & Lifecycle (`transport/`, `client.py`, `auth.py`, `config.py`) | **7,0** | Lesbar, aber echte Races/Leaks im Replay/Reconnect-Pfad                                                              |
-| Store + Events + Bridge (`store.py`, `events/`, `bridge.py`)              | **8,0** | Sauberes Decoupling; Store driftet zum God-Object                                                                    |
-| Model + Operations (`model/`, `operations/`, `exceptions.py`)             | **8,0** | Konsistent, gut dokumentiert; 2 Bugs, etwas Über-Engineering                                                         |
-| Compat — Central-Adapter (`central/adapter.py` u. a.)                     | **7,0** | 1409-Zeilen-God-Object; `getattr`-Wildwuchs                                                                          |
-| Compat — Model-Layer (`model/custom`, `_protocol_surface.py`, `hub/`)     | **7,5** | Saubere Imitation; 50 % der Protocol-Surface sind Stubs                                                              |
-| Tests, Tooling, Packaging, Doku                                           | **7,5** | Reifes Tooling; Doku-/Dependency-Drift, dünne Resilienz-Tests                                                        |
-| **Querschnitt: Kopplung & Typsicherheit**                                 | **7,0** | aiohomematic-Wiederverwendung ist gewollt (Backend-Strategie, §2.1); Typsicherheit bleibt Thema (74× `type: ignore`) |
+| Schicht                                                                   |  Note   | Kernaussage                                                                                                                                      |
+| ------------------------------------------------------------------------- | :-----: | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Transport & Lifecycle (`transport/`, `client.py`, `auth.py`, `config.py`) | **7,0** | Lesbar, aber echte Races/Leaks im Replay/Reconnect-Pfad                                                                                          |
+| Store + Events + Bridge (`store.py`, `events/`, `bridge.py`)              | **8,0** | Sauberes Decoupling; Store driftet zum God-Object                                                                                                |
+| Model + Operations (`model/`, `operations/`, `exceptions.py`)             | **8,0** | Konsistent, gut dokumentiert; 2 Bugs, etwas Über-Engineering                                                                                     |
+| Compat — Central-Adapter (`central/adapter.py` u. a.)                     | **7,0** | 1409-Zeilen-God-Object; `getattr`-Wildwuchs                                                                                                      |
+| Compat — Model-Layer (`model/custom`, `_protocol_surface.py`, `hub/`)     | **7,5** | Saubere Imitation; 50 % der Protocol-Surface sind Stubs                                                                                          |
+| Tests, Tooling, Packaging, Doku                                           | **7,5** | Reifes Tooling; Doku-/Dependency-Drift, dünne Resilienz-Tests                                                                                    |
+| **Querschnitt: Kopplung & Typsicherheit**                                 | **8,0** | aiohomematic-Laufzeitkopplung stark abgebaut (Kern: 2 Imports; `type: ignore` 74 → 9) — §0.5/§2.1; strukturelle Dispatch-Kopplung bleibt gewollt |
 
 ---
 
@@ -105,7 +148,7 @@ umgesetzt, nicht nur behauptet. Die Schwächen konzentrieren sich an drei Stelle
 
 Diese Punkte schneiden durch mehrere Schichten und sind strategisch wichtiger als jeder Einzelbefund.
 
-### 2.1 Strategie: alternatives Backend mit bewusster aiohomematic-Wiederverwendung — **7/10**
+### 2.1 Strategie: alternatives Backend mit bewusster aiohomematic-Wiederverwendung — **8/10** (war 7; siehe §0.5)
 
 > **Strategie-Festlegung (2026-06-21):** `openccu-loom*` ist auf absehbare Zeit _kein_ Ersatz für
 > `aiohomematic`, sondern ein **alternatives Backend** für `homematicip_local` — beide koexistieren,
@@ -134,6 +177,13 @@ weitere Symbole (`async_support.Looper`, `central.events.*`, `const.*`, `interfa
   `==2026.6.2`), die genutzten aiohomematic-Symbole an _einer_ Stelle bündeln, ein CI-Drift-Test gegen
   die genutzte Protokoll-/Signaturfläche, und mittelfristig die Imitation (Stubs, `getattr`, §2.2)
   durch **selektive Wiederverwendung** zurückbauen. → Aufgaben in `todo.md`.
+- **Update (2026-06-23, §0.5):** Der „Imitation zurückbauen"-Punkt ist **substanziell geliefert** —
+  nicht durch Umbau im Client, sondern durch **Verlagerung der Ableitung in den Daemon** (Wellen
+  J/K/J5). Der Client _konsumiert_ jetzt `unique_id`, `is_custom_dp_primary`, `update_status` und die
+  Schedule-Keys; **aiohomematic-Imports im Kern: 2** (nur `canonical.py`, Fallback), `DeviceProfileRegistry`
+  und die Firmware-State-Mengen sind raus, `type: ignore` **74 → 9**. Es bleibt die _strukturelle_
+  Kopplung (Events/Enums/Pseudo-Adressen + `ClimateMode`/`ClimateProfile`), über deren Typidentität HA
+  dispatcht — sie fällt erst mit dem `homematicip_local`-Native-Schritt.
 
 ### 2.2 Drift-Maskierung als systemisches Brüchigkeitsmuster — **5/10**
 
