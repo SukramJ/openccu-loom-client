@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout client
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.3
         with:
           path: openccu-loom-client
 
@@ -26,14 +26,14 @@ jobs:
       # resolves. A PAT (secret LOOM_REPOS_TOKEN) is used when the repos
       # are private; for public repos the default token suffices.
       - name: Checkout daemon
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.3
         with:
           repository: SukramJ/openccu-loom
           path: openccu-loom
           token: ${{ secrets.LOOM_REPOS_TOKEN || github.token }}
 
       - name: Checkout godevccu
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.3
         with:
           repository: SukramJ/godevccu
           path: godevccu
