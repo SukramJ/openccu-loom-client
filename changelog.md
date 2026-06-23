@@ -1,6 +1,6 @@
 # Version 2026.6.24 (2026-06-23)
 
-- Fix dependency version of aiohttp, pydantic 
+- Fix dependency version of aiohttp, pydantic
 
 - # Version 2026.6.23 (2026-06-23)
 
