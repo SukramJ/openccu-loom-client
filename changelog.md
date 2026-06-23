@@ -1,3 +1,7 @@
+# Version 2026.6.23 (2026-06-21)
+
+- Fix dependency version of aiohomematic
+
 # Version 2026.6.22 (2026-06-21)
 
 - Feat: **expose the aiohomematic device-level service surface on the loom
