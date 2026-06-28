@@ -12,7 +12,6 @@ from openccu_loom_types.rest import (
     Function,
     InstallModeInterfaceEntry,
     InstallModeInterfaceRequest,
-    InstallModeState,
     ProgramSummary,
     Room,
     ServiceMessage,
@@ -242,20 +241,6 @@ class HubOperations(_OperationsBase):
         return [dict(e) for e in (payload or [])]
 
     # ---- install mode ----
-
-    async def get_install_mode(self) -> InstallModeState:
-        """Return the current install-mode state. Wire: ``GET /install-mode``."""
-        payload = await self._transport.request(method="GET", path="/install-mode")
-        return InstallModeState.model_validate(payload)
-
-    async def set_install_mode(self, *, active: bool, seconds: int = 60) -> None:
-        """Toggle install mode for a duration. Wire: ``POST /install-mode``."""
-        await self._transport.request(
-            method="POST",
-            path="/install-mode",
-            json_body={"active": active, "seconds": seconds},
-            allow_retry=False,
-        )
 
     async def list_install_mode_interfaces(self) -> list[InstallModeInterfaceEntry]:
         """

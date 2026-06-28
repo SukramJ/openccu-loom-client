@@ -51,6 +51,7 @@ def _service(*, name: str, device_name: str | None = None) -> ServiceMessage:
             "device_name": device_name,
             "timestamp": "2026-06-12T08:00:00Z",
             "counter": 1,
+            "quittable": False,
         }
     )
 

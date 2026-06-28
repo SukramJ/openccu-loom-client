@@ -27,6 +27,15 @@ class TestLoomConfig:
         cfg = LoomConfig(host="x", port=9000, auth=BearerAuth(token="t"))
         assert cfg.port == 9000
 
+    def test_create_central_url_omits_api_path(self) -> None:
+        # Mirrors aiohomematic: scheme + host + port, no base_path.
+        cfg = LoomConfig(host="x", auth=BearerAuth(token="t"))
+        assert cfg.create_central_url() == "https://x:8443"
+
+    def test_create_central_url_cleartext(self) -> None:
+        cfg = LoomConfig(host="x", port=9000, tls=False, auth=BearerAuth(token="t"))
+        assert cfg.create_central_url() == "http://x:9000"
+
 
 class TestAuthMethods:
     def test_basic_auth_header(self) -> None:

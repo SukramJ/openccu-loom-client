@@ -71,3 +71,15 @@ class LoomConfig:
         """WebSocket URL for the /events endpoint."""
         scheme = "wss" if self.tls else "ws"
         return f"{scheme}://{self.host}:{self.port}{self.base_path}/events"
+
+    def create_central_url(self) -> str:
+        """
+        Return the central's base URL — scheme, host and port, no API path.
+
+        Mirrors aiohomematic's ``CentralConfig.create_central_url`` so the
+        compat surface satisfies ``CentralConfigProtocol``. Consumers like
+        homematicip_local's device-icon handler append their own path, so
+        this deliberately omits ``base_path`` (unlike :attr:`http_base_url`).
+        """
+        scheme = "https" if self.tls else "http"
+        return f"{scheme}://{self.host}:{self.port}"

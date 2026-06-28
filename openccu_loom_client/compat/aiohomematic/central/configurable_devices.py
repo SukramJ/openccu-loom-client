@@ -23,6 +23,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from openccu_loom_client.compat.aiohomematic.ccu_translations import register_device_icons
+
 if TYPE_CHECKING:
     from openccu_loom_client.model import Device
     from openccu_loom_client.store import LoomStore
@@ -92,6 +94,10 @@ def _maintenance_for(*, device: Device) -> MaintenanceData:
 
 def build_configurable_devices(*, store: LoomStore) -> tuple[ConfigurableDevice, ...]:
     """Build the configurable-device descriptors from the live store."""
+    # HA's config panel pairs this call with ``get_device_icon(model=...)``
+    # per device, so refresh the model→icon lookup from the live store here:
+    # it keeps the map current (new/removed devices) with no extra round-trip.
+    register_device_icons(devices=store.devices)
     out: list[ConfigurableDevice] = []
     for device in store.devices:
         channels: list[ConfigurableDeviceChannel] = []

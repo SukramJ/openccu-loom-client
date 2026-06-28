@@ -49,10 +49,17 @@ class TestDevicesOperations:
             payload={
                 "address": "VCU0001",
                 "interface": "home:HmIP-RF",
+                "interface_id": "home:HmIP-RF",
                 "model": "HmIP-PSM",
                 "name": "Lamp",
                 "available": True,
                 "channels_count": 2,
+                "updatable": False,
+                "update_available": False,
+                "master_pushes_config_pending": False,
+                "has_sub_devices": False,
+                "firmware": {},
+                "availability": {},
                 "channels": [
                     {
                         "address": "VCU0001:1",
@@ -137,10 +144,15 @@ class TestSystemOperations:
                     {
                         "address": "VCU0001",
                         "interface": "home:HmIP-RF",
+                        "interface_id": "home:HmIP-RF",
                         "model": "HmIP-PSM",
                         "name": "Lamp",
                         "available": True,
                         "channels_count": 2,
+                        "updatable": False,
+                        "update_available": False,
+                        "master_pushes_config_pending": False,
+                        "has_sub_devices": False,
                     }
                 ],
             },

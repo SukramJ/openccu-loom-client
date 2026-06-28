@@ -29,6 +29,10 @@ def _store_with_device() -> tuple[LoomStore, Device]:
             "name": "Thermostat",
             "available": True,
             "channels_count": 1,
+            "updatable": False,
+            "update_available": False,
+            "master_pushes_config_pending": False,
+            "has_sub_devices": False,
         }
     )
     device = store._upsert_device_summary(summary=summary)

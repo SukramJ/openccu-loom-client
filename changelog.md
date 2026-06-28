@@ -1,3 +1,30 @@
+# Version 2026.6.25 (2026-06-28)
+
+- Feat: **wire the daemon's `model_icon` into HA's device-icon handler.**
+  `openccu-loom-types` 0.1.44 ships the eQ-3 icon filename per device on
+  `DeviceSummary.model_icon` (the daemon resolves the model→icon mapping
+  server-side). New `Device.icon` surfaces it (mirroring aiohomematic's
+  `Device.icon` / `DeviceIdentityProtocol.icon`), and
+  `ccu_translations.get_device_icon(model=...)` — which previously always
+  returned `None` — now reads a process-wide, central-independent
+  `model → filename` lookup that `build_configurable_devices` refreshes from
+  the live store on every config-panel listing. Together with the new
+  `LoomConfig.create_central_url()` (scheme + host + port, no API path) this
+  completes the icon proxy path the HA integration drives.
+- Fix: `LoomStore.apply_device_created` seeded its stub `DeviceSummary`
+  without the fields 0.1.44 made required (`updatable`, `update_available`,
+  `master_pushes_config_pending`, `has_sub_devices`), which raised a
+  `ValidationError` on every `device.created` broadcast — freshly paired
+  devices now register again. The stub also adopts the payload's new
+  `central` field.
+- Change: drop the global install-mode REST methods (`HubOperations`
+  `get_install_mode` / `set_install_mode`). The daemon removed the global
+  `GET`/`POST /install-mode` endpoints — install mode is per-interface
+  (`/install-mode/interfaces`, already covered) or per-device — and
+  `openccu-loom-types` 0.1.44 removed the `InstallModeState` model.
+- Bump `openccu-loom-types` 0.1.29 → 0.1.44 and `aiohomematic`
+  2026.6.5 → 2026.6.8.
+
 # Version 2026.6.24 (2026-06-23)
 
 - Fix dependency version of aiohttp, pydantic

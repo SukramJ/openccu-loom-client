@@ -33,6 +33,10 @@ def _device(*, address: str, name: str, model: str = "HmIP-DRSI4") -> DeviceSumm
             "name": name,
             "available": True,
             "channels_count": 0,
+            "updatable": False,
+            "update_available": False,
+            "master_pushes_config_pending": False,
+            "has_sub_devices": False,
         }
     )
 
@@ -69,7 +73,9 @@ def _store_with(device: DeviceSummary, channels: list[ChannelSummary]) -> LoomSt
     store.load_snapshot(
         snapshot=Snapshot.model_validate({"generated_at": "2026-06-12T08:00:00Z", "devices": [device.model_dump()]})
     )
-    detail = DeviceDetail.model_validate({**device.model_dump(), "channels": [c.model_dump() for c in channels]})
+    detail = DeviceDetail.model_validate(
+        {**device.model_dump(), "firmware": {}, "availability": {}, "channels": [c.model_dump() for c in channels]}
+    )
     store.attach_device_detail(detail=detail)
     return store
 

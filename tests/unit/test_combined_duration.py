@@ -59,10 +59,15 @@ def _store_with_duration_pair(*, unit_value: Any = 1) -> tuple[LoomStore, Device
             {
                 "address": _ADDRESS,
                 "interface": "HmIP-RF",
+                "interface_id": "HmIP-RF",
                 "model": "HmIP-MOD-HO",
                 "name": "Garage",
                 "available": True,
                 "channels_count": 3,
+                "updatable": False,
+                "update_available": False,
+                "master_pushes_config_pending": False,
+                "has_sub_devices": False,
             }
         )
     )

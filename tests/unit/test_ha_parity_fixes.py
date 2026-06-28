@@ -313,10 +313,15 @@ class TestCustomTranslatedName:
                         {
                             "address": "VCU1",
                             "interface": "home:HmIP-RF",
+                            "interface_id": "home:HmIP-RF",
                             "model": "HmIP-BDT",
                             "name": "Küchenstrahler",
                             "available": True,
                             "channels_count": 7,
+                            "updatable": False,
+                            "update_available": False,
+                            "master_pushes_config_pending": False,
+                            "has_sub_devices": False,
                         }
                     ],
                 }
@@ -327,10 +332,17 @@ class TestCustomTranslatedName:
                 {
                     "address": "VCU1",
                     "interface": "home:HmIP-RF",
+                    "interface_id": "home:HmIP-RF",
                     "model": "HmIP-BDT",
                     "name": "Küchenstrahler",
                     "available": True,
                     "channels_count": 7,
+                    "updatable": False,
+                    "update_available": False,
+                    "master_pushes_config_pending": False,
+                    "has_sub_devices": False,
+                    "firmware": {},
+                    "availability": {},
                     "channels": [
                         {
                             "address": "VCU1:4",
@@ -395,11 +407,15 @@ class TestUpdateDataPoint:
         device_entry: dict[str, Any] = {
             "address": "VCU9",
             "interface": "HmIP-RF",
+            "interface_id": "HmIP-RF",
             "model": "HmIP-PSM",
             "name": "Steckdose",
             "available": True,
             "channels_count": 1,
             "updatable": True,
+            "update_available": False,
+            "master_pushes_config_pending": False,
+            "has_sub_devices": False,
         }
         if update_status is not None:
             device_entry["update_status"] = update_status
@@ -409,10 +425,17 @@ class TestUpdateDataPoint:
         detail = {
             "address": "VCU9",
             "interface": "HmIP-RF",
+            "interface_id": "HmIP-RF",
             "model": "HmIP-PSM",
             "name": "Steckdose",
             "available": True,
             "channels_count": 1,
+            "updatable": False,
+            "update_available": False,
+            "master_pushes_config_pending": False,
+            "has_sub_devices": False,
+            "firmware": {},
+            "availability": {},
             "channels": [],
         }
         if firmware is not None:
