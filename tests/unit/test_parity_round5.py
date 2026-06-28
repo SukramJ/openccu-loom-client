@@ -93,10 +93,15 @@ def _store_with_device(
                     {
                         "address": address,
                         "interface": "home:HmIP-RF",
+                        "interface_id": "home:HmIP-RF",
                         "model": model,
                         "name": name,
                         "available": True,
                         "channels_count": len(channels or []),
+                        "updatable": False,
+                        "update_available": False,
+                        "master_pushes_config_pending": False,
+                        "has_sub_devices": False,
                     }
                 ],
             }
@@ -108,11 +113,18 @@ def _store_with_device(
                 {
                     "address": address,
                     "interface": "home:HmIP-RF",
+                    "interface_id": "home:HmIP-RF",
                     "model": model,
                     "name": name,
                     "available": True,
                     "channels_count": len(channels),
                     "channels": channels,
+                    "updatable": False,
+                    "update_available": False,
+                    "master_pushes_config_pending": False,
+                    "has_sub_devices": False,
+                    "firmware": {},
+                    "availability": {},
                 }
             )
         )
@@ -950,10 +962,15 @@ class TestLocalePlumbing:
                         {
                             "address": "VCU1",
                             "interface": "home:HmIP-RF",
+                            "interface_id": "home:HmIP-RF",
                             "model": "HmIP-eTRV-2",
                             "name": "Thermostat",
                             "available": True,
                             "channels_count": 1,
+                            "updatable": False,
+                            "update_available": False,
+                            "master_pushes_config_pending": False,
+                            "has_sub_devices": False,
                         }
                     ],
                 }

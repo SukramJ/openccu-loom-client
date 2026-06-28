@@ -46,6 +46,10 @@ _SNAPSHOT = {
             "name": "Lamp",
             "available": True,
             "channels_count": 1,
+            "updatable": False,
+            "update_available": False,
+            "master_pushes_config_pending": False,
+            "has_sub_devices": False,
         }
     ],
     "interfaces": [
@@ -67,6 +71,12 @@ _DEVICE_DETAIL = {
     "name": "Lamp",
     "available": True,
     "channels_count": 1,
+    "updatable": False,
+    "update_available": False,
+    "master_pushes_config_pending": False,
+    "has_sub_devices": False,
+    "firmware": {},
+    "availability": {},
     "channels": [
         {
             "address": "VCU0001:1",
@@ -279,6 +289,12 @@ _NEW_DEVICE_DETAIL = {
     "name": "Window",
     "available": True,
     "channels_count": 1,
+    "updatable": False,
+    "update_available": False,
+    "master_pushes_config_pending": False,
+    "has_sub_devices": False,
+    "firmware": {},
+    "availability": {},
     "channels": [
         {
             "address": "VCU0002:1",

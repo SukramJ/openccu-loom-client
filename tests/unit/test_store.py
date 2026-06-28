@@ -41,6 +41,10 @@ def _device_summary(*, address: str = "VCU0001", name: str = "Lamp") -> DeviceSu
             "name": name,
             "available": True,
             "channels_count": 3,
+            "updatable": False,
+            "update_available": False,
+            "master_pushes_config_pending": False,
+            "has_sub_devices": False,
         }
     )
 
@@ -141,6 +145,8 @@ class TestAttachDetailAndDataPoints:
         detail = DeviceDetail.model_validate(
             {
                 **_device_summary().model_dump(),
+                "firmware": {},
+                "availability": {},
                 "channels": [
                     _channel_summary(address="VCU0001", number=1).model_dump(),
                     _channel_summary(address="VCU0001", number=2).model_dump(),
@@ -159,6 +165,8 @@ class TestAttachDetailAndDataPoints:
         first = DeviceDetail.model_validate(
             {
                 **_device_summary().model_dump(),
+                "firmware": {},
+                "availability": {},
                 "channels": [_channel_summary(address="VCU0001", number=n).model_dump() for n in (1, 2, 3)],
             }
         )
@@ -167,6 +175,8 @@ class TestAttachDetailAndDataPoints:
         second = DeviceDetail.model_validate(
             {
                 **_device_summary().model_dump(),
+                "firmware": {},
+                "availability": {},
                 "channels": [_channel_summary(address="VCU0001", number=n).model_dump() for n in (1, 3)],
             }
         )
@@ -182,6 +192,8 @@ class TestAttachDetailAndDataPoints:
             detail=DeviceDetail.model_validate(
                 {
                     **_device_summary().model_dump(),
+                    "firmware": {},
+                    "availability": {},
                     "channels": [_channel_summary(address="VCU0001", number=1).model_dump()],
                 }
             )
@@ -206,6 +218,8 @@ class TestAttachDetailAndDataPoints:
             detail=DeviceDetail.model_validate(
                 {
                     **_device_summary().model_dump(),
+                    "firmware": {},
+                    "availability": {},
                     "channels": [_channel_summary(address="VCU0001", number=1).model_dump()],
                 }
             )
@@ -237,6 +251,8 @@ class TestLiveUpdates:
             detail=DeviceDetail.model_validate(
                 {
                     **_device_summary().model_dump(),
+                    "firmware": {},
+                    "availability": {},
                     "channels": [_channel_summary(address="VCU0001", number=1).model_dump()],
                 }
             )
@@ -370,6 +386,8 @@ class TestRefreshStaleGuard:
             detail=DeviceDetail.model_validate(
                 {
                     **_device_summary().model_dump(),
+                    "firmware": {},
+                    "availability": {},
                     "channels": [_channel_summary(address="VCU0001", number=1).model_dump()],
                 }
             )
@@ -435,6 +453,8 @@ class TestSetValue:
             detail=DeviceDetail.model_validate(
                 {
                     **_device_summary().model_dump(),
+                    "firmware": {},
+                    "availability": {},
                     "channels": [_channel_summary(address="VCU0001", number=1).model_dump()],
                 }
             )
@@ -462,6 +482,8 @@ class TestSetValue:
             detail=DeviceDetail.model_validate(
                 {
                     **_device_summary().model_dump(),
+                    "firmware": {},
+                    "availability": {},
                     "channels": [_channel_summary(address="VCU0001", number=1).model_dump()],
                 }
             )
@@ -494,6 +516,8 @@ class TestModelNavigation:
             detail=DeviceDetail.model_validate(
                 {
                     **_device_summary().model_dump(),
+                    "firmware": {},
+                    "availability": {},
                     "channels": [_channel_summary(address="VCU0001", number=1).model_dump()],
                 }
             )
@@ -509,6 +533,8 @@ class TestModelNavigation:
             detail=DeviceDetail.model_validate(
                 {
                     **_device_summary().model_dump(),
+                    "firmware": {},
+                    "availability": {},
                     "channels": [_channel_summary(address="VCU0001", number=1).model_dump()],
                 }
             )

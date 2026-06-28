@@ -122,6 +122,11 @@ class TestCustomDataPointModel:
                             "name": "Shutter",
                             "available": True,
                             "channels_count": 1,
+                            "interface_id": "home:HmIP-RF",
+                            "updatable": False,
+                            "update_available": False,
+                            "master_pushes_config_pending": False,
+                            "has_sub_devices": False,
                         }
                     ],
                 }
@@ -400,6 +405,12 @@ class TestProtocolSurfacePresentation:
                     "available": True,
                     "channels_count": 1,
                     "channels": [channel],
+                    "updatable": False,
+                    "update_available": False,
+                    "master_pushes_config_pending": False,
+                    "has_sub_devices": False,
+                    "firmware": {},
+                    "availability": {},
                 }
             )
         )

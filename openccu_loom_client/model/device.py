@@ -112,6 +112,19 @@ class Device:
         return self._summary.model
 
     @property
+    def icon(self) -> str | None:
+        """
+        Return the icon filename for the device model, or ``None``.
+
+        Mirrors aiohomematic's ``Device.icon`` / ``DeviceIdentityProtocol.icon``.
+        The daemon resolves the model→icon mapping server-side and ships the
+        bare PNG filename on the device summary (empty when no artwork is
+        known), so — unlike aiohomematic, which looks the model up in a
+        bundled translation table — the client just surfaces it.
+        """
+        return self._summary.model_icon or None
+
+    @property
     def interface(self) -> str:
         """Return the interface this device is reached through."""
         return self._summary.interface

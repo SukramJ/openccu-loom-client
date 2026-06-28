@@ -610,12 +610,19 @@ class LoomStore:
             return
         stub = DeviceSummary(
             address=payload.device_address,
+            central=payload.central,
             interface=payload.interface_id or "",
             interface_id=payload.interface_id,
             model=payload.model,
             name=payload.device_address,
             available=True,
             channels_count=0,
+            # Stub defaults — corrected by the next ``attach_device_detail``,
+            # which carries the daemon's authoritative flags.
+            updatable=False,
+            update_available=False,
+            master_pushes_config_pending=False,
+            has_sub_devices=False,
         )
         self._devices[payload.device_address] = Device(summary=stub, store=self)
 
