@@ -1,3 +1,13 @@
+# Version 2026.7.4 (2026-07-04)
+
+- Chore: **bump `openccu-loom-types` to 0.1.50 (daemon API 2.14.0).**
+  The pinned types package had trailed the daemon by ten minor API
+  revisions (2.4.0, digest `72a7c0…`); the client's capability
+  handshake logged a `schema_digest` mismatch against every current
+  daemon. The pin now matches the daemon's exported schema digest
+  (`b01d74…`), silencing the warning. No wire-shape changes were
+  required — every path and event the client uses was already valid.
+
 # Version 2026.6.25 (2026-06-28)
 
 - Feat: **wire the daemon's `model_icon` into HA's device-icon handler.**
