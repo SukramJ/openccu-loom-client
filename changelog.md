@@ -1,4 +1,4 @@
-# Version 2026.7.4 (2026-07-04)
+# Version 2026.7.1 (2026-07-04)
 
 - Chore: **bump `openccu-loom-types` to 0.1.50 (daemon API 2.14.0).**
   The pinned types package had trailed the daemon by ten minor API
