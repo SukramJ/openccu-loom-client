@@ -15,6 +15,7 @@ it as ``central.hub_coordinator``.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 import logging
 from typing import TYPE_CHECKING, Any, Final
@@ -90,6 +91,10 @@ class _HubCoordinator:
         # Maps an interface_id (state.id, as the aggregate / connectivity push
         # use it) to the interface token that keys _install_mode_dps.
         self._install_token_by_id: dict[str, str] = {}
+        # Per-message-list locks so the 300 s reconcile loop and the count
+        # push handlers can't interleave a fetch/apply on the same singleton
+        # (a slower in-flight fetch would otherwise clobber a newer list).
+        self._message_list_locks: dict[int, asyncio.Lock] = {}
 
     async def set_system_variable(self, *, legacy_name: str, value: Any) -> None:
         await self._client.hub.set_sysvar(name=legacy_name, value=value)
@@ -398,13 +403,22 @@ class _HubCoordinator:
         """Refetch a message list only when the count moved; return it if it changed."""
         if dp is None or count == dp.value:
             return []
-        try:
-            messages = await fetch()
-        except Exception:  # noqa: BLE001 — endpoint optional, keep last value
-            _LOGGER.debug("message-list refetch failed", exc_info=True)
-            return []
-        local = [m for m in messages if self._matches_central(central=getattr(m, "central", None))]
-        return [dp] if dp.update_messages(messages=local) else []
+        lock = self._message_list_locks.setdefault(id(dp), asyncio.Lock())
+        async with lock:
+            # Re-check under the lock: while we waited, a concurrent refresh
+            # (reconcile loop vs. count push) may already have applied a list
+            # for this count. Comparing against the count this fetch was
+            # issued for — not the fetched length — collapses the redundant
+            # refetch and prevents an older in-flight list from clobbering it.
+            if count == dp.value:
+                return []
+            try:
+                messages = await fetch()
+            except Exception:  # noqa: BLE001 — endpoint optional, keep last value
+                _LOGGER.debug("message-list refetch failed", exc_info=True)
+                return []
+            local = [m for m in messages if self._matches_central(central=getattr(m, "central", None))]
+            return [dp] if dp.update_messages(messages=local) else []
 
     async def _fetch_system_update(self) -> list[Any]:
         """Refresh the system-update singleton (full entry incl. firmware strings)."""

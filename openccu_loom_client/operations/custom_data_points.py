@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import quote
 
 from openccu_loom_types.rest import CustomDPSummary
 
@@ -28,7 +29,7 @@ class CustomDataPointsOperations(_OperationsBase):
 
     async def get(self, *, address: str, name: str) -> CustomDPSummary:
         """Wire: ``GET /devices/{addr}/cdps/{name}``."""
-        payload = await self._transport.request(method="GET", path=f"/devices/{address}/cdps/{name}")
+        payload = await self._transport.request(method="GET", path=f"/devices/{address}/cdps/{quote(name, safe='')}")
         return CustomDPSummary.model_validate(payload)
 
     async def invoke(
@@ -59,7 +60,7 @@ class CustomDataPointsOperations(_OperationsBase):
             body["priority"] = priority
         await self._transport.request(
             method="POST",
-            path=f"/devices/{address}/cdps/{name}/{operation}",
+            path=f"/devices/{address}/cdps/{quote(name, safe='')}/{quote(operation, safe='')}",
             json_body=body or None,
             allow_retry=False,
         )

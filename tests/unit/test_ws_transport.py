@@ -350,3 +350,81 @@ class TestResilience:
 
         assert resyncs, "queue overflow should have forced a resync"
         assert resyncs[0] == -1  # the overflow sentinel
+
+
+class TestAuthRejection:
+    """A permanently-rejected handshake credential must stop the reconnect loop, not spin forever."""
+
+    async def test_handshake_401_fires_callback_and_ends_stream(self) -> None:
+        async def handler(request: web.Request) -> web.Response:
+            return web.Response(status=401, text="Unauthorized")
+
+        app = web.Application()
+        app.router.add_get("/api/v1/events", handler)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        port = site._server.sockets[0].getsockname()[1]
+        cfg = LoomConfig(host="127.0.0.1", port=port, tls=False, auth=BearerAuth(token="dead"))
+
+        auth_failures: list[bool] = []
+
+        async def on_auth_failed() -> None:
+            auth_failures.append(True)
+
+        try:
+            transport = WsTransport(config=cfg, on_auth_failed=on_auth_failed)
+            await transport.start()
+            # The reconnect loop must terminate (not spin) on the 401; the
+            # read task ends and the stopped event is set.
+            async for _ in transport.events():
+                pass
+            assert auth_failures == [True]
+            assert transport._stopped.is_set()  # the loop ended, didn't spin
+        finally:
+            await transport.stop()
+            await runner.cleanup()
+
+
+class TestEnvelopeParsing:
+    """_parse_envelope forward-compatibility and malformed-frame handling."""
+
+    def _frame(self, *, kind: str) -> dict:
+        return {
+            "topic": "device.0001.channels.1.data_points.LEVEL",
+            "type": "datapoint.value_changed",
+            "ts": "2026-05-24T08:42:13Z",
+            "seq": 7,
+            "kind": kind,
+            "payload": {
+                "central": "home",
+                "device_address": "0001",
+                "channel": 1,
+                "parameter": "LEVEL",
+                "paramset_key": "VALUES",
+                "value": 1.0,
+                "modified_at": "2026-05-24T08:42:13Z",
+            },
+        }
+
+    def test_unknown_kind_is_coerced_not_dropped(self) -> None:
+        # A daemon that introduces a new `kind` enum value must not blackhole
+        # the frame — its payload/type are still actionable.
+        envelope = WsTransport._parse_envelope(self._frame(kind="snapshot"))
+        assert envelope is not None
+        assert envelope.kind.value == ws_module._DEFAULT_ENVELOPE_KIND
+        assert envelope.seq == 7
+        assert envelope.type == "datapoint.value_changed"
+
+    def test_known_kind_is_preserved(self) -> None:
+        envelope = WsTransport._parse_envelope(self._frame(kind="refresh"))
+        assert envelope is not None
+        assert envelope.kind.value == "refresh"
+
+    def test_structurally_malformed_frame_is_dropped(self) -> None:
+        # A frame broken beyond an unknown kind (missing required seq) is
+        # dropped, not force-coerced.
+        bad = self._frame(kind="snapshot")
+        del bad["seq"]
+        assert WsTransport._parse_envelope(bad) is None

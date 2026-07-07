@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import quote
 
 from openccu_loom_types.rest import (
     AlarmMessage,
@@ -130,14 +131,14 @@ class HubOperations(_OperationsBase):
             body["value_list"] = value_list
         await self._transport.request(
             method="PATCH",
-            path=f"/sysvars/{name}",
+            path=f"/sysvars/{quote(name, safe='')}",
             json_body=body,
             allow_retry=True,
         )
 
     async def get_sysvar(self, *, name: str) -> SysvarSummary:
         """Return one system variable by name. Wire: ``GET /sysvars/{name}``."""
-        payload = await self._transport.request(method="GET", path=f"/sysvars/{name}")
+        payload = await self._transport.request(method="GET", path=f"/sysvars/{quote(name, safe='')}")
         return SysvarSummary.model_validate(payload)
 
     async def set_sysvar(self, *, name: str, value: Any) -> None:
@@ -150,14 +151,14 @@ class HubOperations(_OperationsBase):
         """
         await self._transport.request(
             method="PUT",
-            path=f"/sysvars/{name}",
+            path=f"/sysvars/{quote(name, safe='')}",
             json_body={"value": value},
             allow_retry=True,
         )
 
     async def delete_sysvar(self, *, name: str) -> None:
         """Delete a system variable by name. Wire: ``DELETE /sysvars/{name}``."""
-        await self._transport.request(method="DELETE", path=f"/sysvars/{name}")
+        await self._transport.request(method="DELETE", path=f"/sysvars/{quote(name, safe='')}")
 
     async def fetch_system_variables(self, *, central_name: str | None = None) -> None:
         """

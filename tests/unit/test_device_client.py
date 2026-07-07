@@ -175,6 +175,24 @@ class TestBatchReadParsing:
         out = await DataPointsOperations(transport=t).batch_read(queries=[("VCU1", 1, "LEVEL")])
         assert out == {("VCU1", 1, "LEVEL"): 1.5}
 
+    async def test_one_malformed_item_does_not_discard_the_batch(self, http) -> None:
+        t, mock = http
+        # A missing-identifier entry, a non-dict entry and a non-dict summary
+        # must be skipped individually — not abort the whole response.
+        mock.post(
+            "/api/v1/devices/values:batch",
+            payload={
+                "results": [
+                    "not-a-dict",
+                    {"channel": 1, "parameter": "LEVEL", "summary": {"value": 9.9}},  # no address
+                    {"address": "VCU1", "channel": 1, "parameter": "STATE", "summary": "not-a-dict"},
+                    {"address": "VCU1", "channel": 1, "parameter": "LEVEL", "summary": {"value": 1.5}},
+                ]
+            },
+        )
+        out = await DataPointsOperations(transport=t).batch_read(queries=[("VCU1", 1, "LEVEL")])
+        assert out == {("VCU1", 1, "LEVEL"): 1.5}
+
 
 class TestDeviceClientLinks:
     """A peer-address paramset key routes to the link surface; links CRUD too."""

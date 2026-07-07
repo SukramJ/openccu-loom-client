@@ -29,6 +29,10 @@ class Channel:
         self._summary = summary
         self._store = store
 
+    def _replace_summary(self, *, summary: ChannelSummary) -> None:
+        """Replace the backing summary in place (called by the store)."""
+        self._summary = summary
+
     @property
     def summary(self) -> ChannelSummary:
         """Return the underlying wire-side summary record."""

@@ -28,12 +28,14 @@ import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
 import contextlib
 from dataclasses import replace
+from http import HTTPStatus
 import json
 import logging
 from typing import TYPE_CHECKING, Final, Self
 
 import aiohttp
 from openccu_loom_types.ws import WsEnvelope
+from pydantic import ValidationError
 
 from openccu_loom_client.auth import BearerAuth
 from openccu_loom_client.exceptions import LoomTransportError
@@ -51,6 +53,18 @@ _LOGGER: Final = logging.getLogger(__name__)
 # reconnect loop. After the final entry the schedule clamps to that
 # value (steady-state reconnect every 30 s).
 _RECONNECT_BACKOFF: Final = (0.5, 2.0, 5.0, 15.0, 30.0)
+
+# A reconnect only resets the backoff ladder once the connection has been
+# up at least this long. Otherwise a daemon that accepts the upgrade and
+# then immediately closes would reset the backoff on every cycle, busy-
+# looping reconnects at the shortest 0.5 s step instead of backing off.
+_HEALTHY_CONNECTION_SECONDS: Final = 10.0
+
+# Live-update kind a forward-compatible envelope falls back to when the
+# daemon introduces a `kind` enum value this build's types don't know yet.
+# Coercing (rather than dropping the frame) keeps the payload flowing, the
+# same way an unknown `type` degrades gracefully downstream.
+_DEFAULT_ENVELOPE_KIND: Final = "change"
 
 # How long we wait for a server ping before considering the connection
 # dead and forcing a reconnect. The daemon contract says 30 s ping
@@ -249,12 +263,36 @@ class WsTransport:
 
     async def _run_forever(self) -> None:
         attempt = 0
+        loop = asyncio.get_running_loop()
         while not self._closing:
+            started = loop.time()
             try:
                 await self._connect_and_read()
-                attempt = 0
             except asyncio.CancelledError:
                 raise
+            except aiohttp.WSServerHandshakeError as exc:
+                if exc.status in (HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN):
+                    # A permanently-rejected credential must not spin the
+                    # reconnect loop forever. Surface it (optional callback)
+                    # and end the stream so the consumer's events() unblocks
+                    # instead of hanging on a socket that will never open.
+                    _LOGGER.error(
+                        "WS handshake rejected by %s with status %d — credential not accepted; "
+                        "stopping the reconnect loop",
+                        self._config.host,
+                        exc.status,
+                    )
+                    if self._on_auth_failed is not None:
+                        with contextlib.suppress(Exception):
+                            await self._on_auth_failed()
+                    self._stopped.set()
+                    return
+                _LOGGER.warning(
+                    "WS connection to %s failed (attempt %d): %s",
+                    self._config.host,
+                    attempt + 1,
+                    exc,
+                )
             except Exception as exc:  # noqa: BLE001 — keep the reconnect loop alive on any failure
                 _LOGGER.warning(
                     "WS connection to %s failed (attempt %d): %s",
@@ -262,6 +300,12 @@ class WsTransport:
                     attempt + 1,
                     exc,
                 )
+            else:
+                # Reset the backoff only after a connection that actually
+                # stayed up — a clean but immediate close (accept-then-drop)
+                # is treated like a failure so the ladder still escalates.
+                if loop.time() - started >= _HEALTHY_CONNECTION_SECONDS:
+                    attempt = 0
             if self._closing:
                 # close() can flip _closing during the await above; mypy
                 # keeps the while-condition's narrowing across the call and
@@ -414,9 +458,39 @@ class WsTransport:
     def _parse_envelope(frame: dict[str, object]) -> WsEnvelope | None:
         try:
             return WsEnvelope.model_validate(frame)
+        except ValidationError as exc:
+            # Forward compatibility: if the *only* problem is that the daemon
+            # sent a `kind` enum value this build's types don't know, coerce
+            # it to the default live-update kind and re-validate rather than
+            # blackholing the whole frame — its payload/type may still be
+            # actionable (mirrors the graceful unknown-`type` degradation).
+            if WsTransport._is_unknown_kind_only(exc=exc):
+                coerced: dict[str, object] = {**frame, "kind": _DEFAULT_ENVELOPE_KIND}
+                try:
+                    envelope = WsEnvelope.model_validate(coerced)
+                except ValidationError as retry_exc:
+                    _LOGGER.warning("dropping malformed WS envelope: %s | frame=%r", retry_exc, frame)
+                    return None
+                _LOGGER.debug(
+                    "coerced unknown WS envelope kind %r to %r | topic=%s",
+                    frame.get("kind"),
+                    _DEFAULT_ENVELOPE_KIND,
+                    frame.get("topic"),
+                )
+                return envelope
+            _LOGGER.warning("dropping malformed WS envelope: %s | frame=%r", exc, frame)
+            return None
         except Exception as exc:  # noqa: BLE001 — drop malformed frames, never crash the reader
             _LOGGER.warning("dropping malformed WS envelope: %s | frame=%r", exc, frame)
             return None
+
+    @staticmethod
+    def _is_unknown_kind_only(*, exc: ValidationError) -> bool:
+        """Report whether the sole validation error is an unknown ``kind`` enum value."""
+        errors = exc.errors()
+        return bool(errors) and all(
+            err.get("loc") == ("kind",) and str(err.get("type", "")).startswith("enum") for err in errors
+        )
 
     async def _send(self, *, frame: dict[str, object]) -> None:
         if self._ws is None or self._ws.closed:

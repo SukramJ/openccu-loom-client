@@ -162,6 +162,19 @@ class TestSysvarSetValue:
         with pytest.raises(RuntimeError):
             await sysvar.set_value(value=22.0)
 
+    async def test_set_value_percent_encodes_sysvar_name(self) -> None:
+        # A free-form sysvar name with reserved characters must be encoded
+        # into the path segment, not injected as path/query structure.
+        transport = _FakeTransport()
+        store = LoomStore(transport=transport)  # type: ignore[arg-type]
+        store.load_snapshot(snapshot=_snapshot(sysvars=[_sysvar_summary(name="Küche/Licht?on")]))
+        sysvar = store.get_sysvar(name="Küche/Licht?on")
+        assert sysvar is not None
+        await sysvar.set_value(value=1)
+        method, path, _body = transport.calls[0]
+        assert method == "PUT"
+        assert path == "/sysvars/K%C3%BCche%2FLicht%3Fon"
+
 
 class TestProgramExecute:
     async def test_execute_round_trips(self) -> None:

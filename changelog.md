@@ -1,3 +1,58 @@
+# Version 2026.7.3 (2026-07-07)
+
+Robustness-hardening pass across the transport, store, event, and compat
+layers (findings surfaced by a multi-agent review and adversarially
+verified). No wire-contract or public-API changes.
+
+- Fix: **live wrappers are now updated in place on every (re)bootstrap,
+  never rebuilt.** `attach_channel_data_points`, `_upsert_channel` and
+  `attach_custom_data_points` reuse the existing `DataPoint` / `Channel` /
+  `CustomDataPoint` instance and replace its summary, matching the
+  never-rebuild-on-update discipline the sysvar/program paths already
+  follow. Rebuilding orphaned the reference HA held, so after a
+  replay-lost re-bootstrap every pre-existing entity silently froze at its
+  snapshot value. Calculated DPs (attached by a separate start-time path)
+  are now tracked and no longer collaterally dropped by the generic
+  per-channel re-attach.
+- Fix: **REST refreshes clear the optimistic `_value_override`** (as the
+  push path already did) so a freshly-fetched daemon value is no longer
+  masked by a stale HA-written one; `refresh_data_point` also guards the
+  dp-existence and non-dict-body cases before validating.
+- Fix: **CDP refresh lost-update guard.** `refresh_custom_data_point`
+  captures a per-CDP apply generation before its GET and drops the now-stale
+  REST snapshot if a live `state_changed` push landed during the round-trip.
+- Fix: **week-profile data points are purged on device removal** (were a
+  slow leak across unpair events).
+- Fix: **`request_bytes` no longer inherits the 30 s total timeout** —
+  backup/capture archive downloads use a per-chunk read timeout with no
+  total cap (optional `total_timeout_seconds` override), so a large
+  transfer over a slow link is no longer guaranteed to time out.
+- Fix: **`HttpTransport.connect()` no longer leaks the aiohttp session** on
+  a failed capability handshake (only an owned, just-opened session is
+  closed; a caller-supplied one is left intact).
+- Fix: **`LoomCentralAdapter.start()` / `validate_config_and_get_system_information()`
+  tear the client down on partial-init failure** instead of orphaning the
+  session and the WS reader / dispatch / reconcile tasks across HA setup
+  retries.
+- Fix: **WS reconnect backoff only resets after a healthy connection** — an
+  accept-then-immediately-close daemon no longer causes a 0.5 s reconnect
+  storm.
+- Fix: **WS handshake auth rejection (401/403) stops the reconnect loop**
+  (and fires `on_auth_failed`) instead of spinning forever against a dead
+  credential.
+- Fix: **an unknown WS envelope `kind` is coerced to the default
+  live-update kind** rather than dropping the whole frame, mirroring the
+  graceful unknown-`type` degradation (forward compatibility with newer
+  daemons).
+- Fix: **the hub message-list refresh is serialised per singleton** so the
+  300 s reconcile loop and a count push can't interleave a fetch/apply and
+  regress the list.
+- Fix: **`batch_read` skips a malformed result item** instead of discarding
+  the whole batch (matching the documented per-item error contract).
+- Fix: **free-form identifiers are percent-encoded into URL path segments**
+  (sysvar names, CDP names/operations), so reserved characters can't inject
+  path or query structure.
+
 # Version 2026.7.2 (2026-07-07)
 
 - Chore: **bump `openccu-loom-types` to 0.1.51 (daemon API 2.15.0).**

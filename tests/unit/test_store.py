@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import Any
 
 from openccu_loom_types.rest import (
+    CalculatedDPSummary,
     ChannelSummary,
     CustomDPSummary,
     DataPointSummary,
@@ -23,7 +24,12 @@ from openccu_loom_types.rest import (
     Operations,
     Snapshot,
 )
-from openccu_loom_types.ws import DataPointValueChangedPayload, DeviceCreatedPayload, DeviceRemovedPayload
+from openccu_loom_types.ws import (
+    CustomDataPointStateChangedPayload,
+    DataPointValueChangedPayload,
+    DeviceCreatedPayload,
+    DeviceRemovedPayload,
+)
 import pytest
 
 from openccu_loom_client.store import LoomStore
@@ -439,6 +445,160 @@ class TestRefreshStaleGuard:
         dp = store.get_data_point(address="VCU0001", channel=1, parameter="STATE")
         assert dp is not None
         assert dp.value is False  # newer refresh wins
+
+
+class TestInPlaceUpsertHardening:
+    """
+    Re-attaching a catalogue must update live wrappers in place, never rebuild.
+
+    A rebuild orphans the reference a consumer already holds — after a
+    replay-lost re-bootstrap that silently freezes every entity.
+    """
+
+    def _detail(self) -> DeviceDetail:
+        return DeviceDetail.model_validate(
+            {
+                **_device_summary().model_dump(),
+                "firmware": {},
+                "availability": {},
+                "channels": [_channel_summary(address="VCU0001", number=1).model_dump()],
+            }
+        )
+
+    def _populated(self) -> LoomStore:
+        store = LoomStore()
+        store.load_snapshot(snapshot=_snapshot(devices=[_device_summary()]))
+        store.attach_device_detail(detail=self._detail())
+        store.attach_channel_data_points(
+            device_address="VCU0001",
+            channel_number=1,
+            data_points=[_dp_summary(parameter="LEVEL", value=0.5)],
+        )
+        return store
+
+    def test_surviving_dp_keeps_identity_and_updates_value(self) -> None:
+        store = self._populated()
+        original = store.get_data_point(address="VCU0001", channel=1, parameter="LEVEL")
+        assert original is not None
+
+        store.attach_channel_data_points(
+            device_address="VCU0001",
+            channel_number=1,
+            data_points=[_dp_summary(parameter="LEVEL", value=0.9)],
+        )
+
+        after = store.get_data_point(address="VCU0001", channel=1, parameter="LEVEL")
+        assert after is original  # same live instance — not rebuilt
+        assert after.value == 0.9  # summary updated in place
+
+    def test_surviving_channel_keeps_identity(self) -> None:
+        store = self._populated()
+        original = store.get_channel(address="VCU0001", number=1)
+        assert original is not None
+
+        store.attach_device_detail(detail=self._detail())
+
+        assert store.get_channel(address="VCU0001", number=1) is original
+
+    def test_reattach_does_not_drop_calculated_dps(self) -> None:
+        store = self._populated()
+
+        def _calc_factory(*, summary: Any, device_address: str, channel_number: int, store: LoomStore) -> Any:
+            return object()
+
+        store.set_calculated_data_point_factory(factory=_calc_factory)
+        store.attach_channel_calculated_data_points(
+            device_address="VCU0001",
+            channel_number=1,
+            calculated=[
+                CalculatedDPSummary.model_validate(
+                    {"name": "OPERATING_VOLTAGE", "value": 3.0, "observed": True, "unique_id": "loom_calc_v"}
+                )
+            ],
+        )
+        calc = store.get_data_point(address="VCU0001", channel=1, parameter="OPERATING_VOLTAGE")
+        assert calc is not None
+
+        # A replay-lost re-bootstrap re-runs the generic per-channel attach.
+        store.attach_channel_data_points(
+            device_address="VCU0001",
+            channel_number=1,
+            data_points=[_dp_summary(parameter="LEVEL", value=0.5)],
+        )
+
+        # The calculated DP (attached by a different path) must survive.
+        assert store.get_data_point(address="VCU0001", channel=1, parameter="OPERATING_VOLTAGE") is calc
+
+    def test_device_removal_purges_week_profile_dp(self) -> None:
+        store = self._populated()
+        store.set_week_profile_data_point(address="VCU0001", data_point=object())
+        assert store.get_week_profile_data_point(address="VCU0001") is not None
+
+        store.apply_device_removed(
+            payload=DeviceRemovedPayload.model_validate(
+                {"central": "home", "interface_id": "home:HmIP-RF", "device_address": "VCU0001"}
+            )
+        )
+
+        assert store.get_week_profile_data_point(address="VCU0001") is None
+
+
+class _RacingCdpTransport:
+    """On the CDP GET, fires a live push (bumping the generation) before returning a now-stale payload."""
+
+    def __init__(self, *, store: LoomStore, stale_state: dict[str, Any], pushed_state: dict[str, Any]) -> None:
+        self._store = store
+        self._stale_state = stale_state
+        self._pushed_state = pushed_state
+
+    async def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: Any = None,
+        json_body: Any = None,
+        headers: Any = None,
+        allow_retry: Any = None,
+    ) -> Any:
+        # Simulate a state_changed push landing while the GET is in flight.
+        self._store.apply_custom_data_point_state_changed(
+            payload=CustomDataPointStateChangedPayload.model_validate(
+                {
+                    "central": "home",
+                    "device_address": "VCU0001",
+                    "channel": 1,
+                    "name": "SWITCH",
+                    "unique_id": "loom_test_switch_1",
+                    "state": self._pushed_state,
+                }
+            )
+        )
+        return {"state": self._stale_state}
+
+
+class TestCdpRefreshStaleGuard:
+    """A CDP refresh GET must not clobber a newer state applied by a push mid-flight."""
+
+    async def test_push_during_refresh_wins(self) -> None:
+        store = LoomStore()
+        store.load_snapshot(snapshot=_snapshot(devices=[_device_summary()]))
+        store.attach_custom_data_points(
+            device_address="VCU0001",
+            cdps=[_cdp_summary(name="SWITCH", channel_no=1)],
+        )
+        transport = _RacingCdpTransport(
+            store=store,
+            stale_state={"value": False},
+            pushed_state={"value": True},
+        )
+        store.set_transport(transport=transport)  # type: ignore[arg-type]
+
+        await store.refresh_custom_data_point(address="VCU0001", name="SWITCH")
+
+        cdp = store.get_custom_data_point(address="VCU0001", name="SWITCH")
+        assert cdp is not None
+        assert cdp.state == {"value": True}  # the pushed state survived; the stale GET was dropped
 
 
 # ---- write-back ----

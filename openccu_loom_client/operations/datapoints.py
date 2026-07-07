@@ -81,13 +81,23 @@ class DataPointsOperations(_OperationsBase):
             results = []
         out: dict[tuple[str, int, str], Any] = {}
         for item in results:
-            key = (item["address"], item["channel"], item["parameter"])
+            # One malformed entry must not discard the whole batch: skip
+            # non-dict items and any missing the (address, channel, parameter)
+            # identifier triple, matching the documented per-item error contract.
+            if not isinstance(item, dict):
+                continue
+            address = item.get("address")
+            channel = item.get("channel")
+            parameter = item.get("parameter")
+            if address is None or channel is None or parameter is None:
+                continue
+            key = (address, channel, parameter)
             # Surface a successful result's summary.value; failures
             # surface as the raw error string so the caller can decide.
             if item.get("error"):
                 out[key] = {"error": item["error"]}
-            elif item.get("summary") is not None:
-                out[key] = item["summary"].get("value")
+            elif isinstance(summary := item.get("summary"), dict):
+                out[key] = summary.get("value")
         return out
 
     # ---- paramset ----
