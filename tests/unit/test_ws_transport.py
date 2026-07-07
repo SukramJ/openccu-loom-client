@@ -348,8 +348,49 @@ class TestResilience:
         async with WsTransport(config=cfg, on_replay_lost=on_replay_lost):
             await asyncio.sleep(0.7)
 
-        assert resyncs, "queue overflow should have forced a resync"
-        assert resyncs[0] == -1  # the overflow sentinel
+        # Exactly one resync for the whole overflow episode: the latch keeps a
+        # sustained flood from re-firing the resync (and flooding the log) once
+        # per dropped event. This is the regression guard for the log storm.
+        assert resyncs == [-1]  # the overflow sentinel, fired once
+
+    async def test_queue_overflow_latch_rearms_after_drain(self, monkeypatch) -> None:
+        """
+        A drained overflow latch re-arms so the next episode resyncs again.
+
+        A sustained overflow resyncs once; after the consumer drains the queue
+        back below the low-watermark the latch re-arms, so a *fresh* overflow
+        episode forces another resync. Driven deterministically through
+        ``_handle_text`` / ``events()`` — no server, no sleeps.
+        """
+        monkeypatch.setattr(ws_module, "_ENVELOPE_QUEUE_MAXSIZE", 3)
+        monkeypatch.setattr(ws_module, "_ENVELOPE_QUEUE_LOW_WATER", 1)
+        resyncs: list[int] = []
+
+        async def on_replay_lost(oldest_seq: int) -> None:
+            resyncs.append(oldest_seq)
+
+        cfg = LoomConfig(host="127.0.0.1", port=1, tls=False, auth=BearerAuth(token="t"))
+        transport = WsTransport(config=cfg, on_replay_lost=on_replay_lost)
+
+        # Fill (3) then overflow (2 more) with no consumer draining.
+        for i in range(5):
+            await transport._handle_text(raw=_envelope(seq=i))
+        assert resyncs == [-1]
+        assert transport._overflowing is True
+
+        # Drain through the public iterator until below the low-watermark.
+        events = transport.events()
+        await events.__anext__()  # qsize 3 → 2, still latched
+        await events.__anext__()  # qsize 2 → 1 (≤ low-water) → latch clears
+        assert transport._overflowing is False
+
+        # A brand-new overflow must force a second resync.
+        for i in range(5, 10):
+            await transport._handle_text(raw=_envelope(seq=i))
+        assert resyncs == [-1, -1]
+        assert transport._overflowing is True
+
+        await events.aclose()
 
 
 class TestAuthRejection:

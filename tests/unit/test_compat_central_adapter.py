@@ -15,6 +15,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from aiohomematic.central.events import EventBus as AioEventBus
+from openccu_loom_types import DAEMON_API_VERSION
 from openccu_loom_types.enums import DataPointCategory
 from openccu_loom_types.rest import DataPointSummary, Snapshot
 import pytest
@@ -43,7 +44,7 @@ def _dp_summary(
 _BASE = "/api/v1"
 _INFO = {
     "version": "1.2.3",
-    "api_version": "1.0.0",
+    "api_version": DAEMON_API_VERSION,
     "commit": "deadbeef",
     "build_date": "2026-05-24T10:00:00Z",
     "addon_build": False,

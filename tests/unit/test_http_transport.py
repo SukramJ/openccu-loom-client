@@ -24,7 +24,10 @@ from tests.helpers import MockDaemon
 
 _INFO_RESPONSE = {
     "version": "1.2.3",
-    "api_version": "1.0.0",
+    # Report the exact API version the installed types were generated
+    # against so the connect() compatibility guard passes; guard-rejection
+    # cases override this inline. See TestApiVersionGuard.
+    "api_version": openccu_loom_types.DAEMON_API_VERSION,
     "commit": "deadbeef",
     "build_date": "2026-05-24T10:00:00Z",
     "addon_build": False,
@@ -51,7 +54,7 @@ class TestConnect:
         mock_daemon.get("/api/v1/info", payload=_INFO_RESPONSE)
         info = await transport.connect()
         assert info.version == "1.2.3"
-        assert info.api_version == "1.0.0"
+        assert info.api_version == openccu_loom_types.DAEMON_API_VERSION
         assert transport.info is not None
         await transport.close()
 
@@ -127,6 +130,53 @@ class TestSchemaDigestHandshake:
         with caplog.at_level(logging.WARNING):
             await transport.connect()
         assert not any("different daemon build" in r.message for r in caplog.records)
+        await transport.close()
+
+
+class TestApiVersionGuard:
+    """connect() hard-fails on an incompatible daemon API version (needs same major, minor ≥ expected)."""
+
+    @staticmethod
+    def _expected_major_minor() -> tuple[int, int]:
+        parts = openccu_loom_types.DAEMON_API_VERSION.split(".")
+        return int(parts[0]), int(parts[1])
+
+    async def test_matching_version_connects(self, mock_daemon: MockDaemon, transport: HttpTransport) -> None:
+        # _INFO_RESPONSE already reports DAEMON_API_VERSION → guard passes.
+        mock_daemon.get("/api/v1/info", payload=_INFO_RESPONSE)
+        await transport.connect()
+        await transport.close()
+
+    async def test_newer_minor_same_major_connects(self, mock_daemon: MockDaemon, transport: HttpTransport) -> None:
+        major, minor = self._expected_major_minor()
+        mock_daemon.get("/api/v1/info", payload={**_INFO_RESPONSE, "api_version": f"{major}.{minor + 5}.0"})
+        await transport.connect()
+        await transport.close()
+
+    async def test_older_minor_raises(self, mock_daemon: MockDaemon, transport: HttpTransport) -> None:
+        # The incident pattern: daemon behind the API version the types expect.
+        major, minor = self._expected_major_minor()
+        mock_daemon.get("/api/v1/info", payload={**_INFO_RESPONSE, "api_version": f"{major}.{minor - 1}.0"})
+        with pytest.raises(LoomTransportError, match="incompatible API version"):
+            await transport.connect()
+
+    async def test_newer_major_raises(self, mock_daemon: MockDaemon, transport: HttpTransport) -> None:
+        major, _minor = self._expected_major_minor()
+        mock_daemon.get("/api/v1/info", payload={**_INFO_RESPONSE, "api_version": f"{major + 1}.0.0"})
+        with pytest.raises(LoomTransportError, match="incompatible API version"):
+            await transport.connect()
+
+    async def test_older_major_raises(self, mock_daemon: MockDaemon, transport: HttpTransport) -> None:
+        major, _minor = self._expected_major_minor()
+        mock_daemon.get("/api/v1/info", payload={**_INFO_RESPONSE, "api_version": f"{major - 1}.99.0"})
+        with pytest.raises(LoomTransportError, match="incompatible API version"):
+            await transport.connect()
+
+    async def test_unparseable_version_skips_guard(self, mock_daemon: MockDaemon, transport: HttpTransport) -> None:
+        # A daemon whose api_version isn't dotted-numeric must not hard-fail;
+        # the guard degrades to a no-op (the digest handshake still warns).
+        mock_daemon.get("/api/v1/info", payload={**_INFO_RESPONSE, "api_version": "experimental"})
+        await transport.connect()
         await transport.close()
 
 

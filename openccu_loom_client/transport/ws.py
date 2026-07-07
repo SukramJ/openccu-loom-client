@@ -78,6 +78,13 @@ _INBOUND_PING_DEADLINE_SECONDS: Final = 60.0
 # and force a resync (fresh snapshot) — the store rebuilds rather than drifting.
 _ENVELOPE_QUEUE_MAXSIZE: Final = 4096
 
+# Low-watermark that ends an overflow episode. While the queue is full the
+# producer drops events and forces exactly one resync per episode (see the
+# ``_overflowing`` latch in ``_handle_text``); the consumer clears the latch
+# only once it has drained the backlog back below this level, so a sustained
+# flood emits one warning + one resync instead of one per dropped event.
+_ENVELOPE_QUEUE_LOW_WATER: Final = _ENVELOPE_QUEUE_MAXSIZE // 2
+
 
 ReplayLostHandler = Callable[[int], Awaitable[None]]
 """Async callback invoked when the daemon emits ``replay_lost``.
@@ -137,6 +144,12 @@ class WsTransport:
         self._reauth_ack: asyncio.Future[bool] | None = None
         self._envelope_queue: asyncio.Queue[WsEnvelope] = asyncio.Queue(maxsize=_ENVELOPE_QUEUE_MAXSIZE)
         self._dropped_count = 0
+        # Latch for the current overflow episode: set on the first dropped
+        # envelope, cleared by the consumer once the queue drains back below
+        # the low-watermark. Producer and consumer share one event loop, so
+        # plain attribute access needs no lock.
+        self._overflowing = False
+        self._overflow_start_dropped = 0
         self._read_task: asyncio.Task[None] | None = None
         self._closing = False
         # Coordinates between the consumer (events()) and the producer
@@ -253,6 +266,16 @@ class WsTransport:
                     with contextlib.suppress(asyncio.CancelledError):
                         await getter
                     return
+                # Ending an overflow episode: once the backlog has drained back
+                # below the low-watermark, clear the latch so a later overflow
+                # warns and resyncs afresh. Report the episode's drop tally.
+                if self._overflowing and self._envelope_queue.qsize() <= _ENVELOPE_QUEUE_LOW_WATER:
+                    self._overflowing = False
+                    _LOGGER.warning(
+                        "WS envelope queue drained below %d — overflow resolved; %d events dropped this episode",
+                        _ENVELOPE_QUEUE_LOW_WATER,
+                        self._dropped_count - self._overflow_start_dropped + 1,
+                    )
                 yield getter.result()
         finally:
             waiter.cancel()
@@ -395,16 +418,21 @@ class WsTransport:
             self._envelope_queue.put_nowait(envelope)
         except asyncio.QueueFull:
             # Consumer can't keep up — drop the backlog and force a resync.
-            # Log on the first drop and every 1000th to avoid flooding.
-            if self._dropped_count % 1000 == 0:
+            # Latch the overflow episode: warn and trigger the resync only on
+            # the first drop, then stay silent until the consumer drains the
+            # queue below the low-watermark and clears the latch (see
+            # events()). Without this a sustained flood logged — and re-fired
+            # the resync — once per dropped event (thousands of lines/sec).
+            self._dropped_count += 1
+            if not self._overflowing:
+                self._overflowing = True
+                self._overflow_start_dropped = self._dropped_count
                 _LOGGER.warning(
                     "WS envelope queue full (maxsize=%d) — forcing resync; %d events dropped so far",
                     _ENVELOPE_QUEUE_MAXSIZE,
-                    self._dropped_count + 1,
+                    self._dropped_count,
                 )
-            self._dropped_count += 1
-            # Repeated calls are de-duplicated by the resync handler.
-            await self._trigger_resync(oldest_seq=-1)
+                await self._trigger_resync(oldest_seq=-1)
 
     async def _handle_control(self, *, op: str, frame: dict[str, object]) -> None:
         if op == "ping":

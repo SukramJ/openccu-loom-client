@@ -96,6 +96,14 @@ _DEFAULT_WS_SUBSCRIPTIONS: Final = (
     "hub.*",
 )
 
+# Minimum spacing between replay-lost re-bootstraps, measured from the end of
+# the previous one. A daemon stuck emitting ``replay_lost`` (or a queue-overflow
+# resync fired per-frame) would otherwise schedule a fresh N×M snapshot walk the
+# instant each prior walk finished. The just-taken snapshot is authoritative for
+# far longer than this window and live events keep flowing meanwhile, so a burst
+# collapses to at most one walk per (walk duration + cooldown).
+_REBOOTSTRAP_COOLDOWN_SECONDS: Final = 30.0
+
 
 def _channel_dp_map(
     *,
@@ -144,6 +152,10 @@ class LoomClient:
         # never blocks event delivery. Tracked so close() can cancel them.
         self._bg_tasks: set[asyncio.Task[None]] = set()
         self._rebootstrap_task: asyncio.Task[None] | None = None
+        # Loop time the last replay-lost re-bootstrap finished, for the
+        # cooldown that keeps a replay_lost / overflow burst from re-walking
+        # the snapshot back-to-back (see _REBOOTSTRAP_COOLDOWN_SECONDS).
+        self._last_rebootstrap_finished: float | None = None
         self._closing = False
 
         # Operations are stateless façades over the transport.
@@ -440,20 +452,36 @@ class LoomClient:
         Schedule a store re-bootstrap after the daemon's replay buffer aged out.
 
         Called by the WS transport on the reader task when the requested
-        events are no longer replayable. The re-bootstrap runs as a tracked
-        background task (never inline) so the N×M snapshot walk can't block
-        the read loop and trip the inbound-ping deadline. De-duplicated: a
-        second ``replay_lost`` while a re-bootstrap is already running is
-        dropped rather than stacking another full walk.
+        events are no longer replayable — from the daemon's ``replay_lost``
+        frame *and* the local envelope-queue overflow, this being their single
+        funnel. The re-bootstrap runs as a tracked background task (never
+        inline) so the N×M snapshot walk can't block the read loop and trip the
+        inbound-ping deadline. De-duplicated two ways: a second trigger while a
+        walk is running is dropped, and one arriving within
+        ``_REBOOTSTRAP_COOLDOWN_SECONDS`` of the previous walk finishing is
+        dropped too — so a burst can't re-walk the snapshot back-to-back.
         """
         if self._closing:
             return
         if self._rebootstrap_task is not None and not self._rebootstrap_task.done():
-            _LOGGER.warning(
+            # Expected de-dup, not an error: a fresh full-snapshot re-bootstrap
+            # is already running and will subsume this loss. Kept at DEBUG so a
+            # burst of replay-lost / queue-overflow triggers can't flood the log.
+            _LOGGER.debug(
                 "WS replay lost (oldest_seq=%s) — re-bootstrap already in progress, skipping",
                 oldest_seq,
             )
             return
+        if self._last_rebootstrap_finished is not None:
+            since = asyncio.get_running_loop().time() - self._last_rebootstrap_finished
+            if since < _REBOOTSTRAP_COOLDOWN_SECONDS:
+                _LOGGER.debug(
+                    "WS replay lost (oldest_seq=%s) — re-bootstrap cooldown (%.1fs of %.1fs), skipping",
+                    oldest_seq,
+                    since,
+                    _REBOOTSTRAP_COOLDOWN_SECONDS,
+                )
+                return
         _LOGGER.warning("WS replay lost (oldest_seq=%s) — scheduling store re-bootstrap", oldest_seq)
         self._rebootstrap_task = asyncio.create_task(self._run_rebootstrap(), name="openccu-loom-rebootstrap")
 
@@ -465,3 +493,9 @@ class LoomClient:
             raise
         except Exception:
             _LOGGER.exception("re-bootstrap after replay_lost failed")
+        finally:
+            # Stamp completion (success, failure, or cancellation) so the
+            # cooldown in _on_replay_lost spaces out the next walk. On a
+            # cancelled walk (close()) the stamp is harmless — _closing then
+            # short-circuits _on_replay_lost before it is ever read.
+            self._last_rebootstrap_finished = asyncio.get_running_loop().time()

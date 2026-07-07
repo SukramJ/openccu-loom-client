@@ -16,8 +16,10 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 
+from openccu_loom_types import DAEMON_API_VERSION
 from openccu_loom_types.rest import Kind1 as Kind
 from openccu_loom_types.ws import DataPointValueChangedPayload, DeviceCreatedPayload
+import pytest
 
 from openccu_loom_client import LoomClient
 from openccu_loom_client.bridge import bind_ws_events_to_store
@@ -26,7 +28,7 @@ from tests.helpers import MockDaemon
 
 _INFO = {
     "version": "1.2.3",
-    "api_version": "1.0.0",
+    "api_version": DAEMON_API_VERSION,
     "commit": "deadbeef",
     "build_date": "2026-05-24T10:00:00Z",
     "addon_build": False,
@@ -479,3 +481,51 @@ class TestReplayLostRebootstrap:
             release.set()
             await asyncio.wait_for(client._rebootstrap_task, timeout=1.0)
             assert calls == 1
+
+    async def test_replay_lost_cooldown_skips_back_to_back_reboots(
+        self, mock_daemon: MockDaemon, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A second loss inside the cooldown window after a completed walk is
+        # dropped — the just-taken snapshot is still authoritative.
+        monkeypatch.setattr("openccu_loom_client.client._REBOOTSTRAP_COOLDOWN_SECONDS", 1000.0)
+        _wire_endpoints(mock_daemon)
+        async with LoomClient(config=mock_daemon.config) as client:
+            calls = 0
+
+            async def fast_bootstrap(**_kwargs: object) -> None:
+                nonlocal calls
+                calls += 1
+
+            client.bootstrap = fast_bootstrap  # type: ignore[method-assign]
+
+            await client._on_replay_lost(901)
+            await asyncio.wait_for(client._rebootstrap_task, timeout=1.0)
+            assert calls == 1
+
+            # Within cooldown → dropped, no new walk scheduled.
+            await client._on_replay_lost(902)
+            assert calls == 1
+
+    async def test_replay_lost_reboots_again_after_cooldown(
+        self, mock_daemon: MockDaemon, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # With the cooldown elapsed, a fresh loss walks the snapshot again.
+        monkeypatch.setattr("openccu_loom_client.client._REBOOTSTRAP_COOLDOWN_SECONDS", 0.0)
+        _wire_endpoints(mock_daemon)
+        async with LoomClient(config=mock_daemon.config) as client:
+            calls = 0
+
+            async def fast_bootstrap(**_kwargs: object) -> None:
+                nonlocal calls
+                calls += 1
+
+            client.bootstrap = fast_bootstrap  # type: ignore[method-assign]
+
+            await client._on_replay_lost(901)
+            await asyncio.wait_for(client._rebootstrap_task, timeout=1.0)
+            assert calls == 1
+
+            await client._on_replay_lost(902)
+            assert client._rebootstrap_task is not None
+            await asyncio.wait_for(client._rebootstrap_task, timeout=1.0)
+            assert calls == 2
