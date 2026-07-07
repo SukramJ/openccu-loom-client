@@ -691,46 +691,54 @@ class LoomCentralAdapter:
 
     async def start(self) -> None:
         """Connect, bootstrap the store, open the event stream, and install the refresh bridge."""
-        await self._client.connect()
-        await self._refresh_system_information()
-        await self.client_coordinator.refresh()
-        self._state = CentralState.Starting
-        await self._client.bootstrap()
-        await self._bootstrap_hub_catalogue()
-        await self.hub_coordinator.fetch_hub_singleton_data()
-        # Custom DPs first: schedule discovery and the combined duration
-        # number key off the devices' CDP catalogue (aiohomematic builds
-        # both through the custom data points).
-        await self._bootstrap_custom_data_points()
-        await self._bootstrap_schedules()
-        await self._bootstrap_combined_data_points()
-        await self.query_facade.prefetch_un_ignore_candidates()
-        await self._client.start_events()
-        # Fan the daemon's typed value events into the uniform
-        # DataPointStateChangedEvent the HA entities subscribe to.
-        self._refresh_group = self._client.events.create_subscription_group(name="loom-compat-refresh")
-        install_refresh_bridge(
-            group=self._refresh_group,
-            store=self._client.store,
-            ha_bus=self._ha_bus,
-            central_name=self._name,
-            event_group_resolver=self.query_facade.find_event_group,
-        )
-        # Route the daemon's hub-singleton push broadcasts (alarm/service/inbox
-        # counts, metrics, connectivity, system-update, install-mode) straight
-        # onto the singletons — this replaces the old 30 s poll loop. The
-        # cold-start fetch above seeded the values once; the pushes keep them live.
-        self.hub_coordinator.install_push_routing(group=self._refresh_group)
-        # Announce every data point (generic + custom) in one batch *after*
-        # the custom DPs are attached, so HA's platforms spawn entities for
-        # them too. Published on the real aiohomematic bus as the real
-        # DataPointsCreatedEvent HA subscribes to.
-        await self._emit_data_points_created()
-        # Slow reconcile backstop: re-seed the singletons from the aggregate so
-        # a missed push can't drift. Every singleton (system_update included) is
-        # push-driven now; this loop is pure resilience.
-        self._hub_reconcile_task = asyncio.create_task(self._hub_reconcile_loop(), name="loom-hub-reconcile")
-        self._state = CentralState.Running
+        try:
+            await self._client.connect()
+            await self._refresh_system_information()
+            await self.client_coordinator.refresh()
+            self._state = CentralState.Starting
+            await self._client.bootstrap()
+            await self._bootstrap_hub_catalogue()
+            await self.hub_coordinator.fetch_hub_singleton_data()
+            # Custom DPs first: schedule discovery and the combined duration
+            # number key off the devices' CDP catalogue (aiohomematic builds
+            # both through the custom data points).
+            await self._bootstrap_custom_data_points()
+            await self._bootstrap_schedules()
+            await self._bootstrap_combined_data_points()
+            await self.query_facade.prefetch_un_ignore_candidates()
+            await self._client.start_events()
+            # Fan the daemon's typed value events into the uniform
+            # DataPointStateChangedEvent the HA entities subscribe to.
+            self._refresh_group = self._client.events.create_subscription_group(name="loom-compat-refresh")
+            install_refresh_bridge(
+                group=self._refresh_group,
+                store=self._client.store,
+                ha_bus=self._ha_bus,
+                central_name=self._name,
+                event_group_resolver=self.query_facade.find_event_group,
+            )
+            # Route the daemon's hub-singleton push broadcasts (alarm/service/inbox
+            # counts, metrics, connectivity, system-update, install-mode) straight
+            # onto the singletons — this replaces the old 30 s poll loop. The
+            # cold-start fetch above seeded the values once; the pushes keep them live.
+            self.hub_coordinator.install_push_routing(group=self._refresh_group)
+            # Announce every data point (generic + custom) in one batch *after*
+            # the custom DPs are attached, so HA's platforms spawn entities for
+            # them too. Published on the real aiohomematic bus as the real
+            # DataPointsCreatedEvent HA subscribes to.
+            await self._emit_data_points_created()
+            # Slow reconcile backstop: re-seed the singletons from the aggregate so
+            # a missed push can't drift. Every singleton (system_update included) is
+            # push-driven now; this loop is pure resilience.
+            self._hub_reconcile_task = asyncio.create_task(self._hub_reconcile_loop(), name="loom-hub-reconcile")
+            self._state = CentralState.Running
+        except Exception:
+            # A failure partway through start() would otherwise orphan the
+            # HTTP session, the WS reader + dispatch tasks, and the reconcile
+            # loop — they accumulate across HA setup retries. stop() is
+            # idempotent and None-safe, so it cleans up whatever was created.
+            await self.stop()
+            raise
 
     async def _hub_reconcile_loop(self) -> None:
         """Re-seed the hub singletons from the aggregate every reconcile interval."""
@@ -966,8 +974,14 @@ class LoomCentralAdapter:
         Opens the session (capability handshake), reads daemon + CCU
         metadata, and returns it without starting the event stream.
         """
-        await self._client.connect()
-        await self._refresh_system_information()
+        try:
+            await self._client.connect()
+            await self._refresh_system_information()
+        except Exception:
+            # Pre-flight failure must not leave the just-opened HTTP session
+            # dangling (config-flow retries would leak one per attempt).
+            await self._client.close()
+            raise
         return self._system_information
 
     async def create_backup_and_download(self) -> dict[str, Any]:

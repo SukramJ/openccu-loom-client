@@ -31,6 +31,7 @@ from __future__ import annotations
 from collections.abc import Callable
 import logging
 from typing import TYPE_CHECKING, Any, Final
+from urllib.parse import quote
 
 from openccu_loom_types.rest import (
     CalculatedDPSummary,
@@ -93,6 +94,15 @@ class LoomStore:
         self._devices: dict[str, Device] = {}
         self._channels: dict[tuple[str, int], Channel] = {}
         self._data_points: dict[tuple[str, int, str], DataPoint] = {}
+        # Calculated DPs live in ``_data_points`` alongside the generic ones
+        # (so ``apply_value_changed`` routes to them uniformly), but they are
+        # attached by a different path (the compat adapter's start-time
+        # ``attach_channel_calculated_data_points``) than the generic
+        # per-channel fetch. Tracking their keys lets
+        # ``attach_channel_data_points`` — which re-runs on every (re)bootstrap,
+        # including the replay-lost recovery — replace only the generic DPs it
+        # owns without collaterally dropping calculated DPs it never re-adds.
+        self._calculated_dp_keys: set[tuple[str, int, str]] = set()
         self._cdps: dict[tuple[str, str], CustomDataPoint] = {}
         # Secondary index (address, primary-channel-no) → CDP, kept in lock-step
         # with ``_cdps`` so the refresh bridge's per-value-event channel lookup
@@ -237,6 +247,19 @@ class LoomStore:
         )
 
     @staticmethod
+    def _clear_value_override(*, dp: DataPoint) -> None:
+        """
+        Drop any optimistic HA-written value so a fresh daemon value shows through.
+
+        The compat data-point layer overlays ``_value_override`` when HA
+        writes a value optimistically; a genuine daemon value (whether from
+        a ``value_changed`` push or an explicit REST re-sync) supersedes it.
+        Shared by the push and refresh paths so they cannot drift.
+        """
+        if hasattr(dp, "_value_override"):
+            del dp._value_override
+
+    @staticmethod
     def _refresh_is_stale(*, current_modified_at: Any, incoming_modified_at: Any) -> bool:
         """
         Report whether a REST refresh is older than the in-store value.
@@ -261,9 +284,19 @@ class LoomStore:
         """
         if self._transport is None:
             return
-        payload = await self._transport.request(method="GET", path=f"/devices/{address}/cdps/{name}")
         cdp = self._cdps.get((address, name))
-        if cdp is not None and isinstance(payload, dict):
+        if cdp is None:
+            return
+        # Snapshot the apply-generation before the round-trip; if a live
+        # ``state_changed`` push lands during the GET it bumps the counter,
+        # and we drop this now-stale REST snapshot rather than overwrite the
+        # newer pushed state (CDP state carries no wire timestamp to compare).
+        generation = cdp._apply_generation
+        payload = await self._transport.request(method="GET", path=f"/devices/{address}/cdps/{quote(name, safe='')}")
+        cdp = self._cdps.get((address, name))
+        if cdp is None or cdp._apply_generation != generation:
+            return
+        if isinstance(payload, dict):
             state = payload.get("state")
             if isinstance(state, dict):
                 cdp._replace_state(state=state)
@@ -281,16 +314,19 @@ class LoomStore:
         payload = await self._transport.request(
             method="GET", path=f"/devices/{address}/channels/{channel}/data-points/{parameter}"
         )
-        summary = DataPointSummary.model_validate(payload)
         dp = self._data_points.get((address, channel, parameter))
         if dp is None:
             return
+        if not isinstance(payload, dict):
+            return
+        summary = DataPointSummary.model_validate(payload)
         if self._refresh_is_stale(
             current_modified_at=dp.summary.modified_at,
             incoming_modified_at=summary.modified_at,
         ):
             return
         dp._replace_summary(summary=summary)
+        self._clear_value_override(dp=dp)
 
     # ---- read access ----
 
@@ -425,11 +461,23 @@ class LoomStore:
         during bootstrap. Subsequent state changes attach via
         :meth:`apply_custom_data_point_state_changed`.
         """
-        stale = [k for k in self._cdps if k[0] == device_address]
+        incoming = {(device_address, summary.name) for summary in cdps}
+        stale = [k for k in self._cdps if k[0] == device_address and k not in incoming]
         for k in stale:
             self._drop_cdp(key=k)
         for summary in cdps:
             key = (device_address, summary.name)
+            existing = self._cdps.get(key)
+            if existing is not None:
+                # Update in place — rebuilding would orphan the live twin HA
+                # holds. Re-seed the live state from the fresh snapshot too.
+                existing._replace_summary(summary=summary)
+                if summary.state is not None:
+                    existing._replace_state(state=summary.state)
+                # Keep the channel index in lock-step in case the primary
+                # channel moved between catalogue reads.
+                self._cdp_by_channel[(device_address, summary.channel_no)] = existing
+                continue
             # Seed the live state from the summary's snapshot (daemon
             # >= 0.x includes it in GET .../cdps) so entities start on
             # the real state instead of defaults until the first WS
@@ -544,21 +592,42 @@ class LoomStore:
         """
         Register the data-points of one channel.
 
-        Replaces any previously-registered DPs for the same channel —
-        the daemon's catalogue is authoritative.
+        Reconciles the channel's generic DPs against the daemon's
+        authoritative catalogue *in place*: an existing DP keeps its live
+        instance (its summary is replaced), genuinely new parameters are
+        built, and parameters the daemon dropped are removed. Rebuilding a
+        surviving DP would orphan the reference HA already holds — after a
+        replay-lost re-bootstrap that would silently freeze every entity —
+        so this follows the same never-rebuild-on-update discipline as
+        :meth:`_upsert_program` / :meth:`_upsert_sysvar`.
+
+        Calculated DPs share the ``_data_points`` map but are attached by a
+        separate start-time path that this method never re-runs, so they are
+        excluded from the stale sweep (see :attr:`_calculated_dp_keys`).
         """
-        # Drop the prior DPs for this channel (we replace wholesale).
-        stale = [k for k in self._data_points if k[0] == device_address and k[1] == channel_number]
+        incoming = {(device_address, channel_number, dp.parameter) for dp in data_points}
+        stale = [
+            k
+            for k in self._data_points
+            if k[0] == device_address
+            and k[1] == channel_number
+            and k not in incoming
+            and k not in self._calculated_dp_keys
+        ]
         for s in stale:
             del self._data_points[s]
 
         for dp_summary in data_points:
             key = (device_address, channel_number, dp_summary.parameter)
-            self._data_points[key] = self._build_data_point(
-                summary=dp_summary,
-                device_address=device_address,
-                channel_number=channel_number,
-            )
+            existing = self._data_points.get(key)
+            if existing is None:
+                self._data_points[key] = self._build_data_point(
+                    summary=dp_summary,
+                    device_address=device_address,
+                    channel_number=channel_number,
+                )
+            else:
+                existing._replace_summary(summary=dp_summary)
 
     # ---- live updates ----
 
@@ -591,10 +660,7 @@ class LoomStore:
             }
         )
         dp._replace_summary(summary=new_summary)
-        # A fresh daemon value supersedes any optimistic value HA wrote
-        # (the compat data-point layer overlays ``_value_override``).
-        if hasattr(dp, "_value_override"):
-            del dp._value_override
+        self._clear_value_override(dp=dp)
 
     def apply_device_created(self, *, payload: DeviceCreatedPayload) -> None:
         """
@@ -637,6 +703,10 @@ class LoomStore:
         stale_cdps = [cdp_key for cdp_key in self._cdps if cdp_key[0] == addr]
         for cdp_key in stale_cdps:
             self._drop_cdp(key=cdp_key)
+        # The per-device week-profile DP is registered outside the channel
+        # graph, so channel GC never reaches it — drop it explicitly, else
+        # it accrues across unpair events (a slow leak).
+        self._week_profile_dps.pop(addr, None)
 
     def apply_sysvar_changed(self, *, payload: SysvarChangedPayload) -> None:
         """
@@ -719,7 +789,7 @@ class LoomStore:
         transport = self._require_transport()
         await transport.request(
             method="PUT",
-            path=f"/sysvars/{name}",
+            path=f"/sysvars/{quote(name, safe='')}",
             json_body={"value": value},
             allow_retry=True,
         )
@@ -760,7 +830,7 @@ class LoomStore:
         # operation (turn_on without params) must POST ``{}``.
         await transport.request(
             method="POST",
-            path=f"/devices/{address}/cdps/{name}/{operation}",
+            path=f"/devices/{address}/cdps/{quote(name, safe='')}/{quote(operation, safe='')}",
             json_body=body,
             allow_retry=False,  # CDP operations may not be idempotent (e.g. cover open).
         )
@@ -800,6 +870,7 @@ class LoomStore:
                 channel_number=channel_number,
                 store=self,
             )
+            self._calculated_dp_keys.add(key)
 
     def set_calculated_data_point_factory(self, *, factory: Callable[..., DataPoint] | None) -> None:
         """Install the categorised calculated-DP factory (compat layer)."""
@@ -828,6 +899,7 @@ class LoomStore:
                 }
             )
             dp._replace_summary(summary=new_summary)
+            self._clear_value_override(dp=dp)
 
     async def refresh_device(self, *, address: str) -> None:
         """
@@ -892,11 +964,18 @@ class LoomStore:
     def _upsert_channel(self, *, summary: ChannelSummary) -> None:
         device_address = summary.address.split(":", 1)[0]
         key = (device_address, summary.number)
-        self._channels[key] = Channel(summary=summary, store=self)
+        existing = self._channels.get(key)
+        if existing is None:
+            self._channels[key] = Channel(summary=summary, store=self)
+        else:
+            # Update in place — rebuilding would orphan the live reference a
+            # consumer already holds (freezing it after a re-bootstrap).
+            existing._replace_summary(summary=summary)
 
     def _drop_channel(self, *, key: tuple[str, int]) -> None:
         self._channels.pop(key, None)
-        # Drop any DPs hanging off this channel.
+        # Drop any DPs hanging off this channel (generic and calculated).
         stale_dps = [k for k in self._data_points if k[0] == key[0] and k[1] == key[1]]
         for k in stale_dps:
             del self._data_points[k]
+            self._calculated_dp_keys.discard(k)

@@ -125,24 +125,37 @@ class HttpTransport:
         Raises :class:`LoomTransportError` if the daemon is unreachable
         or returns a non-2xx status.
         """
+        created_here = False
         if self._session is None or self._session.closed:
             self._session = self._external_session or aiohttp.ClientSession(
                 connector=aiohttp.TCPConnector(ssl=self._config.verify_tls),
                 timeout=aiohttp.ClientTimeout(total=self._config.request_timeout_seconds),
             )
+            created_here = True
 
-        info_payload = await self.request(method="GET", path="/info")
-        self._info = Info.model_validate(info_payload)
+        try:
+            info_payload = await self.request(method="GET", path="/info")
+            self._info = Info.model_validate(info_payload)
 
-        missing = [c for c in required_capabilities if c not in (self._info.capabilities or [])]
-        if missing:
-            msg = (
-                f"daemon at {self._config.host} is missing required capabilities: "
-                f"{sorted(missing)} — got {sorted(self._info.capabilities or [])}"
-            )
-            raise LoomTransportError(msg)
+            missing = [c for c in required_capabilities if c not in (self._info.capabilities or [])]
+            if missing:
+                msg = (
+                    f"daemon at {self._config.host} is missing required capabilities: "
+                    f"{sorted(missing)} — got {sorted(self._info.capabilities or [])}"
+                )
+                raise LoomTransportError(msg)
 
-        self._check_schema_digest(info_payload=info_payload)
+            self._check_schema_digest(info_payload=info_payload)
+        except BaseException:
+            # A failed handshake must not leak the session we just opened
+            # (unreachable daemon, capability mismatch, cancellation). Only
+            # tear down a session this call created and owns — never a
+            # caller-supplied one, and never one a prior connect() opened.
+            if created_here and self._external_session is None and self._session is not None:
+                await self._session.close()
+                self._session = None
+            self._info = None
+            raise
 
         _LOGGER.info(
             "connected to openccu-loom %s at %s (api_version=%s)",
@@ -273,6 +286,7 @@ class HttpTransport:
         path: str,
         params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
+        total_timeout_seconds: float | None = None,
     ) -> bytes:
         """
         Fetch a non-JSON (binary) body — backup / capture downloads.
@@ -282,6 +296,16 @@ class HttpTransport:
         exceptions as :meth:`request`. Not retried by default — these
         endpoints stream sizeable archives where a blind retry is
         wasteful.
+
+        These archives can take far longer to transfer than a JSON call,
+        so this method does *not* inherit the session-wide total timeout
+        (default 30s), which would guarantee failure on any sizeable
+        download over a slow link. Instead it applies a per-chunk *read*
+        timeout (so a genuinely stalled transfer still fails fast) and no
+        total cap, unless the caller passes ``total_timeout_seconds`` to
+        impose an explicit ceiling. Setting an explicit timeout on the
+        request also makes behaviour deterministic when the transport runs
+        on a caller-supplied session whose default is unknown.
         """
         if self._session is None or self._session.closed:
             msg = "HttpTransport not connected — call connect() first"
@@ -289,9 +313,14 @@ class HttpTransport:
         url = self._config.http_base_url + path
         merged = self._build_headers(extra=headers)
         merged.setdefault("Accept", "application/octet-stream")
+        timeout = aiohttp.ClientTimeout(
+            total=total_timeout_seconds,
+            sock_connect=self._config.request_timeout_seconds,
+            sock_read=self._config.request_timeout_seconds,
+        )
         assert self._session is not None  # noqa: S101 — narrowed by the connected-state guard above
         try:
-            async with self._session.request(method, url, params=params, headers=merged) as resp:
+            async with self._session.request(method, url, params=params, headers=merged, timeout=timeout) as resp:
                 raw = await resp.read()
                 if HTTPStatus.OK <= resp.status < HTTPStatus.MULTIPLE_CHOICES:
                     return raw

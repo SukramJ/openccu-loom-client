@@ -39,6 +39,7 @@ class CustomDataPoint:
     """Store-aware wrapper around one aggregated CDP on one device."""
 
     __slots__ = (
+        "_apply_generation",
         "_device_address",
         "_state",
         "_store",
@@ -58,6 +59,11 @@ class CustomDataPoint:
         self._device_address = device_address
         self._store = store
         self._state: dict[str, Any] = dict(initial_state or {})
+        # Monotonic counter bumped on every state write. A REST refresh
+        # captures it before its GET and skips its own write-back if a live
+        # push advanced it during the round-trip (lost-update guard — the CDP
+        # state carries no wire timestamp to compare instead).
+        self._apply_generation: int = 0
 
     # ---- raw view ----
 
@@ -142,6 +148,7 @@ class CustomDataPoint:
     def _replace_state(self, *, state: dict[str, Any]) -> None:
         """Replace the current state dict in place (called by the store)."""
         self._state = dict(state)
+        self._apply_generation += 1
 
     def _replace_summary(self, *, summary: CustomDPSummary) -> None:
         """Replace the backing summary in place (called by the store)."""
