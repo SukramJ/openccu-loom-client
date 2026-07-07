@@ -137,6 +137,8 @@ class HttpTransport:
             info_payload = await self.request(method="GET", path="/info")
             self._info = Info.model_validate(info_payload)
 
+            self._check_api_version()
+
             missing = [c for c in required_capabilities if c not in (self._info.capabilities or [])]
             if missing:
                 msg = (
@@ -193,6 +195,51 @@ class HttpTransport:
                 getattr(openccu_loom_types, "DAEMON_API_VERSION", "?"),
                 self._info.api_version if self._info else "?",
             )
+
+    def _check_api_version(self) -> None:
+        """
+        Fail fast when the daemon's API version is incompatible with the types.
+
+        The installed ``openccu-loom-types`` package is generated against one
+        daemon API version (``DAEMON_API_VERSION``). Under the daemon's semver
+        contract a *major* bump is breaking and a *minor* bump adds only
+        backward-compatible surface, so this build is compatible with a daemon
+        of the **same major** whose **minor is at least** the one the types
+        were generated against. Anything else is raised — not merely logged
+        like the digest drift — so ``connect()`` fails cleanly and the caller
+        retries with aligned versions instead of half-initializing against an
+        incompatible daemon (which manifests downstream as bootstrap/dispatch
+        failures and event storms). Skipped when either version is absent or
+        unparsable (old daemon or unstamped types package); the digest
+        handshake still warns on build drift within a compatible API line.
+        """
+        if self._info is None:
+            return
+        expected = getattr(openccu_loom_types, "DAEMON_API_VERSION", "")
+        expected_mm = self._parse_major_minor(expected)
+        daemon_mm = self._parse_major_minor(self._info.api_version)
+        if expected_mm is None or daemon_mm is None:
+            return
+        exp_major, exp_minor = expected_mm
+        got_major, got_minor = daemon_mm
+        if got_major != exp_major or got_minor < exp_minor:
+            msg = (
+                f"daemon at {self._config.host} reports incompatible API version {self._info.api_version!r}: "
+                f"installed openccu-loom-types expects {expected!r} (same major, minor ≥ {exp_minor}). "
+                f"Update the daemon or install an openccu-loom-types release matching it."
+            )
+            raise LoomTransportError(msg)
+
+    @staticmethod
+    def _parse_major_minor(version: str) -> tuple[int, int] | None:
+        """Parse ``(major, minor)`` from a dotted version; ``None`` if unparsable."""
+        parts = version.split(".")
+        if len(parts) < 2:
+            return None
+        try:
+            return int(parts[0]), int(parts[1])
+        except ValueError:
+            return None
 
     async def close(self) -> None:
         """Tear down the session (only if this transport owns it)."""

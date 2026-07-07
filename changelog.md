@@ -1,3 +1,32 @@
+# Version 2026.7.4 (2026-07-07)
+
+Reconnect/reload robustness: fail fast on an incompatible daemon and stop a
+replay-lost / queue-overflow burst from storming the log and the store.
+
+- Feat: **hard daemon API-version guard at `connect()`.** `HttpTransport`
+  now compares the daemon's `/info` `api_version` against the
+  `openccu-loom-types` `DAEMON_API_VERSION` and raises `LoomTransportError`
+  when they are incompatible (needs the same major and a minor ≥ the one the
+  installed types were generated against). Previously `api_version` was only
+  logged; an incompatible daemon (e.g. a version skew after a daemon update)
+  half-initialized the client instead of failing cleanly, which downstream
+  manifested as bootstrap/dispatch failures and event storms. Skipped when
+  either version is absent or unparsable; the `schema_digest` handshake
+  still warns on build drift within a compatible API line.
+- Fix: **WS envelope-queue overflow no longer re-fires the resync per dropped
+  event.** An `_overflowing` latch forces exactly one resync per overflow
+  episode; the consumer clears it once the queue drains below the
+  low-watermark. The client's "re-bootstrap already in progress" de-dup log
+  drops to DEBUG. A sustained flood previously emitted thousands of warnings
+  per second.
+- Fix: **replay-lost re-bootstrap cooldown.** `_on_replay_lost` — the single
+  funnel for both the daemon's `replay_lost` frame and the queue-overflow
+  resync — now drops a trigger arriving within 30 s of the previous
+  re-bootstrap finishing, so a burst collapses to at most one snapshot walk
+  per (walk duration + cooldown) instead of re-walking back-to-back.
+- Chore: raise the `aiohomematic` floor to `>=2026.7.1` to match the
+  CI-pinned version in `requirements.txt`.
+
 # Version 2026.7.3 (2026-07-07)
 
 Robustness-hardening pass across the transport, store, event, and compat

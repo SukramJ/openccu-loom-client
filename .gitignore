@@ -19,3 +19,4 @@ htmlcov/
 .idea/
 .vscode/
 .DS_Store
+/tmp

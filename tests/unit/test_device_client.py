@@ -16,6 +16,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
+from openccu_loom_types import DAEMON_API_VERSION
 from openccu_loom_types.rest import ChannelSummary, DeviceDetail, DeviceSummary, Snapshot
 import pytest
 
@@ -27,7 +28,7 @@ from tests.helpers import MockDaemon
 
 _INFO = {
     "version": "1.2.3",
-    "api_version": "1.0.0",
+    "api_version": DAEMON_API_VERSION,
     "commit": "deadbeef",
     "build_date": "2026-05-24T10:00:00Z",
     "addon_build": False,
