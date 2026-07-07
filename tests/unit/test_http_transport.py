@@ -27,6 +27,7 @@ _INFO_RESPONSE = {
     "api_version": "1.0.0",
     "commit": "deadbeef",
     "build_date": "2026-05-24T10:00:00Z",
+    "addon_build": False,
     "started_at": "2026-05-24T10:01:00Z",
     # uptime is ISO-8601 duration per the daemon schema.
     "uptime": "PT60S",
