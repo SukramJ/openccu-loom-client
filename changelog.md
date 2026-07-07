@@ -1,3 +1,14 @@
+# Version 2026.7.2 (2026-07-07)
+
+- Chore: **bump `openccu-loom-types` to 0.1.51 (daemon API 2.15.0).**
+  Daemon 0.27.2 added the required `addon_build` field on `GET /info`
+  (the only wire change since 2.14.0); the `/info` test fixtures carry
+  the field now. This also repairs the `pyproject.toml` pin, which the
+  Dependabot merge (#47) — branched before #45 — had downgraded from
+  0.1.50 back to 0.1.46 (API 2.6.0), reintroducing the `schema_digest`
+  mismatch #45 had fixed. `requirements.txt` moves to types 0.1.51 and
+  `aiohomematic` 2026.7.1.
+
 # Version 2026.7.1 (2026-07-04)
 
 - Chore: **bump `openccu-loom-types` to 0.1.50 (daemon API 2.14.0).**

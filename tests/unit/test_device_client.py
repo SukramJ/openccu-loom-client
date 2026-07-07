@@ -30,6 +30,7 @@ _INFO = {
     "api_version": "1.0.0",
     "commit": "deadbeef",
     "build_date": "2026-05-24T10:00:00Z",
+    "addon_build": False,
     "started_at": "2026-05-24T10:01:00Z",
     "uptime": "PT60S",
     "capabilities": ["rest.v1", "ws.broadcasts.v1"],
