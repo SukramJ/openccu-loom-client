@@ -52,8 +52,21 @@ class AuthMethod(ABC):
         secret itself.
         """
 
+    def __repr__(self) -> str:
+        """
+        Return a secret-safe repr delegating to :attr:`identity_hint`.
 
-@dataclass(frozen=True, slots=True)
+        The concrete auth methods are ``@dataclass``es carrying the
+        plaintext secret in a field; the dataclass-synthesised repr would
+        render it verbatim, so every one is declared ``repr=False`` and
+        inherits this redacting repr instead. That keeps credentials out of
+        debug logs, exception tracebacks capturing locals, and config /
+        diagnostics dumps that recurse into ``LoomConfig.auth``.
+        """
+        return f"{type(self).__name__}({self.identity_hint})"
+
+
+@dataclass(frozen=True, slots=True, repr=False)
 class BasicAuth(AuthMethod):
     """HTTP Basic auth — username + password."""
 
@@ -71,7 +84,7 @@ class BasicAuth(AuthMethod):
         return f"basic:{self.username}"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, repr=False)
 class BearerAuth(AuthMethod):
     """
     HTTP Bearer auth — API token issued by the daemon.
@@ -98,7 +111,7 @@ class BearerAuth(AuthMethod):
         return f"bearer:{self.label}:…{suffix}"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, repr=False)
 class SessionAuth(AuthMethod):
     """
     Cookie-based session issued by POST /auth/login.

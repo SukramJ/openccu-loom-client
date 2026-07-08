@@ -5,7 +5,7 @@
 # events onto the real aiohomematic event bus, so its unit tests need the
 # real package installed.
 coverage==7.15.0
-mypy==2.1.0
+mypy==2.2.0
 prek==0.4.8
 pur==7.4.0
 pytest==9.1.1

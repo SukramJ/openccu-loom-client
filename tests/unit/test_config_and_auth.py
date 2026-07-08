@@ -90,3 +90,39 @@ def test_all_auths_produce_authorization_header(
     headers: dict[str, str] = {}
     auth.apply_to_headers(headers=headers)
     assert headers["Authorization"].startswith(expected_prefix)
+
+
+class TestSecretRedaction:
+    """The auto-generated dataclass repr must never render a secret (F1)."""
+
+    def test_basic_auth_repr_hides_password(self) -> None:
+        auth = BasicAuth(username="admin", password="s3cr3t-passw0rd")
+        assert "s3cr3t-passw0rd" not in repr(auth)
+        assert "s3cr3t-passw0rd" not in str(auth)
+        assert repr(auth) == "BasicAuth(basic:admin)"
+
+    def test_bearer_auth_repr_hides_token(self) -> None:
+        auth = BearerAuth(token="abcdef-TOP-SECRET-123456", label="ha")
+        assert "TOP-SECRET" not in repr(auth)
+        assert "abcdef" not in repr(auth)
+        # Only the six-char suffix hint survives.
+        assert repr(auth) == "BearerAuth(bearer:ha:…123456)"
+
+    def test_session_auth_repr_hides_cookie_value(self) -> None:
+        auth = SessionAuth(cookie_value="cookieSECRETvalue")
+        assert "cookieSECRETvalue" not in repr(auth)
+        assert repr(auth) == "SessionAuth(session:openccu_loom_session)"
+
+    @pytest.mark.parametrize(
+        "auth",
+        [
+            BasicAuth(username="admin", password="s3cr3t-passw0rd"),
+            BearerAuth(token="abcdef-TOP-SECRET-123456"),
+            SessionAuth(cookie_value="cookieSECRETvalue"),
+        ],
+    )
+    def test_config_repr_does_not_leak_auth_secret(self, auth: BasicAuth | BearerAuth | SessionAuth) -> None:
+        # repr(config) recurses into the auth field; it must stay redacted.
+        cfg = LoomConfig(host="ccu", auth=auth)
+        for secret in ("s3cr3t-passw0rd", "TOP-SECRET", "cookieSECRETvalue"):
+            assert secret not in repr(cfg)

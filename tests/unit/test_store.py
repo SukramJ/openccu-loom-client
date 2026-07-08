@@ -338,6 +338,49 @@ class TestLiveUpdates:
         store.apply_device_created(payload=payload)
         assert store.get_device(address="VCU0001").name == "original"
 
+    def test_device_created_is_capped_against_unbounded_growth(self) -> None:
+        # F2: a hostile daemon streaming unique addresses must not grow the
+        # store without bound. New addresses past the cap are refused.
+        store = LoomStore(max_devices=3)
+        for i in range(10):
+            store.apply_device_created(
+                payload=DeviceCreatedPayload.model_validate(
+                    {
+                        "central": "home",
+                        "interface_id": "home:HmIP-RF",
+                        "device_address": f"VCU_FLOOD_{i}",
+                        "model": "HmIP-PSM",
+                    }
+                )
+            )
+        assert len(list(store.devices)) == 3
+        # Below-cap addresses were admitted; over-cap ones were dropped.
+        assert store.get_device(address="VCU_FLOOD_0") is not None
+        assert store.get_device(address="VCU_FLOOD_9") is None
+
+    def test_snapshot_load_is_capped(self) -> None:
+        # The same cap guards the bootstrap path, not just live pushes.
+        store = LoomStore(max_devices=2)
+        store.load_snapshot(snapshot=_snapshot(devices=[_device_summary(address=f"VCU{i:04d}") for i in range(5)]))
+        assert len(list(store.devices)) == 2
+
+    def test_known_device_still_updates_at_cap(self) -> None:
+        # An update to an already-known address must never be refused, even
+        # when the store sits exactly at the cap.
+        store = LoomStore(max_devices=1)
+        store.load_snapshot(snapshot=_snapshot(devices=[_device_summary(name="original")]))
+        store.apply_device_created(
+            payload=DeviceCreatedPayload.model_validate(
+                {
+                    "central": "home",
+                    "interface_id": "home:HmIP-RF",
+                    "device_address": "VCU0001",
+                    "model": "HmIP-PSM",
+                }
+            )
+        )
+        assert store.get_device(address="VCU0001") is not None
+
     def test_apply_device_removed_clears_device_and_children(self, populated: LoomStore) -> None:
         payload = DeviceRemovedPayload.model_validate(
             {

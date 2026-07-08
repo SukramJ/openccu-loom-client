@@ -72,6 +72,14 @@ _RETRYABLE_EXCEPTIONS: Final = (
 # not the sum of per-attempt timeouts.
 _DEFAULT_BACKOFF_SEQUENCE: Final = (0.5, 2.0)
 
+# Hard ceiling on a binary download (backup / capture archives). Without a
+# cap, ``request_bytes`` buffers the whole body into memory, so a hostile or
+# compromised daemon could stream an unbounded body (each chunk arriving within
+# the per-chunk ``sock_read`` window, so the socket never times out) and drive
+# the host to OOM. 512 MiB is far above any real CCU backup while still bounding
+# the blast radius; callers may override per request via ``max_bytes``.
+_DEFAULT_MAX_DOWNLOAD_BYTES: Final = 512 * 1024 * 1024
+
 
 class HttpTransport:
     """
@@ -334,6 +342,7 @@ class HttpTransport:
         params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
         total_timeout_seconds: float | None = None,
+        max_bytes: int | None = _DEFAULT_MAX_DOWNLOAD_BYTES,
     ) -> bytes:
         """
         Fetch a non-JSON (binary) body — backup / capture downloads.
@@ -353,6 +362,11 @@ class HttpTransport:
         impose an explicit ceiling. Setting an explicit timeout on the
         request also makes behaviour deterministic when the transport runs
         on a caller-supplied session whose default is unknown.
+
+        The body is read with a ``max_bytes`` ceiling (default
+        :data:`_DEFAULT_MAX_DOWNLOAD_BYTES`) so a daemon streaming an
+        unbounded body cannot exhaust host memory; crossing it raises
+        :class:`LoomTransportError`. Pass ``max_bytes=None`` to opt out.
         """
         if self._session is None or self._session.closed:
             msg = "HttpTransport not connected — call connect() first"
@@ -367,8 +381,17 @@ class HttpTransport:
         )
         assert self._session is not None  # noqa: S101 — narrowed by the connected-state guard above
         try:
-            async with self._session.request(method, url, params=params, headers=merged, timeout=timeout) as resp:
-                raw = await resp.read()
+            async with self._session.request(
+                method,
+                url,
+                params=params,
+                headers=merged,
+                timeout=timeout,
+                # No legitimate redirect in the daemon contract; refuse to
+                # follow one so the auth header can't leak to another host.
+                allow_redirects=False,
+            ) as resp:
+                raw = await self._read_capped(resp=resp, url=url, max_bytes=max_bytes)
                 if HTTPStatus.OK <= resp.status < HTTPStatus.MULTIPLE_CHOICES:
                     return raw
                 payload = self._decode_json(raw) if raw else None
@@ -421,6 +444,13 @@ class HttpTransport:
                 params=params,
                 json=json_body,
                 headers=headers,
+                # The daemon REST contract defines no redirects. Refuse to
+                # follow one: aiohttp does not strip our manually-set
+                # Authorization / Cookie headers across a cross-origin hop, so
+                # a hostile/compromised daemon replying 3xx could otherwise
+                # exfiltrate the credential to an arbitrary host or steer the
+                # client at an internal endpoint (SSRF).
+                allow_redirects=False,
                 **extra,
             ) as resp:
                 if resp.status == HTTPStatus.NO_CONTENT:
@@ -444,6 +474,29 @@ class HttpTransport:
         except TimeoutError as exc:
             msg = f"request to {url} timed out after {self._config.request_timeout_seconds}s"
             raise LoomTransportError(msg) from exc
+
+    @staticmethod
+    async def _read_capped(*, resp: aiohttp.ClientResponse, url: str, max_bytes: int | None) -> bytes:
+        """
+        Read a response body into memory, aborting past ``max_bytes``.
+
+        ``resp.read()`` buffers the whole body unbounded; a hostile daemon can
+        stream indefinitely as long as each chunk beats the ``sock_read``
+        timeout. Streaming with a running byte tally lets us fail fast once the
+        ceiling is crossed instead of allocating without limit. ``max_bytes=None``
+        restores the unbounded behaviour for callers that opt out explicitly.
+        """
+        if max_bytes is None:
+            return await resp.read()
+        chunks: list[bytes] = []
+        total = 0
+        async for chunk in resp.content.iter_chunked(64 * 1024):
+            total += len(chunk)
+            if total > max_bytes:
+                msg = f"response from {url} exceeded the {max_bytes}-byte download cap — aborting"
+                raise LoomTransportError(msg)
+            chunks.append(chunk)
+        return b"".join(chunks)
 
     @staticmethod
     def _decode_json(raw: bytes) -> Any:
