@@ -15,6 +15,7 @@ import pytest
 from openccu_loom_client import (
     LoomAuthError,
     LoomConfig,
+    LoomHttpError,
     LoomNotFoundError,
     LoomTransportError,
     LoomUpstreamUnavailableError,
@@ -330,3 +331,65 @@ class TestDeadlineBudget:
         # Budget ≈ 0.4 s. Without it: 3 × 0.4 + 0.2 backoff ≈ 1.4 s. Assert the
         # total stays near the single budget (generous CI slack).
         assert elapsed < 1.0, f"deadline budget not enforced: {elapsed:.2f}s"
+
+
+class TestTransportSecurityHardening:
+    """Audit fixes F3 (no daemon-driven redirects) and F6 (bounded download)."""
+
+    async def test_json_request_does_not_follow_redirect(
+        self, mock_daemon: MockDaemon, transport: HttpTransport
+    ) -> None:
+        # A hostile/compromised daemon replies 302 → another endpoint; aiohttp
+        # would otherwise re-send the auth header there. With allow_redirects
+        # disabled the 3xx surfaces as an error and the target is never hit.
+        mock_daemon.get("/api/v1/info", payload=_INFO_RESPONSE)
+        mock_daemon.get(
+            "/api/v1/devices",
+            status=302,
+            headers={"Location": "/api/v1/leaked"},
+        )
+        mock_daemon.get("/api/v1/leaked", payload={"stolen": True})
+        await transport.connect()
+        # The unfollowed 3xx surfaces as an HTTP-status error, not a 2xx body.
+        with pytest.raises(LoomHttpError) as ei:
+            await transport.request(method="GET", path="/devices")
+        assert ei.value.status == 302
+        await transport.close()
+        assert not any(r.path == "/api/v1/leaked" for r in mock_daemon.requests), (
+            "client followed a daemon-controlled redirect"
+        )
+
+    async def test_request_bytes_does_not_follow_redirect(
+        self, mock_daemon: MockDaemon, transport: HttpTransport
+    ) -> None:
+        mock_daemon.get("/api/v1/info", payload=_INFO_RESPONSE)
+        mock_daemon.get(
+            "/api/v1/backup",
+            status=302,
+            headers={"Location": "/api/v1/leaked"},
+        )
+        mock_daemon.get("/api/v1/leaked", body=b"stolen")
+        await transport.connect()
+        with pytest.raises(LoomHttpError) as ei:
+            await transport.request_bytes(method="GET", path="/backup")
+        assert ei.value.status == 302
+        await transport.close()
+        assert not any(r.path == "/api/v1/leaked" for r in mock_daemon.requests)
+
+    async def test_request_bytes_aborts_past_max_bytes(self, mock_daemon: MockDaemon, transport: HttpTransport) -> None:
+        mock_daemon.get("/api/v1/info", payload=_INFO_RESPONSE)
+        mock_daemon.get("/api/v1/backup", body=b"x" * 4096)
+        await transport.connect()
+        with pytest.raises(LoomTransportError, match="download cap"):
+            await transport.request_bytes(method="GET", path="/backup", max_bytes=1024)
+        await transport.close()
+
+    async def test_request_bytes_returns_body_within_cap(
+        self, mock_daemon: MockDaemon, transport: HttpTransport
+    ) -> None:
+        mock_daemon.get("/api/v1/info", payload=_INFO_RESPONSE)
+        mock_daemon.get("/api/v1/backup", body=b"x" * 4096)
+        await transport.connect()
+        raw = await transport.request_bytes(method="GET", path="/backup", max_bytes=1_000_000)
+        assert raw == b"x" * 4096
+        await transport.close()

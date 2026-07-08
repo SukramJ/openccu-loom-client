@@ -58,6 +58,7 @@ class _StubResponse:
     body: bytes | None = None
     content_type: str = "application/json"
     delay: float = 0.0
+    headers: dict[str, str] | None = None
 
 
 class MockDaemon:
@@ -86,11 +87,14 @@ class MockDaemon:
         body: bytes | None = None,
         content_type: str = "application/json",
         delay: float = 0.0,
+        headers: dict[str, str] | None = None,
     ) -> None:
         """Queue a response for the next call to ``method path`` (``delay`` s server-side)."""
         key = (method.upper(), path)
         self._responses.setdefault(key, deque()).append(
-            _StubResponse(status=status, payload=payload, body=body, content_type=content_type, delay=delay)
+            _StubResponse(
+                status=status, payload=payload, body=body, content_type=content_type, delay=delay, headers=headers
+            )
         )
 
     def get(self, path: str, **kwargs: Any) -> None:
@@ -170,7 +174,11 @@ class MockDaemon:
         if stub.delay:
             await asyncio.sleep(stub.delay)
         if stub.payload is not None:
-            return web.json_response(stub.payload, status=stub.status)
-        if stub.body is not None:
-            return web.Response(body=stub.body, status=stub.status, content_type=stub.content_type)
-        return web.Response(status=stub.status)
+            resp = web.json_response(stub.payload, status=stub.status)
+        elif stub.body is not None:
+            resp = web.Response(body=stub.body, status=stub.status, content_type=stub.content_type)
+        else:
+            resp = web.Response(status=stub.status)
+        if stub.headers:
+            resp.headers.update(stub.headers)
+        return resp

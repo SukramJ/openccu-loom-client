@@ -469,3 +469,71 @@ class TestEnvelopeParsing:
         bad = self._frame(kind="snapshot")
         del bad["seq"]
         assert WsTransport._parse_envelope(bad) is None
+
+
+class TestLoggingAndMemoryHardening:
+    """Audit fixes F4 (bounded malformed-frame logging) and F5 (byte-budgeted queue)."""
+
+    def test_short_frame_truncates_large_repr(self) -> None:
+        big = {"payload": "A" * 100_000}
+        out = WsTransport._short_frame(big)
+        assert len(out) < ws_module._MAX_FRAME_LOG_CHARS + 40
+        assert out.endswith("chars)")
+
+    def test_malformed_frame_warning_is_truncated(self, caplog) -> None:
+        # A malformed but huge frame must not be echoed verbatim into the log.
+        bad = {
+            "topic": "device.0001.channels.1.data_points.LEVEL",
+            "type": "datapoint.value_changed",
+            "ts": "2026-05-24T08:42:13Z",
+            "kind": "snapshot",  # forces the coerce path…
+            "junk": "Z" * 100_000,  # …then re-validation fails (no seq/payload)
+        }
+        with caplog.at_level("WARNING", logger=ws_module._LOGGER.name):
+            assert WsTransport._parse_envelope(bad) is None
+        warnings = [r.getMessage() for r in caplog.records if "malformed WS envelope" in r.getMessage()]
+        assert warnings, "expected a malformed-frame warning"
+        # The 100k-char junk must not have been rendered in full.
+        assert all(len(msg) < 1000 for msg in warnings)
+        assert not any("Z" * 1000 in msg for msg in warnings)
+
+    async def test_queue_overflows_on_byte_budget_before_count(self, monkeypatch) -> None:
+        # F5: a burst of large valid frames trips the aggregate-byte ceiling
+        # long before the 4096-item count cap, forcing a resync.
+        monkeypatch.setattr(ws_module, "_ENVELOPE_QUEUE_MAX_BYTES", 20_000)
+        resyncs: list[int] = []
+
+        async def on_replay_lost(oldest_seq: int) -> None:
+            resyncs.append(oldest_seq)
+
+        cfg = LoomConfig(host="127.0.0.1", port=1, tls=False, auth=BearerAuth(token="t"))
+        transport = WsTransport(config=cfg, on_replay_lost=on_replay_lost)
+
+        # Each frame carries a ~5k-char string; a handful blow the 20k budget
+        # well under the item-count cap (which stays at its 4096 default).
+        pad = "x" * 5_000
+        for seq in range(1, 21):
+            frame = json.loads(_envelope(seq=seq))
+            frame["payload"]["pad"] = pad
+            await transport._handle_text(raw=json.dumps(frame))
+
+        assert resyncs == [-1]
+        assert transport._overflowing is True
+        # The queue never reached the item-count cap — bytes tripped first.
+        assert transport._envelope_queue.qsize() < ws_module._ENVELOPE_QUEUE_MAXSIZE
+
+    async def test_queued_bytes_tally_decrements_on_drain(self) -> None:
+        # The byte tally must fall back as the consumer drains, so a transient
+        # burst doesn't permanently wedge the queue in the overflow state.
+        cfg = LoomConfig(host="127.0.0.1", port=1, tls=False, auth=BearerAuth(token="t"))
+        transport = WsTransport(config=cfg)
+        # seq is 1-based on the wire (seq=0 fails validation), so start at 1.
+        for seq in (1, 2, 3):
+            await transport._handle_text(raw=_envelope(seq=seq))
+        assert transport._queued_bytes > 0
+        assert transport._envelope_queue.qsize() == 3
+        events = transport.events()
+        for _ in range(3):
+            await events.__anext__()
+        assert transport._queued_bytes == 0
+        await events.aclose()

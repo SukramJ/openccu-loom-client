@@ -64,13 +64,26 @@ if TYPE_CHECKING:
 
 _LOGGER: Final = logging.getLogger(__name__)
 
+# Upper bound on the number of distinct devices the store will hold. Every
+# store map is fed by daemon-supplied data — ``load_snapshot`` and the live
+# ``device.created`` push both add net-new entries with no intrinsic ceiling —
+# so a hostile or compromised daemon could stream unique addresses without
+# limit and grow the process toward OOM. A real CCU tops out in the low
+# thousands of devices, so this ceiling never bites legitimately; on exceed we
+# refuse the new address (existing devices keep updating) and warn once.
+_DEFAULT_MAX_DEVICES: Final = 20000
+
 
 class LoomStore:
     """Process-local mirror of one daemon's CCU model."""
 
-    def __init__(self, *, transport: HttpTransport | None = None) -> None:
+    def __init__(self, *, transport: HttpTransport | None = None, max_devices: int = _DEFAULT_MAX_DEVICES) -> None:
         """Initialise an empty store, optionally bound to a transport."""
         self._transport = transport
+        self._max_devices: Final = max_devices
+        # One-shot latch so a sustained flood of net-new addresses past the cap
+        # emits a single warning rather than one per rejected device.
+        self._device_cap_warned = False
         # The daemon central *name* (``snapshot.interfaces[].central_id``,
         # == ``payload.central``). Used to scope/annotate events, NOT as a
         # routing-key prefix.
@@ -567,6 +580,8 @@ class LoomStore:
         # DeviceDetail extends DeviceSummary, so we can pass it through
         # the upsert path that handles the common case.
         device = self._upsert_device_summary(summary=detail)
+        if device is None:
+            return  # device cap reached — a net-new address was refused
         device._attach_detail(
             firmware=detail.firmware,
             availability=detail.availability,
@@ -673,6 +688,8 @@ class LoomStore:
         ``attach_device_detail`` call completes the graph.
         """
         if payload.device_address in self._devices:
+            return
+        if not self._can_admit_device(address=payload.device_address):
             return
         stub = DeviceSummary(
             address=payload.device_address,
@@ -837,14 +854,37 @@ class LoomStore:
 
     # ---- internals ----
 
-    def _upsert_device_summary(self, *, summary: DeviceSummary) -> Device:
+    def _upsert_device_summary(self, *, summary: DeviceSummary) -> Device | None:
         device = self._devices.get(summary.address)
         if device is None:
+            if not self._can_admit_device(address=summary.address):
+                return None
             device = Device(summary=summary, store=self)
             self._devices[summary.address] = device
         else:
             device._update_summary(summary=summary)
         return device
+
+    def _can_admit_device(self, *, address: str) -> bool:
+        """
+        Report whether a *net-new* device address may be admitted.
+
+        Guards every growth path (``load_snapshot`` and the live
+        ``device.created`` push) against unbounded map growth from a hostile
+        daemon streaming unique addresses. Updates to an already-known address
+        never reach here, so existing devices keep refreshing even at the cap.
+        """
+        if address in self._devices or len(self._devices) < self._max_devices:
+            return True
+        if not self._device_cap_warned:
+            self._device_cap_warned = True
+            _LOGGER.warning(
+                "device cap reached (%d) — refusing net-new device %s and further new devices; "
+                "existing devices continue to update",
+                self._max_devices,
+                address,
+            )
+        return False
 
     def attach_channel_calculated_data_points(
         self,

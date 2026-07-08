@@ -25,6 +25,7 @@ arrival order.
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable
 import contextlib
 from dataclasses import replace
@@ -77,6 +78,28 @@ _INBOUND_PING_DEADLINE_SECONDS: Final = 60.0
 # without limit → OOM. On overflow the backlog is stale anyway, so we drop it
 # and force a resync (fresh snapshot) — the store rebuilds rather than drifting.
 _ENVELOPE_QUEUE_MAXSIZE: Final = 4096
+
+# Aggregate byte ceiling on the in-memory envelope queue. The item-count cap
+# alone does not bound memory: ``WsEnvelope.payload`` is ``Any`` and each frame
+# can be up to ``_MAX_WS_MSG_SIZE``, so a full queue of maximally-sized frames
+# would be item-count × frame-size. During a slow-consumer window (a long
+# re-bootstrap) a busy or hostile daemon could flood large valid envelopes and
+# push transient memory toward multi-GB before the count cap engages. We track
+# queued bytes (by source-frame length) and force the same drop-and-resync once
+# this ceiling is crossed, whichever limit is hit first.
+_ENVELOPE_QUEUE_MAX_BYTES: Final = 64 * 1024 * 1024
+
+# Explicit per-frame size cap for the WS upgrade (aiohttp defaults to 4 MiB).
+# Broadcast envelopes are per-event and tiny (a value change is a few hundred
+# bytes); a small ceiling bounds both a single frame's memory and the worst-case
+# repr volume of a malformed frame, without threatening any legitimate payload.
+_MAX_WS_MSG_SIZE: Final = 1024 * 1024
+
+# Upper bound on how much of a rejected frame is echoed into a WARNING log line.
+# A malformed frame is daemon-controlled and can be near ``_MAX_WS_MSG_SIZE``;
+# logging it verbatim (as the sibling non-JSON paths already avoid) lets a peer
+# amplify wire bytes into unbounded log volume and repr CPU. Truncate it.
+_MAX_FRAME_LOG_CHARS: Final = 200
 
 # Low-watermark that ends an overflow episode. While the queue is full the
 # producer drops events and forces exactly one resync per episode (see the
@@ -143,6 +166,12 @@ class WsTransport:
         # reauth_ok/reauth_failed); None when no reauth is in flight.
         self._reauth_ack: asyncio.Future[bool] | None = None
         self._envelope_queue: asyncio.Queue[WsEnvelope] = asyncio.Queue(maxsize=_ENVELOPE_QUEUE_MAXSIZE)
+        # Source-frame byte size per queued envelope, kept FIFO-aligned with
+        # ``_envelope_queue`` (single-threaded event loop, so producer append and
+        # consumer popleft stay in lock-step). ``_queued_bytes`` is their running
+        # sum, used to enforce ``_ENVELOPE_QUEUE_MAX_BYTES`` alongside the count.
+        self._envelope_sizes: deque[int] = deque()
+        self._queued_bytes = 0
         self._dropped_count = 0
         # Latch for the current overflow episode: set on the first dropped
         # envelope, cleared by the consumer once the queue drains back below
@@ -266,6 +295,10 @@ class WsTransport:
                     with contextlib.suppress(asyncio.CancelledError):
                         await getter
                     return
+                # One envelope just left the queue — keep the byte tally in
+                # lock-step with the count (FIFO-aligned with the producer).
+                if self._envelope_sizes:
+                    self._queued_bytes -= self._envelope_sizes.popleft()
                 # Ending an overflow episode: once the backlog has drained back
                 # below the low-watermark, clear the latch so a later overflow
                 # warns and resyncs afresh. Report the episode's drop tally.
@@ -348,6 +381,7 @@ class WsTransport:
             self._config.ws_url,
             headers=headers,
             heartbeat=None,  # daemon drives heartbeat; aiohttp default would double-ping
+            max_msg_size=_MAX_WS_MSG_SIZE,  # cap per-frame size (aiohttp default 4 MiB)
         ) as ws:
             self._ws = ws
             await self._send_initial_subscribe()
@@ -414,25 +448,43 @@ class WsTransport:
         # Monotonic by daemon contract — keep the highest we've seen.
         if envelope.seq is not None and (self._last_seq is None or envelope.seq > self._last_seq):
             self._last_seq = envelope.seq
+        # Overflow on either bound — item count OR aggregate bytes — since a
+        # burst of large frames can blow the byte budget long before the count.
+        frame_size = len(raw)
+        if self._queued_bytes + frame_size > _ENVELOPE_QUEUE_MAX_BYTES:
+            await self._register_overflow()
+            return
         try:
             self._envelope_queue.put_nowait(envelope)
         except asyncio.QueueFull:
-            # Consumer can't keep up — drop the backlog and force a resync.
-            # Latch the overflow episode: warn and trigger the resync only on
-            # the first drop, then stay silent until the consumer drains the
-            # queue below the low-watermark and clears the latch (see
-            # events()). Without this a sustained flood logged — and re-fired
-            # the resync — once per dropped event (thousands of lines/sec).
-            self._dropped_count += 1
-            if not self._overflowing:
-                self._overflowing = True
-                self._overflow_start_dropped = self._dropped_count
-                _LOGGER.warning(
-                    "WS envelope queue full (maxsize=%d) — forcing resync; %d events dropped so far",
-                    _ENVELOPE_QUEUE_MAXSIZE,
-                    self._dropped_count,
-                )
-                await self._trigger_resync(oldest_seq=-1)
+            await self._register_overflow()
+            return
+        self._envelope_sizes.append(frame_size)
+        self._queued_bytes += frame_size
+
+    async def _register_overflow(self) -> None:
+        """
+        Drop the overflowing envelope and force exactly one resync per episode.
+
+        Reached when either the item-count or the byte budget is exhausted. The
+        backlog is stale anyway, so we drop and force a resync (fresh snapshot);
+        the store rebuilds rather than drifting. Latch the episode: warn and
+        trigger the resync only on the first drop, then stay silent until the
+        consumer drains below the low-watermark and clears the latch (see
+        ``events()``). Without the latch a sustained flood logged — and re-fired
+        the resync — once per dropped event (thousands of lines/sec).
+        """
+        self._dropped_count += 1
+        if not self._overflowing:
+            self._overflowing = True
+            self._overflow_start_dropped = self._dropped_count
+            _LOGGER.warning(
+                "WS envelope queue full (maxsize=%d, ~%d bytes queued) — forcing resync; %d events dropped so far",
+                _ENVELOPE_QUEUE_MAXSIZE,
+                self._queued_bytes,
+                self._dropped_count,
+            )
+            await self._trigger_resync(oldest_seq=-1)
 
     async def _handle_control(self, *, op: str, frame: dict[str, object]) -> None:
         if op == "ping":
@@ -497,7 +549,9 @@ class WsTransport:
                 try:
                     envelope = WsEnvelope.model_validate(coerced)
                 except ValidationError as retry_exc:
-                    _LOGGER.warning("dropping malformed WS envelope: %s | frame=%r", retry_exc, frame)
+                    _LOGGER.warning(
+                        "dropping malformed WS envelope: %s | frame=%s", retry_exc, WsTransport._short_frame(frame)
+                    )
                     return None
                 _LOGGER.debug(
                     "coerced unknown WS envelope kind %r to %r | topic=%s",
@@ -506,11 +560,19 @@ class WsTransport:
                     frame.get("topic"),
                 )
                 return envelope
-            _LOGGER.warning("dropping malformed WS envelope: %s | frame=%r", exc, frame)
+            _LOGGER.warning("dropping malformed WS envelope: %s | frame=%s", exc, WsTransport._short_frame(frame))
             return None
         except Exception as exc:  # noqa: BLE001 — drop malformed frames, never crash the reader
-            _LOGGER.warning("dropping malformed WS envelope: %s | frame=%r", exc, frame)
+            _LOGGER.warning("dropping malformed WS envelope: %s | frame=%s", exc, WsTransport._short_frame(frame))
             return None
+
+    @staticmethod
+    def _short_frame(frame: object) -> str:
+        """Return a length-bounded repr of a daemon frame for safe logging."""
+        text = repr(frame)
+        if len(text) <= _MAX_FRAME_LOG_CHARS:
+            return text
+        return f"{text[:_MAX_FRAME_LOG_CHARS]}… (+{len(text) - _MAX_FRAME_LOG_CHARS} chars)"
 
     @staticmethod
     def _is_unknown_kind_only(*, exc: ValidationError) -> bool:

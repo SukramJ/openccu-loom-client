@@ -27,6 +27,42 @@ replay-lost / queue-overflow burst from storming the log and the store.
 - Chore: raise the `aiohomematic` floor to `>=2026.7.1` to match the
   CI-pinned version in `requirements.txt`.
 
+Security-hardening pass (findings from a multi-agent audit against the
+"compromised daemon / MITM" client threat model, each adversarially verified).
+No wire-contract or public-API changes.
+
+- Fix: **auth credentials no longer leak through a dataclass `repr`.**
+  `BasicAuth` / `BearerAuth` / `SessionAuth` are declared `repr=False` and
+  inherit a redacting `AuthMethod.__repr__` that delegates to `identity_hint`,
+  so the plaintext password / token / session cookie can no longer surface in
+  a debug log, an exception traceback capturing locals, or an HA diagnostics
+  dump that recurses into `LoomConfig.auth`.
+- Fix: **HTTP transport refuses daemon-controlled redirects.** Both the JSON
+  request path and `request_bytes` pass `allow_redirects=False`; the daemon
+  contract has no redirects, and aiohttp would not strip the manually-set
+  `Authorization` / `Cookie` header across a cross-origin hop — so a hostile
+  3xx could otherwise exfiltrate the credential or steer the client at an
+  internal endpoint (SSRF).
+- Fix: **binary downloads are size-capped.** `request_bytes` streams with a
+  running byte tally and aborts past `max_bytes` (default 512 MiB) instead of
+  buffering an unbounded body, so a daemon streaming forever within the
+  per-chunk read timeout can no longer drive the host to OOM.
+- Fix: **malformed WS frames are logged truncated.** The rejected-envelope
+  warnings now emit a length-bounded repr (`_short_frame`) like the sibling
+  non-JSON paths, so a peer cannot amplify near-`max_msg_size` frames into
+  unbounded log volume. An explicit 1 MiB `max_msg_size` caps each WS frame
+  (aiohttp defaults to 4 MiB).
+- Fix: **the WS envelope queue is bounded by bytes as well as item count.**
+  A running `_queued_bytes` tally forces the same drop-and-resync once the
+  aggregate `_ENVELOPE_QUEUE_MAX_BYTES` (64 MiB) ceiling is crossed, so a
+  burst of large valid frames during a slow re-bootstrap can't grow transient
+  memory toward multi-GB before the item-count cap engages.
+- Fix: **the store caps net-new devices.** `load_snapshot` and the live
+  `device.created` push refuse a net-new address once `max_devices` (20000,
+  far above any real CCU) is reached — updates to known devices are never
+  refused — so a daemon streaming unique addresses can't grow the store
+  without bound.
+
 # Version 2026.7.3 (2026-07-07)
 
 Robustness-hardening pass across the transport, store, event, and compat
