@@ -1,3 +1,20 @@
+# Version 2026.7.5 (2026-07-10)
+
+Dependency maintenance: follow aiohomematic's protocol-surface consolidation.
+
+- Chore: **bump `aiohomematic` to 2026.7.5** (floor in `pyproject.toml`, CI pin
+  in `requirements.txt`). Upstream folded the 19 fine-grained `Channel*` /
+  `Device*` facet protocols (plus `PayloadProtocol`) into the aggregates —
+  `ChannelProtocol` now carries its members directly and `DeviceProtocol`
+  inherits only `DeviceIdentityProtocol` + `DeviceChannelAccessProtocol`. The
+  drift-guard snapshot in `tests/compat/test_aiohomematic_protocol_parity.py`
+  is updated to the new 30-protocol surface. The four protocols the compat
+  twins must satisfy (`GenericDataPointProtocol`, `CustomDataPointProtocol`,
+  `GenericSysvarDataPointProtocol`, `GenericProgramDataPointProtocol`) are
+  unchanged, so no twin follows — all parity cases pass as-is.
+- Chore: bump `ruff` to 0.15.21 (pre-commit hook rev + pinned lint
+  requirement).
+
 # Version 2026.7.4 (2026-07-07)
 
 Reconnect/reload robustness: fail fast on an incompatible daemon and stop a
