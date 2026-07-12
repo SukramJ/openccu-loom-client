@@ -1,3 +1,20 @@
+# Version 2026.7.7 (2026-07-12)
+
+Maintenance release tracking the daemon's `openccu-loom-types` 0.1.54 build
+(daemon API 2.18.0). The wire delta is a single additive, optional field —
+no functional client change is required; the release exists to keep the
+version pins, changelog and `const.VERSION` in lock-step with the types build.
+
+- Chore: **bump `openccu-loom-types` to 0.1.54** (daemon API 2.17.0 → 2.18.0,
+  new `SCHEMA_DIGEST`). The only contract change vs. 0.1.53 is a new optional
+  `note_key: str | None` on `Component` (the `Health.components[]` entry
+  returned by `GET /health`) — an i18n catalogue key for the localized display
+  of a static component note (absent for interpolated notes; render `note`
+  verbatim). `enums` and `ws` are byte-identical to 0.1.53, so there is no
+  event/bridge impact. The client validates `Health` as a whole
+  (`system.get_health`) and passes it through untouched, so Pydantic surfaces
+  the field automatically; the API-version guard accepts 2.18.0 unchanged.
+
 # Version 2026.7.6 (2026-07-12)
 
 Sysvar/program → device attachment: the daemon (v0.36.0) now resolves which
