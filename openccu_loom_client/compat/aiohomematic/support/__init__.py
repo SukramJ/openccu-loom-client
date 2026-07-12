@@ -16,9 +16,14 @@ def find_free_port() -> int:
     The daemon owns its own bindings now — this helper survives only
     because HA's config-flow still threads it through legacy code
     paths that may be cleaned up in the cutover.
+
+    The probe deliberately binds loopback, not all interfaces: parity
+    with the original is about the result (a free port number), and a
+    wildcard bind — even a transient one — is an avoidable exposure
+    window security scanners rightly flag.
     """
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("", 0))
+        s.bind(("127.0.0.1", 0))
         return int(s.getsockname()[1])
 
 

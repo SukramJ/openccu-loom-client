@@ -753,6 +753,43 @@ class TestModelNavigation:
         assert dp.device is store.get_device(address="VCU0001")
 
 
+class TestGetChannelByAddress:
+    """Canonical ``"ADDR:idx"`` lookup — feeds the sysvar/program device link."""
+
+    def _store_with_channel(self) -> LoomStore:
+        store = LoomStore()
+        store.load_snapshot(snapshot=_snapshot(devices=[_device_summary()]))
+        store.attach_device_detail(
+            detail=DeviceDetail.model_validate(
+                {
+                    **_device_summary().model_dump(),
+                    "firmware": {},
+                    "availability": {},
+                    "channels": [_channel_summary(address="VCU0001", number=1).model_dump()],
+                }
+            )
+        )
+        return store
+
+    def test_resolves_canonical_address(self) -> None:
+        store = self._store_with_channel()
+        channel = store.get_channel_by_address(channel_address="VCU0001:1")
+        assert channel is store.get_channel(address="VCU0001", number=1)
+
+    def test_unknown_channel_yields_none(self) -> None:
+        store = self._store_with_channel()
+        assert store.get_channel_by_address(channel_address="VCU0001:9") is None
+        assert store.get_channel_by_address(channel_address="GHOST:1") is None
+
+    def test_malformed_address_yields_none(self) -> None:
+        store = self._store_with_channel()
+        # Bare device address (no channel separator) and a non-numeric
+        # index must degrade to None, never raise.
+        assert store.get_channel_by_address(channel_address="VCU0001") is None
+        assert store.get_channel_by_address(channel_address="VCU0001:x") is None
+        assert store.get_channel_by_address(channel_address="") is None
+
+
 def _cdp_summary(*, name: str, channel_no: int) -> CustomDPSummary:
     return CustomDPSummary.model_validate(
         {

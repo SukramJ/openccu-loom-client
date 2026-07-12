@@ -210,6 +210,46 @@ class TestDispatch:
         )
         ev = event_from_envelope(envelope=env)
         assert isinstance(ev, SysvarChangedEvent)
+        # Unlinked push: the device-link fields default to "no link".
+        assert ev.payload.channel is None
+        assert ev.payload.device_address is None
+
+    def test_sysvar_changed_carries_device_link(self) -> None:
+        # A sysvar linked to a device channel (CCU channel assignment or
+        # name match) pushes the link so live updates route to the device.
+        env = self._envelope(
+            type_="hub.sysvar_changed",
+            payload={
+                "central": "home",
+                "name": "my_var",
+                "value_type": "FLOAT",
+                "value": 42.0,
+                "unique_id": "loom_test_my_var",
+                "channel": "VCU0001:1",
+                "device_address": "VCU0001",
+            },
+        )
+        ev = event_from_envelope(envelope=env)
+        assert isinstance(ev, SysvarChangedEvent)
+        assert ev.payload.channel == "VCU0001:1"
+        assert ev.payload.device_address == "VCU0001"
+
+    def test_program_executed_carries_device_link(self) -> None:
+        env = self._envelope(
+            type_="hub.program_executed",
+            payload={
+                "central": "home",
+                "program_id": "p1",
+                "trigger": "manual",
+                "success": True,
+                "channel": "VCU0001:1",
+                "device_address": "VCU0001",
+            },
+        )
+        ev = event_from_envelope(envelope=env)
+        assert isinstance(ev, ProgramExecutedEvent)
+        assert ev.payload.channel == "VCU0001:1"
+        assert ev.payload.device_address == "VCU0001"
 
     @pytest.mark.parametrize(
         ("type_id", "payload", "expected_cls"),

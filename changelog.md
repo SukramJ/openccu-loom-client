@@ -1,3 +1,47 @@
+# Version 2026.7.6 (2026-07-12)
+
+Sysvar/program → device attachment: the daemon (v0.36.0) now resolves which
+device channel a CCU system variable or program belongs to (explicit CCU WebUI
+channel assignment "Kanalzuordnung", or a device identifier matched in the
+name) and ships it as two optional fields — `channel` (canonical `"ADDR:idx"`)
+and `device_address` — on the REST summaries and the WS broadcasts. This
+release surfaces the link end-to-end so HA consumers can route the entity's
+`device_info` to the physical device instead of the central hub device.
+
+- Feat: **`Sysvar` / `Program` wrappers expose the device link.** New
+  properties `channel_address` (canonical `"ADDR:idx"`, `None` when the
+  entity belongs to no device — empty strings normalize to `None` too),
+  `device_address` (device part, for device grouping) and `channel` (the
+  linked `Channel` resolved from the store graph, `None` when unlinked or
+  not loaded). New store lookup `get_channel_by_address` resolves a
+  canonical channel string defensively (malformed/unknown → `None`).
+- Feat: **live pushes carry the link.** `SysvarChangedPayload` /
+  `ProgramExecutedPayload` now include `channel` + `device_address`;
+  `apply_sysvar_changed` folds them into the summary on every push (absent =
+  unlinked, so a removed channel assignment propagates live), and
+  `apply_program_executed` folds a _present_ link into the program summary
+  (absence is ambiguous on that event — daemon hub model may not be loaded —
+  so it never clears a known link; the next catalogue refresh is
+  authoritative for unlinking).
+- Feat: **compat hub twins route `device_info` to the device.** The
+  `Sysvar*`/`Program*` twins' `channel` property (previously a hard `None`)
+  resolves the linked store channel, so `homematicip_local`'s
+  `_get_device_info` walks `channel.device.identifier` and attaches the
+  entity to the physical device — mirroring aiohomematic's
+  `channel_lookup.identify_channel` behaviour. Hub singletons (no wire
+  summary) keep returning `None` and stay on the hub device.
+- Fix: **security — `find_free_port` probes on loopback** instead of a
+  transient wildcard bind (`0.0.0.0`), closing GitHub code-scanning alert #2
+  (`py/bind-socket-all-network-interfaces`). The result (a free port number)
+  is unchanged.
+- Chore: **bump `openccu-loom-types` to 0.1.53** (daemon API 2.17.0,
+  regenerated from daemon v0.36.0) — carries the new `channel` /
+  `device_address` fields on `SysvarSummary`, `ProgramSummary` and the two
+  hub WS payloads.
+- Chore: bump `aiohomematic` to 2026.7.6 (floor in `pyproject.toml`, CI pin
+  in `requirements.txt`; drift-guard suite passes unchanged) and `prek` to
+  0.4.9.
+
 # Version 2026.7.5 (2026-07-10)
 
 Dependency maintenance: follow aiohomematic's protocol-surface consolidation.
