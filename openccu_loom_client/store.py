@@ -356,6 +356,23 @@ class LoomStore:
         """Return the channel for the given address and number, or ``None``."""
         return self._channels.get((address, number))
 
+    def get_channel_by_address(self, *, channel_address: str) -> Channel | None:
+        """
+        Return the channel for a canonical ``"ADDR:idx"`` address, or ``None``.
+
+        The daemon serialises channel references (e.g. the sysvar/program
+        device link) as one canonical string; this resolves it against the
+        channel graph. Malformed or unknown addresses yield ``None``.
+        """
+        device_address, sep, raw_number = channel_address.partition(":")
+        if not sep:
+            return None
+        try:
+            number = int(raw_number)
+        except ValueError:
+            return None
+        return self._channels.get((device_address, number))
+
     def get_data_point(self, *, address: str, channel: int, parameter: str) -> DataPoint | None:
         """Return the data point for the given address, channel and parameter."""
         return self._data_points.get((address, channel, parameter))
@@ -736,7 +753,18 @@ class LoomStore:
         if sysvar is None:
             _LOGGER.debug("sysvar_changed for unknown sysvar %r — ignoring", payload.name)
             return
-        new_summary = sysvar.summary.model_copy(update={"value": payload.value, "observed": True})
+        new_summary = sysvar.summary.model_copy(
+            update={
+                "value": payload.value,
+                "observed": True,
+                # The push carries the device link (the same value the REST
+                # summary holds — absent means unlinked), so a re-resolved
+                # link (renamed variable, changed CCU channel assignment)
+                # propagates live without a catalogue refresh.
+                "channel": payload.channel,
+                "device_address": payload.device_address,
+            }
+        )
         sysvar._replace_summary(summary=new_summary)
 
     def apply_program_executed(self, *, payload: ProgramExecutedPayload) -> None:
@@ -745,6 +773,11 @@ class LoomStore:
 
         The catalogue itself doesn't change, but a subscriber may want to
         react to the event itself (logged / used by HA-side automations).
+        A device link carried by the push is folded into the program's
+        summary so consumers see the current attachment; an *absent* link
+        is ambiguous on this event (unlinked vs. hub model not yet loaded
+        on the daemon) and therefore never clears an existing one — the
+        next catalogue refresh is authoritative for unlinking.
         """
         _LOGGER.debug(
             "program_executed: %s (trigger=%s, success=%s)",
@@ -752,6 +785,16 @@ class LoomStore:
             payload.trigger,
             payload.success,
         )
+        program = self._programs.get(payload.program_id)
+        if program is None or not payload.channel:
+            return
+        summary = program.summary
+        if payload.channel != summary.channel or payload.device_address != summary.device_address:
+            program._replace_summary(
+                summary=summary.model_copy(
+                    update={"channel": payload.channel, "device_address": payload.device_address}
+                )
+            )
 
     def apply_custom_data_point_state_changed(self, *, payload: CustomDataPointStateChangedPayload) -> None:
         """

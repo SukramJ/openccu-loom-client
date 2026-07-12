@@ -516,13 +516,24 @@ class _HubProtocolSurface(_CommonProtocolSurface):
         # union so the cross-kind reads below stay ``getattr`` (a sysvar-only
         # field like ``value`` is absent on a program summary and vice versa).
         summary: SysvarSummary | ProgramSummary
+        _store: LoomStore
 
         @property
         def name(self) -> str: ...  # kwonly: disable
 
     @property
     def channel(self) -> Any:
-        return None
+        # Mirrors aiohomematic model/hub/data_point.py:GenericHubDataPoint
+        # (channel_lookup.identify_channel): a hub data point linked to a
+        # device channel exposes it so HA routes the entity's device_info
+        # to the physical device (`channel.device.identifier`) instead of
+        # the central hub device. The daemon resolves the link (CCU WebUI
+        # channel assignment or name match) into ``summary.channel``.
+        # ``getattr`` probe: hub singletons carry no wire summary (None).
+        channel_address = getattr(self.summary, "channel", None)
+        if not channel_address:
+            return None
+        return self._store.get_channel_by_address(channel_address=channel_address)
 
     @property
     def available(self) -> bool:

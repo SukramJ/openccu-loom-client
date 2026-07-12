@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from openccu_loom_types.rest import ProgramSummary
 
 if TYPE_CHECKING:
+    from openccu_loom_client.model.channel import Channel
     from openccu_loom_client.store import LoomStore
 
 
@@ -54,6 +55,43 @@ class Program:
     def active(self) -> bool | None:
         """Return whether the program is enabled, or ``None`` if unknown."""
         return self._summary.active
+
+    # ---- device attachment ----
+
+    @property
+    def channel_address(self) -> str | None:
+        """
+        Return the canonical ``"ADDR:idx"`` channel this program is linked to.
+
+        The daemon resolves the link from a device identifier matched in
+        the program name. ``None`` means the program belongs to no device —
+        HA consumers then attach the entity to the central hub device
+        instead of a physical device.
+        """
+        return self._summary.channel or None
+
+    @property
+    def device_address(self) -> str | None:
+        """
+        Return the device part of :attr:`channel_address` (before ``":"``).
+
+        HA consumers use it to group the entity under the owning physical
+        device; ``None`` together with :attr:`channel_address` (the entity
+        belongs on the central hub device).
+        """
+        return self._summary.device_address or None
+
+    @property
+    def channel(self) -> Channel | None:
+        """
+        Return the linked :class:`Channel` from the store, or ``None``.
+
+        ``None`` when the program is not linked to a device (hub-level
+        entity) or the linked channel is not loaded in the store.
+        """
+        if (channel_address := self.channel_address) is None:
+            return None
+        return self._store.get_channel_by_address(channel_address=channel_address)
 
     async def execute(self) -> None:
         """

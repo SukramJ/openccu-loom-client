@@ -258,11 +258,18 @@ class TestIdentities:
 
 class TestSupportHelpers:
     def test_find_free_port_returns_usable_port(self) -> None:
+        import socket
+
         from openccu_loom_client.compat.aiohomematic.support import find_free_port
 
         port = find_free_port()
         assert isinstance(port, int)
-        assert port > 0
+        assert 0 < port <= 65535
+        # The port must be genuinely free: binding it must succeed. The
+        # probe itself binds loopback only (never a wildcard bind — see
+        # the helper's docstring), so verify on loopback too.
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("127.0.0.1", port))
 
     @pytest.mark.parametrize(
         ("value", "expected"),

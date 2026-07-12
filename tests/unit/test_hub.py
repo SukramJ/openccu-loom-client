@@ -7,14 +7,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from openccu_loom_types.rest import ProgramSummary, Snapshot, SysvarSummary
+from openccu_loom_types.rest import DeviceDetail, DeviceSummary, ProgramSummary, Snapshot, SysvarSummary
 from openccu_loom_types.ws import ProgramExecutedPayload, SysvarChangedPayload
 import pytest
 
 from openccu_loom_client.store import LoomStore
 
 
-def _program_summary(*, program_id: str = "p1") -> ProgramSummary:
+def _program_summary(*, program_id: str = "p1", **extra: Any) -> ProgramSummary:
     return ProgramSummary.model_validate(
         {
             "id": program_id,
@@ -22,11 +22,12 @@ def _program_summary(*, program_id: str = "p1") -> ProgramSummary:
             "description": "",
             "active": True,
             "unique_id": f"loom_test_{program_id}",
+            **extra,
         }
     )
 
 
-def _sysvar_summary(*, name: str = "temp", value: Any = 21.5) -> SysvarSummary:
+def _sysvar_summary(*, name: str = "temp", value: Any = 21.5, **extra: Any) -> SysvarSummary:
     return SysvarSummary.model_validate(
         {
             "name": name,
@@ -36,6 +37,7 @@ def _sysvar_summary(*, name: str = "temp", value: Any = 21.5) -> SysvarSummary:
             "value": value,
             "observed": True,
             "unique_id": f"loom_test_{name.lower()}",
+            **extra,
         }
     )
 
@@ -52,6 +54,45 @@ def _snapshot(
             "programs": [p.model_dump() for p in (programs or [])],
             "sysvars": [s.model_dump() for s in (sysvars or [])],
         }
+    )
+
+
+def _attach_device_with_channel(*, store: LoomStore, address: str = "VCU0001", number: int = 1) -> None:
+    """Load one device with one channel into the store's channel graph."""
+    summary = DeviceSummary.model_validate(
+        {
+            "address": address,
+            "interface": "home:HmIP-RF",
+            "interface_id": "home:HmIP-RF",
+            "model": "HmIP-PSM",
+            "name": "Lamp",
+            "available": True,
+            "channels_count": 1,
+            "updatable": False,
+            "update_available": False,
+            "master_pushes_config_pending": False,
+            "has_sub_devices": False,
+        }
+    )
+    store.load_snapshot(
+        snapshot=Snapshot.model_validate({"generated_at": "2026-05-24T08:00:00Z", "devices": [summary.model_dump()]})
+    )
+    store.attach_device_detail(
+        detail=DeviceDetail.model_validate(
+            {
+                **summary.model_dump(),
+                "firmware": {},
+                "availability": {},
+                "channels": [
+                    {
+                        "address": f"{address}:{number}",
+                        "number": number,
+                        "paramset_key": "VALUES",
+                        "data_points_count": 0,
+                    }
+                ],
+            }
+        )
     )
 
 
@@ -206,3 +247,173 @@ class TestProgramExecutedEvent:
             )
         )
         # No assertion on state — just that it doesn't crash.
+
+
+class TestSysvarDeviceLink:
+    """Sysvar→device attachment: channel_address / device_address / channel."""
+
+    def test_linked_sysvar_surfaces_channel_and_device_address(self) -> None:
+        store = LoomStore()
+        store.load_snapshot(
+            snapshot=_snapshot(sysvars=[_sysvar_summary(channel="VCU0001:1", device_address="VCU0001")])
+        )
+        sysvar = store.get_sysvar(name="temp")
+        assert sysvar is not None
+        assert sysvar.channel_address == "VCU0001:1"
+        assert sysvar.device_address == "VCU0001"
+
+    def test_unlinked_sysvar_normalizes_to_none(self) -> None:
+        store = LoomStore()
+        store.load_snapshot(snapshot=_snapshot(sysvars=[_sysvar_summary()]))
+        sysvar = store.get_sysvar(name="temp")
+        assert sysvar is not None
+        assert sysvar.channel_address is None
+        assert sysvar.device_address is None
+        assert sysvar.channel is None
+
+    def test_empty_link_normalizes_to_none(self) -> None:
+        # A daemon serialising the "no link" case as empty strings must
+        # read identically to the absent-field case.
+        store = LoomStore()
+        store.load_snapshot(snapshot=_snapshot(sysvars=[_sysvar_summary(channel="", device_address="")]))
+        sysvar = store.get_sysvar(name="temp")
+        assert sysvar is not None
+        assert sysvar.channel_address is None
+        assert sysvar.device_address is None
+        assert sysvar.channel is None
+
+    def test_channel_resolves_linked_channel_from_graph(self) -> None:
+        store = LoomStore()
+        store.load_snapshot(
+            snapshot=_snapshot(sysvars=[_sysvar_summary(channel="VCU0001:1", device_address="VCU0001")])
+        )
+        _attach_device_with_channel(store=store, address="VCU0001", number=1)
+        sysvar = store.get_sysvar(name="temp")
+        assert sysvar is not None
+        channel = sysvar.channel
+        assert channel is not None
+        assert channel.address == "VCU0001:1"
+        # The device hop HA consumers walk for device_info routing.
+        assert channel.device is not None
+        assert channel.device.address == "VCU0001"
+
+    def test_channel_none_when_linked_channel_not_loaded(self) -> None:
+        store = LoomStore()
+        store.load_snapshot(snapshot=_snapshot(sysvars=[_sysvar_summary(channel="GHOST:7", device_address="GHOST")]))
+        sysvar = store.get_sysvar(name="temp")
+        assert sysvar is not None
+        assert sysvar.channel_address == "GHOST:7"
+        assert sysvar.channel is None
+
+    def test_apply_sysvar_changed_updates_link(self) -> None:
+        store = LoomStore()
+        store.load_snapshot(snapshot=_snapshot(sysvars=[_sysvar_summary()]))
+        store.apply_sysvar_changed(
+            payload=SysvarChangedPayload.model_validate(
+                {
+                    "central": "home",
+                    "name": "temp",
+                    "value_type": "FLOAT",
+                    "value": 22.0,
+                    "unique_id": "loom_test_temp",
+                    "channel": "VCU0001:1",
+                    "device_address": "VCU0001",
+                }
+            )
+        )
+        sysvar = store.get_sysvar(name="temp")
+        assert sysvar is not None
+        assert sysvar.channel_address == "VCU0001:1"
+        assert sysvar.device_address == "VCU0001"
+
+    def test_apply_sysvar_changed_without_link_clears_it(self) -> None:
+        # The push always carries the daemon's current link (absent =
+        # unlinked), so a removed CCU channel assignment propagates live.
+        store = LoomStore()
+        store.load_snapshot(
+            snapshot=_snapshot(sysvars=[_sysvar_summary(channel="VCU0001:1", device_address="VCU0001")])
+        )
+        store.apply_sysvar_changed(
+            payload=SysvarChangedPayload.model_validate(
+                {
+                    "central": "home",
+                    "name": "temp",
+                    "value_type": "FLOAT",
+                    "value": 22.0,
+                    "unique_id": "loom_test_temp",
+                }
+            )
+        )
+        sysvar = store.get_sysvar(name="temp")
+        assert sysvar is not None
+        assert sysvar.channel_address is None
+        assert sysvar.device_address is None
+
+
+class TestProgramDeviceLink:
+    """Program→device attachment: channel_address / device_address / channel."""
+
+    def test_linked_program_surfaces_channel_and_device_address(self) -> None:
+        store = LoomStore()
+        store.load_snapshot(
+            snapshot=_snapshot(programs=[_program_summary(channel="VCU0001:1", device_address="VCU0001")])
+        )
+        _attach_device_with_channel(store=store, address="VCU0001", number=1)
+        program = store.get_program(program_id="p1")
+        assert program is not None
+        assert program.channel_address == "VCU0001:1"
+        assert program.device_address == "VCU0001"
+        channel = program.channel
+        assert channel is not None
+        assert channel.address == "VCU0001:1"
+
+    def test_unlinked_program_normalizes_to_none(self) -> None:
+        store = LoomStore()
+        store.load_snapshot(snapshot=_snapshot(programs=[_program_summary()]))
+        program = store.get_program(program_id="p1")
+        assert program is not None
+        assert program.channel_address is None
+        assert program.device_address is None
+        assert program.channel is None
+
+    def test_apply_program_executed_folds_present_link(self) -> None:
+        store = LoomStore()
+        store.load_snapshot(snapshot=_snapshot(programs=[_program_summary()]))
+        store.apply_program_executed(
+            payload=ProgramExecutedPayload.model_validate(
+                {
+                    "central": "home",
+                    "program_id": "p1",
+                    "trigger": "manual",
+                    "success": True,
+                    "channel": "VCU0001:1",
+                    "device_address": "VCU0001",
+                }
+            )
+        )
+        program = store.get_program(program_id="p1")
+        assert program is not None
+        assert program.channel_address == "VCU0001:1"
+        assert program.device_address == "VCU0001"
+
+    def test_apply_program_executed_absent_link_keeps_existing(self) -> None:
+        # Absence is ambiguous on this push (unlinked vs. hub model not
+        # yet loaded daemon-side) — it must never clear a known link.
+        store = LoomStore()
+        store.load_snapshot(
+            snapshot=_snapshot(programs=[_program_summary(channel="VCU0001:1", device_address="VCU0001")])
+        )
+        store.apply_program_executed(
+            payload=ProgramExecutedPayload.model_validate(
+                {
+                    "central": "home",
+                    "program_id": "p1",
+                    "trigger": "manual",
+                    "success": True,
+                }
+            )
+        )
+        program = store.get_program(program_id="p1")
+        assert program is not None
+        assert program.channel_address == "VCU0001:1"
+        assert program.device_address == "VCU0001"

@@ -116,6 +116,13 @@ class TestUniqueIds:
         assert hmip_sensor.name == "install_mode_hmip"
         assert hmip_button.name == "install_mode_hmip_button"
 
+    def test_singleton_channel_is_none(self) -> None:
+        # Singletons carry no wire summary, so the sysvar/program device
+        # link can never apply — they always stay on the hub device.
+        store = _store()
+        assert InboxSensor(store=store).channel is None
+        assert SystemHealthSensor(store=store).channel is None
+
 
 class TestMessageSensors:
     def test_alarm_messages_count_and_attributes(self) -> None:

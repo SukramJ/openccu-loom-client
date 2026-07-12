@@ -14,7 +14,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from openccu_loom_types.rest import CustomDPSummary, DataPointSummary, SysvarSummary
+from openccu_loom_types.rest import (
+    CustomDPSummary,
+    DataPointSummary,
+    DeviceDetail,
+    DeviceSummary,
+    ProgramSummary,
+    Snapshot,
+    SysvarSummary,
+)
 
 from openccu_loom_client.compat.aiohomematic.central.adapter import _is_creatable
 from openccu_loom_client.compat.aiohomematic.model.custom import (
@@ -31,6 +39,7 @@ from openccu_loom_client.compat.aiohomematic.model.hub import (
     SysvarDpSensor,
     SysvarDpSwitch,
     SysvarDpText,
+    make_program_data_point,
     make_sysvar_data_point,
     resolve_sysvar_class,
 )
@@ -647,3 +656,100 @@ class TestSysvarExtendedClasses:
             store=LoomStore(),
         )
         assert isinstance(dp, SysvarDpBinarySensor)
+
+
+class TestHubDeviceLinkRouting:
+    """
+    Hub data points linked to a device channel route device_info there.
+
+    HA's hub entity reads ``dp.channel`` — ``None`` attaches the entity
+    to the central hub device; a resolved channel routes it to the
+    physical device via ``channel.device.identifier`` (mirrors
+    aiohomematic's ``channel_lookup.identify_channel`` behaviour, fed by
+    the daemon-resolved link on the wire summary).
+    """
+
+    @staticmethod
+    def _store_with_channel() -> LoomStore:
+        store = LoomStore()
+        summary = DeviceSummary.model_validate(
+            {
+                "address": "VCU0001",
+                "interface": "home:HmIP-RF",
+                "interface_id": "home:HmIP-RF",
+                "model": "HmIP-PSM",
+                "name": "Lamp",
+                "available": True,
+                "channels_count": 1,
+                "updatable": False,
+                "update_available": False,
+                "master_pushes_config_pending": False,
+                "has_sub_devices": False,
+            }
+        )
+        store.load_snapshot(
+            snapshot=Snapshot.model_validate(
+                {"generated_at": "2026-05-24T08:00:00Z", "devices": [summary.model_dump()]}
+            )
+        )
+        store.attach_device_detail(
+            detail=DeviceDetail.model_validate(
+                {
+                    **summary.model_dump(),
+                    "firmware": {},
+                    "availability": {},
+                    "channels": [
+                        {
+                            "address": "VCU0001:1",
+                            "number": 1,
+                            "paramset_key": "VALUES",
+                            "data_points_count": 0,
+                        }
+                    ],
+                }
+            )
+        )
+        return store
+
+    def test_linked_sysvar_twin_resolves_channel(self) -> None:
+        store = self._store_with_channel()
+        dp = make_sysvar_data_point(
+            summary=_sysvar_summary(channel="VCU0001:1", device_address="VCU0001"),
+            store=store,
+        )
+        channel = dp.channel
+        assert channel is not None
+        # The exact hops homematicip_local's _get_device_info walks.
+        assert channel.device is not None
+        assert channel.device.identifier == "VCU0001@home:HmIP-RF"
+
+    def test_unlinked_sysvar_twin_channel_is_none(self) -> None:
+        dp = make_sysvar_data_point(summary=_sysvar_summary(), store=self._store_with_channel())
+        assert dp.channel is None
+
+    def test_linked_program_twin_resolves_channel(self) -> None:
+        store = self._store_with_channel()
+        program = ProgramSummary.model_validate(
+            {
+                "id": "p1",
+                "name": "All off",
+                "active": True,
+                "unique_id": "loom_test_p1",
+                "channel": "VCU0001:1",
+                "device_address": "VCU0001",
+            }
+        )
+        dp = make_program_data_point(summary=program, store=store)
+        channel = dp.channel
+        assert channel is not None
+        assert channel.device is not None
+        assert channel.device.identifier == "VCU0001@home:HmIP-RF"
+
+    def test_link_to_unloaded_channel_falls_back_to_none(self) -> None:
+        # A link the store cannot resolve (device not bootstrapped yet)
+        # must degrade to the hub device, never raise.
+        dp = make_sysvar_data_point(
+            summary=_sysvar_summary(channel="GHOST:7", device_address="GHOST"),
+            store=self._store_with_channel(),
+        )
+        assert dp.channel is None
