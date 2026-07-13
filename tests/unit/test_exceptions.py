@@ -148,3 +148,82 @@ class TestPublicExports:
         from openccu_loom_client import LoomInternalError
 
         assert LoomInternalError.__name__ in __import__("openccu_loom_client").__all__
+
+
+class TestAiohomematicHierarchy:
+    """
+    Loom failures must be catchable as aiohomematic failures.
+
+    ``homematicip_local`` wraps every backend call in
+    ``except BaseHomematicException`` (imported from the *real* aiohomematic,
+    not the compat shim) and maps it to a typed websocket error. A loom
+    exception outside that hierarchy escapes the handler and reaches the config
+    panel as a generic ``unknown_error``, losing the error code and the daemon's
+    problem+json title.
+    """
+
+    def test_loom_exceptions_are_aiohomematic_exceptions(self) -> None:
+        from aiohomematic.exceptions import BaseHomematicException
+
+        from openccu_loom_client.exceptions import BaseLoomException, LoomTransportError
+
+        assert issubclass(BaseLoomException, BaseHomematicException)
+        assert isinstance(LoomTransportError("boom"), BaseHomematicException)
+        assert isinstance(
+            http_error_from_problem(
+                status=404,
+                problem=_make_problem(Code.not_found, status=404),
+                raw_body=None,
+                method="GET",
+                url="/devices/X",
+            ),
+            BaseHomematicException,
+        )
+
+    def test_message_survives_the_aiohomematic_base(self) -> None:
+        """Aiohomematic's base eats a leading ``name`` arg — str(err) must stay the message."""
+        from openccu_loom_client.exceptions import LoomTransportError
+
+        err = LoomTransportError("connection refused")
+        assert str(err) == "connection refused"
+        assert err.name == "LoomTransportError"
+
+        http_err = http_error_from_problem(
+            status=404,
+            problem=_make_problem(Code.not_found, status=404, title="device gone"),
+            raw_body=None,
+            method="PUT",
+            url="/devices/X/paramsets/MASTER",
+        )
+        # The handler forwards str(err) as the websocket error message.
+        assert str(http_err) == "[404] PUT /devices/X/paramsets/MASTER: device gone"
+
+    def test_handler_maps_loom_error_to_typed_code(self) -> None:
+        """Simulate homematicip_local's handler: typed code + daemon title, not unknown_error."""
+        from aiohomematic.exceptions import BaseHomematicException
+
+        def handler() -> tuple[str, str]:
+            try:
+                raise http_error_from_problem(
+                    status=404,
+                    problem=_make_problem(Code.not_found, status=404, title="device gone"),
+                    raw_body=None,
+                    method="PUT",
+                    url="/devices/X",
+                )
+            except BaseHomematicException as err:
+                return ("write_failed", str(err))
+            except Exception:
+                return ("unknown_error", "")
+
+        code, message = handler()
+        assert code == "write_failed"
+        assert "device gone" in message
+
+    def test_shim_base_is_the_real_upstream_class(self) -> None:
+        """The shim re-exports upstream's base (superset), not the loom alias."""
+        from aiohomematic.exceptions import BaseHomematicException as Upstream
+
+        from openccu_loom_client.compat.aiohomematic.exceptions import BaseHomematicException as Shim
+
+        assert Shim is Upstream

@@ -26,6 +26,7 @@ stays explicit at the use site.
 from __future__ import annotations
 
 from aiohomematic.async_support import Looper
+from aiohomematic.central.coordinators.link import DeviceLink, LinkableChannel
 from aiohomematic.central.events import (
     CentralStateChangedEvent,
     DataPointsCreatedEvent,
@@ -75,9 +76,11 @@ __all__ = [
     "DataPointsCreatedEvent",
     "DeviceLifecycleEvent",
     "DeviceLifecycleEventType",
+    "DeviceLink",
     "DeviceTriggerEvent",
     "DeviceTriggerEventType",
     "EventBus",
+    "LinkableChannel",
     "Looper",
     "OptimisticRollbackEvent",
     "ParamsetKey",

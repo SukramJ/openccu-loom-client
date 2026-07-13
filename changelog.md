@@ -1,3 +1,46 @@
+# Version 2026.7.9 (2026-07-13)
+
+Frontend compat, part 2: **direct links** and — the load-bearing one — the
+**exception hierarchy**. Continues the end-to-end audit of
+`homematicip-local-frontend` → `homematicip_local` → `LoomCentralAdapter` that
+started in 2026.7.8 (schedule cards + paramset/sessions).
+
+- Fix: **loom exceptions are now aiohomematic exceptions.** `BaseLoomException`
+  derives from `aiohomematic.exceptions.BaseHomematicException` (a hard runtime
+  dependency). `homematicip_local` wraps every backend call in
+  `except BaseHomematicException` — imported from the _real_ aiohomematic, not
+  the compat shim's alias — and maps it to a typed websocket error
+  (`write_failed`, `read_failed`, …). Loom failures sat outside that hierarchy,
+  so they escaped the handlers and reached the config panel as a generic
+  `unknown_error`, losing both the error code and the daemon's problem+json
+  title. This one change repairs error translation across links, sessions,
+  paramset and the panel bootstrap at once. `str(err)` is preserved (the base
+  eats a leading `name` argument; the concrete class name is passed for it), and
+  the shim now re-exports upstream's `BaseHomematicException` verbatim — the
+  strict superset, since loom errors are subclasses.
+- Fix: **`central.link` matches aiohomematic's `LinkCoordinator` signature.**
+  `add_link` / `remove_link` take `sender_channel_address` /
+  `receiver_channel_address` (full `"<device>:<channel>"` addresses, the device
+  part derived for the daemon path) and return `bool` — the handlers render
+  `add_link_failed` / `remove_link_failed` on a falsy result, and previously got
+  a `TypeError` at argument binding instead. `get_device_links` takes
+  `device_address`; `get_linkable_channels` takes `interface_id` /
+  `source_channel_address`. Both now return aiohomematic's `DeviceLink` /
+  `LinkableChannel` **dataclasses** (the wire models are field-for-field
+  identical) because the handlers call `dataclasses.asdict()` on the results,
+  which throws on a pydantic model.
+- Feat: **`Device.get_channel(channel_address=…)`, `Device.sub_model` and
+  `Channel.type_name`.** The config-form and link handlers address channels by
+  full address and read the reference's spellings. `get_channel` keeps accepting
+  `number` for the loom-internal callers; a foreign or malformed address
+  resolves to `None` like the reference's keyed lookup. `sub_model` is a real
+  wire field (`DeviceSummary.sub_model`), not a stub.
+
+Cross-repo companion: `homematicip_local`'s `ws_get_linkable_channels` needs the
+`isawaitable` dual-await (the daemon computes link candidates server-side, so
+the loom call is async where aiohomematic's is sync) — the same accommodation it
+already makes for `get_paramset_description`.
+
 # Version 2026.7.8 (2026-07-13)
 
 Tracks the `openccu-loom-types` 0.1.55 build (daemon API 2.18.0 → 2.19.0,

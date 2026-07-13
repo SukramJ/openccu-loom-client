@@ -69,6 +69,18 @@ class Channel:
         return self._summary.type
 
     @property
+    def type_name(self) -> str:
+        """
+        Return the channel-type string under aiohomematic's name.
+
+        ``homematicip_local``'s config/link handlers read ``channel.type_name``
+        (the reference's spelling) and feed it to the form generator, which
+        expects a plain ``str`` — an unset type degrades to ``""``, the same
+        fallback the handlers use for a missing channel.
+        """
+        return self._summary.type or ""
+
+    @property
     def type_label(self) -> str | None:
         """Return the localised channel-type label, or ``None`` if unset."""
         return self._summary.type_label

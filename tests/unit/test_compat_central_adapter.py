@@ -12,12 +12,14 @@ rather than returning a wrong shape.
 
 from __future__ import annotations
 
+import dataclasses
 from types import SimpleNamespace
+from typing import Any
 
 from aiohomematic.central.events import EventBus as AioEventBus
 from openccu_loom_types import DAEMON_API_VERSION
 from openccu_loom_types.enums import DataPointCategory
-from openccu_loom_types.rest import DataPointSummary, Snapshot
+from openccu_loom_types.rest import DataPointSummary, Link, Snapshot
 import pytest
 
 from openccu_loom_client import BasicAuth, BearerAuth
@@ -26,8 +28,10 @@ from openccu_loom_client.compat.aiohomematic.central import CentralConfig, check
 from openccu_loom_client.compat.aiohomematic.central.adapter import (
     _Configuration,
     _JsonRpcClient,
+    _LinkCoordinator,
     _ui_schema_to_parameter_data,
 )
+from openccu_loom_client.exceptions import LoomConflictError
 from tests.helpers import MockDaemon
 
 
@@ -707,3 +711,112 @@ class TestPutParamset:
         assert result.success is True
         assert result.validated is False
         assert len(spy.calls) == 1
+
+
+class TestLinkCoordinator:
+    """Signatures mirror aiohomematic's LinkCoordinator — the HA handlers depend on it."""
+
+    @staticmethod
+    def _coordinator() -> tuple[_LinkCoordinator, dict[str, Any]]:
+        calls: dict[str, Any] = {}
+
+        async def list_links(*, address: str, locale: str = "en") -> list[Any]:
+            calls["list"] = {"address": address, "locale": locale}
+            return [
+                Link.model_validate(
+                    {
+                        "sender_address": "AAA:1",
+                        "receiver_address": "BBB:2",
+                        "name": "n",
+                        "description": "d",
+                        "flags": 1,
+                        "sender_device_name": "S",
+                        "sender_device_model": "SM",
+                        "sender_channel_type": "KEY",
+                        "sender_channel_type_label": "Key",
+                        "sender_channel_name": "SC",
+                        "receiver_device_name": "R",
+                        "receiver_device_model": "RM",
+                        "receiver_channel_type": "SW",
+                        "receiver_channel_type_label": "Switch",
+                        "receiver_channel_name": "RC",
+                        "peer_address": "BBB:2",
+                        "peer_device_name": "R",
+                        "peer_device_model": "RM",
+                        "direction": "out",
+                    }
+                )
+            ]
+
+        async def add_link(**kwargs: Any) -> None:
+            calls["add"] = kwargs
+
+        async def remove_link(**kwargs: Any) -> None:
+            calls["remove"] = kwargs
+
+        async def linkable_channels(**kwargs: Any) -> list[dict[str, str]]:
+            calls["linkable"] = kwargs
+            return [
+                {
+                    "address": "CCC:3",
+                    "channel_type": "SW",
+                    "channel_type_label": "Switch",
+                    "channel_name": "C",
+                    "device_address": "CCC",
+                    "device_name": "Dev",
+                    "device_model": "M",
+                }
+            ]
+
+        client = SimpleNamespace(
+            links=SimpleNamespace(
+                list_links=list_links,
+                add_link=add_link,
+                remove_link=remove_link,
+                linkable_channels=linkable_channels,
+            )
+        )
+        return _LinkCoordinator(client=client), calls
+
+    async def test_add_link_returns_true_and_derives_path_address(self) -> None:
+        link, calls = self._coordinator()
+        assert await link.add_link(sender_channel_address="AAA:1", receiver_channel_address="BBB:2") is True
+        # The daemon path is the device address; the name defaults like the reference.
+        assert calls["add"]["address"] == "AAA"
+        assert calls["add"]["sender_address"] == "AAA:1"
+        assert calls["add"]["name"] == "AAA:1 -> BBB:2"
+
+    async def test_remove_link_returns_true(self) -> None:
+        link, calls = self._coordinator()
+        assert await link.remove_link(sender_channel_address="AAA:1", receiver_channel_address="BBB:2") is True
+        assert calls["remove"] == {"address": "AAA", "sender": "AAA:1", "receiver": "BBB:2"}
+
+    async def test_daemon_refusal_becomes_false_not_an_exception(self) -> None:
+        """The handler renders add_link_failed on a falsy result — it must not see an exception."""
+        link, _ = self._coordinator()
+
+        async def boom(**_kwargs: Any) -> None:
+            raise LoomConflictError(status=409, problem=None, raw_body=None, method="POST", url="/x")
+
+        link._client.links.add_link = boom
+        assert await link.add_link(sender_channel_address="AAA:1", receiver_channel_address="BBB:2") is False
+
+    async def test_get_device_links_returns_asdict_able_dataclasses(self) -> None:
+        link, _ = self._coordinator()
+        links = await link.get_device_links(device_address="AAA", locale="de")
+        assert dataclasses.is_dataclass(links[0])
+        # The handler calls dataclasses.asdict on each — a pydantic model would raise.
+        payload = dataclasses.asdict(links[0])
+        assert payload["sender_address"] == "AAA:1"
+        assert payload["flags"] == 1
+        assert len(payload) == 19
+
+    async def test_get_linkable_channels_splits_the_source_address(self) -> None:
+        link, calls = self._coordinator()
+        channels = await link.get_linkable_channels(
+            interface_id="home:HmIP-RF", source_channel_address="AAA:1", role="sender"
+        )
+        assert calls["linkable"]["address"] == "AAA"
+        assert calls["linkable"]["channel"] == 1
+        assert calls["linkable"]["interface"] == "home:HmIP-RF"
+        assert dataclasses.asdict(channels[0])["address"] == "CCC:3"
