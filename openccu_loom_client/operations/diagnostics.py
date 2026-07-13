@@ -174,6 +174,16 @@ class DiagnosticsOperations(_OperationsBase):
 
     # ---- incidents / metrics ----
 
+    async def clear_incidents(self) -> None:
+        """
+        Drop the daemon's recorded incidents.
+
+        Wire: ``DELETE /incidents``. The daemon owns the incident store, so the
+        integration panel's "clear incidents" action has to reach it — a
+        client-side no-op left the list unchanged and the button dead.
+        """
+        await self._transport.request(method="DELETE", path="/incidents", allow_retry=True)
+
     async def list_incidents(self) -> dict[str, Any]:
         """Diagnostic incidents. Wire: ``GET /incidents``."""
         payload = await self._transport.request(method="GET", path="/incidents")

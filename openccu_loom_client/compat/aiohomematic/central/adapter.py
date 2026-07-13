@@ -49,12 +49,15 @@ from typing import TYPE_CHECKING, Any, Final
 from openccu_loom_types.enums import CentralState, DataPointCategory
 
 from openccu_loom_client.compat.aiohomematic._upstream import (
+    AlarmMessageData,
     DataPointCategory as AioDataPointCategory,
     DataPointsCreatedEvent as AioDataPointsCreatedEvent,
     DeviceLink,
     EventBus as AioEventBus,
+    InboxDeviceData,
     LinkableChannel,
     Looper,
+    ServiceMessageData,
     validate_paramset,
 )
 from openccu_loom_client.compat.aiohomematic.central.configurable_devices import (
@@ -80,7 +83,7 @@ from openccu_loom_client.compat.aiohomematic.model.week_profile import (
     ScheduleChannelSwitch,
     WeekProfileDp,
 )
-from openccu_loom_client.exceptions import BaseLoomException
+from openccu_loom_client.exceptions import BaseLoomException, LoomHttpError, LoomNotFoundError
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
@@ -350,8 +353,76 @@ class _ClientCoordinator:
         return bool(self._interface_ids)
 
     @property
-    def clients(self) -> frozenset[str]:
+    def clients(self) -> tuple[_InterfaceClient, ...]:
+        """
+        Return one record per wired interface.
+
+        The integration dashboard's throttle view iterates these and reads
+        ``client.interface_id`` plus ``client.command_throttle.*`` — a bare
+        interface-id string raised ``AttributeError`` and, because the panel
+        fetches the four integration sections in one ``Promise.all``, took the
+        whole tab down with it.
+        """
+        return tuple(_InterfaceClient(interface_id=interface_id) for interface_id in sorted(self._interface_ids))
+
+    @property
+    def interface_ids(self) -> frozenset[str]:
+        """Return the bare interface ids (loom-internal callers)."""
         return self._interface_ids
+
+
+@dataclass(frozen=True, slots=True)
+class _CommandThrottle:
+    """
+    Per-interface command-throttle stats.
+
+    The daemon serialises CCU commands itself, so there is no client-side
+    throttle: the panel is told, honestly, that throttling is off and the
+    counters are empty — rather than being handed an ``AttributeError``.
+    """
+
+    interval: float = 0.0
+    is_enabled: bool = False
+    queue_size: int = 0
+    throttled_count: int = 0
+    critical_count: int = 0
+    burst_count: int = 0
+    burst_threshold: int = 0
+    burst_window: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class _InterfaceClient:
+    """One wired interface, shaped like the aiohomematic client the throttle view iterates."""
+
+    interface_id: str
+    command_throttle: _CommandThrottle = dataclasses.field(default_factory=_CommandThrottle)
+
+
+@dataclass(frozen=True, slots=True)
+class _HealthSnapshot:
+    """The daemon's last health report. The HA handler calls ``to_dict()`` on it."""
+
+    payload: Any = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return the health report as a plain dict (empty before the first refresh)."""
+        if self.payload is None:
+            return {}
+        if hasattr(self.payload, "model_dump"):
+            return dict(self.payload.model_dump(mode="json"))
+        return dict(self.payload)
+
+
+@dataclass(frozen=True, slots=True)
+class _Incident:
+    """One recorded incident. The HA handler calls ``to_dict()`` on each."""
+
+    payload: dict[str, Any]
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return the incident as a plain dict."""
+        return dict(self.payload)
 
 
 def _incident_list(*, payload: Any) -> list[dict[str, Any]]:
@@ -369,23 +440,36 @@ def _incident_list(*, payload: Any) -> list[dict[str, Any]]:
 class _IncidentStore:
     """``cache_coordinator.incident_store`` surface over ``client.diagnostics``."""
 
-    def __init__(self, *, client: LoomClient) -> None:
+    def __init__(self, *, client: LoomClient, looper: Looper) -> None:
         self._client = client
+        self._looper = looper
 
     async def get_diagnostics(self) -> dict[str, Any]:
         return await self._client.diagnostics.list_incidents()
 
-    async def get_incidents_by_interface(self, *, interface_id: str) -> list[dict[str, Any]]:
+    async def get_incidents_by_interface(self, *, interface_id: str) -> list[_Incident]:
+        """Return one interface's incidents as records — the handler calls ``to_dict()`` on each."""
         incidents = _incident_list(payload=await self._client.diagnostics.list_incidents())
-        return [i for i in incidents if i.get("interface_id") == interface_id]
+        return [_Incident(payload=i) for i in incidents if i.get("interface_id") == interface_id]
 
     async def get_recent_incidents(self, *, limit: int) -> list[dict[str, Any]]:
+        """Return the most recent incidents as plain dicts (the handler forwards these verbatim)."""
         incidents = _incident_list(payload=await self._client.diagnostics.list_incidents())
         return incidents[:limit] if limit > 0 else incidents
 
     def clear_incidents(self) -> None:
-        # The daemon owns the incident store; there is no client-side clear.
-        _LOGGER.debug("clear_incidents() is a no-op on the loom backend")
+        """
+        Drop the daemon's incident store.
+
+        The HA handler calls this synchronously, but the daemon owns the store
+        and only a ``DELETE /incidents`` actually clears it — so the request is
+        scheduled on the adapter's looper. A client-side no-op left the list
+        unchanged and the panel's "clear" button dead.
+        """
+        self._looper.create_task(
+            target=self._client.diagnostics.clear_incidents(),
+            name="loom-clear-incidents",
+        )
 
 
 class _Recorder:
@@ -404,9 +488,9 @@ class _Recorder:
 class _CacheCoordinator:
     """``central.cache_coordinator`` surface."""
 
-    def __init__(self, *, client: LoomClient) -> None:
+    def __init__(self, *, client: LoomClient, looper: Looper) -> None:
         self._client = client
-        self._incident_store = _IncidentStore(client=client)
+        self._incident_store = _IncidentStore(client=client, looper=looper)
         self._recorder = _Recorder(client=client)
 
     async def clear_all(self) -> None:
@@ -421,39 +505,125 @@ class _CacheCoordinator:
         return self._recorder
 
 
+def _iso(*, value: Any) -> str:
+    """Render a wire timestamp as an ISO string (the aiohomematic records type it as ``str``)."""
+    if value is None:
+        return ""
+    return value.isoformat() if hasattr(value, "isoformat") else str(value)
+
+
+def _to_service_message(*, message: Any) -> ServiceMessageData:
+    """Convert a wire ``ServiceMessage`` into aiohomematic's ``ServiceMessageData``."""
+    return ServiceMessageData(
+        msg_id=message.id,
+        name=message.name,
+        timestamp=_iso(value=message.timestamp),
+        # The CCU's numeric message type has no daemon equivalent; the textual
+        # `type` carries the same information and is what the card renders.
+        msg_type=0,
+        msg_type_name=message.type or "",
+        display_name=message.display_name or "",
+        address=message.address or "",
+        device_name=message.device_name or "",
+        counter=message.counter or 0,
+        quittable=bool(message.quittable),
+    )
+
+
+def _to_alarm_message(*, message: Any) -> AlarmMessageData:
+    """Convert a wire ``AlarmMessage`` into aiohomematic's ``AlarmMessageData``."""
+    return AlarmMessageData(
+        alarm_id=message.id,
+        name=message.name,
+        display_name=message.display_name or "",
+        description=message.description or "",
+        device_name=message.device_name or "",
+        timestamp=_iso(value=message.timestamp),
+        counter=message.counter or 0,
+        last_trigger=_iso(value=message.last_trigger),
+        rooms=tuple(message.rooms or ()),
+    )
+
+
+def _to_inbox_device(*, entry: Any) -> InboxDeviceData:
+    """Convert a daemon inbox entry into aiohomematic's ``InboxDeviceData``."""
+    data = _as_dict(entry=entry)
+    address = data.get("address") or ""
+    return InboxDeviceData(
+        # The daemon's inbox DTO carries no ise_id; the serial is the stable
+        # identity it does ship (the address is the fallback).
+        device_id=data.get("serial") or address,
+        address=address,
+        name=address,
+        device_type=data.get("model") or "",
+        interface="",
+    )
+
+
 class _JsonRpcClient:
-    """``central.json_rpc_client`` surface (CCU-side message/inbox ops)."""
+    """
+    ``central.json_rpc_client`` surface (CCU-side message/inbox ops).
+
+    Returns aiohomematic's record *dataclasses* — the HA handlers call
+    ``dataclasses.asdict()`` on the lists — and ``bool`` from the mutations,
+    which the handlers test (``if not success: send_error(…, "…_failed")``); a
+    ``None`` return made every acknowledge/accept report failure even when the
+    CCU-side write had succeeded.
+    """
 
     def __init__(self, *, client: LoomClient) -> None:
         self._client = client
 
-    async def get_service_messages(self) -> Any:
-        return await self._client.hub.list_service_messages()
+    async def get_service_messages(self, *, message_type: Any = None) -> tuple[ServiceMessageData, ...]:
+        """Return the pending service messages as aiohomematic records."""
+        messages = await self._client.hub.list_service_messages()
+        return tuple(_to_service_message(message=message) for message in messages)
 
-    async def get_alarm_messages(self) -> Any:
-        return await self._client.hub.list_alarm_messages()
+    async def get_alarm_messages(self) -> tuple[AlarmMessageData, ...]:
+        """Return the pending alarm messages as aiohomematic records."""
+        messages = await self._client.hub.list_alarm_messages()
+        return tuple(_to_alarm_message(message=message) for message in messages)
 
-    async def get_inbox_devices(self) -> Any:
-        return await self._client.hub.list_inbox()
+    async def get_inbox_devices(self) -> tuple[InboxDeviceData, ...]:
+        """Return the devices waiting in the CCU inbox as aiohomematic records."""
+        entries = await self._client.hub.list_inbox()
+        return tuple(_to_inbox_device(entry=entry) for entry in entries)
 
-    async def accept_device_in_inbox(self, *, device_address: str) -> None:
+    async def accept_device_in_inbox(self, *, device_address: str) -> bool:
+        """Accept a device out of the inbox. The transport raises on refusal, so reaching the return means success."""
         await self._client.devices.accept_device(address=device_address)
+        return True
 
-    async def acknowledge_message(self, *, message_id: str) -> None:
-        # aiohomematic exposed a single ack; the daemon splits alarm vs.
-        # service. Service messages are the common HA case; callers that
-        # need alarm-ack should use client.hub.ack_alarm_message.
-        await self._client.hub.ack_service_message(message_id=message_id)
+    async def acknowledge_message(self, *, message_id: str) -> bool:
+        """
+        Acknowledge a service *or* alarm message.
 
-    async def rename_device(self, *, ise_id: int, name: str) -> None:
+        aiohomematic exposes a single ack primitive and both HA handlers
+        (``ws_acknowledge_service_message`` / ``ws_acknowledge_alarm_message``)
+        route through it, but the daemon splits the two endpoints. Ids share the
+        CCU id space, so try the service store first (the common case) and fall
+        back to the alarm store; a failure of *both* propagates.
+        """
+        try:
+            await self._client.hub.ack_service_message(message_id=message_id)
+        except LoomHttpError:
+            await self._client.hub.ack_alarm_message(message_id=message_id)
+        return True
+
+    async def rename_device(self, *, ise_id: int, new_name: str) -> bool:
         """Rename a device by its CCU ise_id (mapped to the address)."""
         address = next(
             (d.address for d in self._client.store.devices if d.ise_id == ise_id),
             None,
         )
         if address is None:
-            raise ValueError(f"no device with ise_id {ise_id} in the store")
-        await self._client.devices.patch_device(address=address, name=name)
+            # Must stay inside the aiohomematic hierarchy — the handler catches
+            # BaseHomematicException and would otherwise leak an unknown_error.
+            raise LoomNotFoundError(
+                status=404, problem=None, raw_body=None, method="PATCH", url=f"/devices?ise_id={ise_id}"
+            )
+        await self._client.devices.patch_device(address=address, name=new_name)
+        return True
 
 
 # The daemon's wire `Link` / `LinkableChannel` models are field-for-field
@@ -808,6 +978,7 @@ class LoomCentralAdapter:
         # real aiohomematic EventBus (not the loom wire bus) as ``event_bus``
         # and the bridges publish real aiohomematic events onto it.
         self._looper: Final = Looper()
+        self._health: Any = None
         self._ha_bus: Final = AioEventBus(task_scheduler=self._looper)
         # Adapter-built data points without a store summary (week
         # profiles, schedule switches, combined numbers); shared with
@@ -824,7 +995,7 @@ class LoomCentralAdapter:
         )
         self.query_facade: Final = _QueryFacade(client=client, extra_data_points=self._extra_data_points)
         self.client_coordinator: Final = _ClientCoordinator(client=client)
-        self.cache_coordinator: Final = _CacheCoordinator(client=client)
+        self.cache_coordinator: Final = _CacheCoordinator(client=client, looper=self._looper)
         self.json_rpc_client: Final = _JsonRpcClient(client=client)
         self.link: Final = _LinkCoordinator(client=client)
         self.configuration: Final = _Configuration(client=client)
@@ -882,9 +1053,31 @@ class LoomCentralAdapter:
         """Return the real aiohomematic event bus HA entities subscribe on."""
         return self._ha_bus
 
-    async def health(self) -> Any:
-        """Return the daemon's health report."""
-        return await self._client.system.get_health()
+    @property
+    def health(self) -> _HealthSnapshot:
+        """
+        Return the daemon's health report.
+
+        A *property* returning a record with ``to_dict()`` — that is the shape
+        ``ws_get_system_health`` consumes (``control.central.health.to_dict()``,
+        no await), and an async method there raised
+        ``AttributeError: 'method' object has no attribute 'to_dict'``, taking
+        the whole integration dashboard down with it (the panel fetches its four
+        sections in one ``Promise.all``). The snapshot is refreshed at start and
+        on the hub-reconcile tick, mirroring aiohomematic's cached health object.
+        """
+        return _HealthSnapshot(payload=self._health)
+
+    async def refresh_health(self) -> None:
+        """Re-pull the daemon's health report into the cached snapshot."""
+        self._health = await self._client.system.get_health()
+
+    async def _refresh_health_safely(self) -> None:
+        """Seed the health snapshot; a failure must never abort start()."""
+        try:
+            await self.refresh_health()
+        except Exception:  # noqa: BLE001 — health is diagnostic, not load-bearing for start
+            _LOGGER.debug("initial health refresh failed", exc_info=True)
 
     # ---- lifecycle ----
 
@@ -893,6 +1086,7 @@ class LoomCentralAdapter:
         try:
             await self._client.connect()
             await self._refresh_system_information()
+            await self._refresh_health_safely()
             await self.client_coordinator.refresh()
             self._state = CentralState.Starting
             await self._client.bootstrap()
@@ -947,6 +1141,10 @@ class LoomCentralAdapter:
                 await self.hub_coordinator.fetch_hub_singleton_data(scheduled=True)
             except Exception:  # noqa: BLE001 — keep the reconcile loop alive
                 _LOGGER.debug("hub singleton reconcile failed", exc_info=True)
+            try:
+                await self.refresh_health()
+            except Exception:  # noqa: BLE001 — keep the reconcile loop alive
+                _LOGGER.debug("health refresh failed", exc_info=True)
 
     async def _emit_data_points_created(self) -> None:
         """Publish a real ``DataPointsCreatedEvent`` grouped by aiohomematic category."""

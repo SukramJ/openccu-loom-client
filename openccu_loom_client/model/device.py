@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
@@ -15,9 +16,30 @@ from openccu_loom_client.operations.devices import DevicesOperations
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from datetime import datetime
 
     from openccu_loom_client.model.channel import Channel
+    from openccu_loom_client.model.data_point import DataPoint
     from openccu_loom_client.store import LoomStore
+
+
+@dataclass(frozen=True, slots=True)
+class AvailabilityInfo:
+    """
+    Bundled availability information for a device.
+
+    Structural twin of aiohomematic's ``AvailabilityInfo`` (same member names).
+    ``homematicip_local``'s CCU-dashboard views read ``.is_reachable`` off
+    ``Device.availability``; the daemon's wire record spells the same fields in
+    PascalCase. Declared here rather than imported so the *core* model stays free
+    of aiohomematic internals — the compat layer is where that coupling belongs.
+    """
+
+    is_reachable: bool
+    last_updated: datetime | None
+    battery_level: float | None
+    low_battery: bool | None
+    signal_strength: int | None
 
 
 class _ChannelsView:
@@ -171,8 +193,37 @@ class Device:
         return self._firmware
 
     @property
-    def availability(self) -> Availability | None:
-        """Return the availability detail, or ``None`` until detail is attached."""
+    def availability(self) -> AvailabilityInfo:
+        """
+        Return bundled availability information for the device.
+
+        Mirrors aiohomematic's ``Device.availability`` — an ``AvailabilityInfo``
+        record with snake_case members. The CCU dashboard's device-statistics and
+        signal-quality views read ``.is_reachable`` off it; the daemon's wire
+        record spells the same fields in PascalCase, and before the device detail
+        is attached there is no record at all, so an unknown device degrades to
+        "reachable if the summary says so".
+        """
+        detail = self._availability
+        if detail is None:
+            return AvailabilityInfo(
+                is_reachable=self.available,
+                last_updated=None,
+                battery_level=None,
+                low_battery=None,
+                signal_strength=None,
+            )
+        return AvailabilityInfo(
+            is_reachable=detail.IsReachable if detail.IsReachable is not None else self.available,
+            last_updated=detail.LastUpdated,
+            battery_level=detail.BatteryLevel,
+            low_battery=detail.LowBattery,
+            signal_strength=detail.SignalStrength,
+        )
+
+    @property
+    def availability_detail(self) -> Availability | None:
+        """Return the raw wire availability record, or ``None`` until detail is attached."""
         return self._availability
 
     # ---- aiohomematic-compat surface (read by homematicip_local entities) ----
@@ -198,6 +249,35 @@ class Device:
     def firmware_update_state(self) -> str | None:
         """Return the CCU's firmware-update state token, or ``None``."""
         return self._firmware.UpdateState if self._firmware is not None else None
+
+    @property
+    def firmware_updatable(self) -> bool:
+        """
+        Return whether a firmware update can be applied to this device.
+
+        Mirrors aiohomematic's ``Device.firmware_updatable`` — the CCU-dashboard
+        firmware overview and the device statistics both gate on it. Prefers the
+        daemon's firmware record; before the device detail is attached the
+        summary's ``updatable`` + ``update_available`` pair carries the same
+        verdict.
+        """
+        if self._firmware is not None and self._firmware.Updatable is not None:
+            return bool(self._firmware.Updatable)
+        return bool(self._summary.updatable and self._summary.update_available)
+
+    async def update_firmware(self, *, refresh_after_update_intervals: tuple[int, ...] = ()) -> bool:
+        """
+        Start an OTA firmware update.
+
+        Mirrors aiohomematic's ``Device.update_firmware`` (which the HA firmware
+        overview calls and tests for a truthy result). The daemon owns the
+        post-update refresh cadence, so ``refresh_after_update_intervals`` is
+        accepted for signature parity and not scheduled client-side. The
+        transport raises on a refusal, so reaching the return means the OTA was
+        accepted.
+        """
+        await self._store.update_device_firmware(address=self.address)
+        return True
 
     @property
     def update_status(self) -> str | None:
@@ -325,6 +405,38 @@ class Device:
     def channels(self) -> _ChannelsView:
         """Return a mapping-like view over this device's channels."""
         return _ChannelsView(store=self._store, device_address=self.address)
+
+    def get_generic_data_point(
+        self,
+        *,
+        channel_address: str | None = None,
+        parameter: str | None = None,
+        **_kwargs: Any,
+    ) -> DataPoint | None:
+        """
+        Find one of the device's data points by parameter, or ``None``.
+
+        Mirrors aiohomematic's ``Device.get_generic_data_point`` lookup surface.
+        The CCU dashboard's signal-quality view calls it with ``parameter`` only
+        (``RSSI_DEVICE`` / ``RSSI_PEER``, which sit on the maintenance channel),
+        so an unqualified parameter is searched across the device's channels;
+        ``channel_address`` narrows it to a single channel. The reference's
+        ``paramset_key`` / ``state_path`` selectors are accepted for signature
+        parity and ignored — the loom data point is keyed by channel+parameter
+        and carries neither.
+        """
+        if parameter is None:
+            return None
+        if channel_address is not None:
+            channel = self.get_channel(channel_address=channel_address)
+            channels = [channel] if channel is not None else []
+        else:
+            channels = list(self.channels)
+        for channel in channels:
+            for data_point in channel.data_points:
+                if data_point.parameter == parameter:
+                    return data_point
+        return None
 
     def get_channel(self, *, number: int | None = None, channel_address: str | None = None) -> Channel | None:
         """

@@ -922,3 +922,114 @@ class TestAiohomematicModelCompat:
         channel = device.get_channel(channel_address="VCU1:3")
         assert channel is not None
         assert channel.type_name == "SWITCH_VIRTUAL_RECEIVER"
+
+
+class TestCcuDashboardDeviceSurface:
+    """Device members the CCU dashboard's firmware / signal-quality / statistics views read."""
+
+    @staticmethod
+    def _store_with_rssi(*, updatable: bool = True) -> LoomStore:
+        store = LoomStore()
+        store.set_serial(serial="ABC1234567")
+        store.set_central_name(central_name="home")
+        store.attach_device_detail(
+            detail=DeviceDetail.model_validate(
+                {
+                    "address": "VCU1",
+                    "interface": "HmIP-RF",
+                    "interface_id": "home-HmIP-RF",
+                    "model": "HmIP-PS",
+                    "name": "Lamp",
+                    "available": True,
+                    "channels_count": 1,
+                    "updatable": True,
+                    "update_available": True,
+                    "master_pushes_config_pending": False,
+                    "has_sub_devices": False,
+                    "firmware": {
+                        "Current": "1.0",
+                        "Available": "1.2",
+                        "Updatable": updatable,
+                        "UpdateState": "AVAILABLE",
+                    },
+                    "availability": {},
+                    "channels": [
+                        {
+                            "address": "VCU1:0",
+                            "number": 0,
+                            "name": "MAINT",
+                            "type": "MAINTENANCE",
+                            "type_label": "M",
+                            "paramset_key": "VALUES",
+                            "paramset_keys": ["VALUES"],
+                            "data_points_count": 1,
+                            "is_group_master": False,
+                            "is_in_multi_group": False,
+                            "is_custom_dp_primary": False,
+                            "data_points": [],
+                        }
+                    ],
+                }
+            )
+        )
+        store.attach_channel_data_points(
+            device_address="VCU1",
+            channel_number=0,
+            data_points=[
+                DataPointSummary.model_validate(
+                    {
+                        "parameter": "RSSI_DEVICE",
+                        "type": "INTEGER",
+                        "value": -63,
+                        "observed": True,
+                        "operations": {"read": True, "write": False, "event": True},
+                        "unique_id": "loom_x_rssi",
+                    }
+                )
+            ],
+        )
+        return store
+
+    def test_firmware_updatable(self) -> None:
+        device = self._store_with_rssi().get_device(address="VCU1")
+        assert device is not None
+        assert device.firmware_updatable is True
+        not_updatable = self._store_with_rssi(updatable=False).get_device(address="VCU1")
+        assert not_updatable is not None
+        assert not_updatable.firmware_updatable is False
+
+    def test_get_generic_data_point_finds_rssi_across_channels(self) -> None:
+        """The signal-quality view looks the RSSI up by bare parameter."""
+        from aiohomematic.const import Parameter
+
+        device = self._store_with_rssi().get_device(address="VCU1")
+        assert device is not None
+        # The handler passes aiohomematic's Parameter StrEnum.
+        data_point = device.get_generic_data_point(parameter=Parameter.RSSI_DEVICE)
+        assert data_point is not None
+        assert data_point.value == -63
+
+    def test_get_generic_data_point_scoping_and_misses(self) -> None:
+        device = self._store_with_rssi().get_device(address="VCU1")
+        assert device is not None
+        assert device.get_generic_data_point(channel_address="VCU1:0", parameter="RSSI_DEVICE") is not None
+        assert device.get_generic_data_point(channel_address="VCU1:9", parameter="RSSI_DEVICE") is None
+        assert device.get_generic_data_point(parameter="NOPE") is None
+        assert device.get_generic_data_point() is None
+
+    async def test_update_firmware_posts_and_returns_true(self) -> None:
+        store = self._store_with_rssi()
+        calls: list[dict[str, object]] = []
+
+        class _Transport:
+            async def request(self, **kwargs: object) -> None:
+                calls.append(kwargs)
+
+        store._transport = _Transport()  # type: ignore[assignment]
+        device = store.get_device(address="VCU1")
+        assert device is not None
+        assert await device.update_firmware(refresh_after_update_intervals=(10, 60)) is True
+        assert calls[0]["method"] == "POST"
+        assert calls[0]["path"] == "/devices/VCU1/firmware/update"
+        # Starting an OTA is never retried.
+        assert calls[0]["allow_retry"] is False
