@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from dataclasses import dataclass
 from datetime import UTC, datetime
 import logging
 from typing import TYPE_CHECKING, Any, Final
@@ -51,6 +52,7 @@ from openccu_loom_client.compat.aiohomematic._upstream import (
     DataPointsCreatedEvent as AioDataPointsCreatedEvent,
     EventBus as AioEventBus,
     Looper,
+    validate_paramset,
 )
 from openccu_loom_client.compat.aiohomematic.central.configurable_devices import (
     ConfigurableDevice,
@@ -70,10 +72,14 @@ from openccu_loom_client.compat.aiohomematic.model.custom import (
 from openccu_loom_client.compat.aiohomematic.model.event_group import build_event_groups
 from openccu_loom_client.compat.aiohomematic.model.generic import make_generic_data_point
 from openccu_loom_client.compat.aiohomematic.model.update import make_update_data_point
-from openccu_loom_client.compat.aiohomematic.model.week_profile import ScheduleChannelSwitch, WeekProfileDp
+from openccu_loom_client.compat.aiohomematic.model.week_profile import (
+    ClimateWeekProfileDp,
+    ScheduleChannelSwitch,
+    WeekProfileDp,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Mapping
 
     from openccu_loom_client.client import LoomClient
     from openccu_loom_client.events import EventBus
@@ -490,6 +496,77 @@ def _split_channel_address(*, channel_address: str) -> tuple[str, int]:
     return device, int(channel) if channel else 0
 
 
+@dataclass(frozen=True, slots=True)
+class _PutParamsetResult:
+    """
+    Structural twin of aiohomematic's ``PutParamsetResult``.
+
+    ``homematicip_local``'s ``ws_put_paramset`` / ``ws_session_save`` read only
+    ``success`` / ``validated`` / ``validation_errors`` off the result, so the
+    loom facade returns this duck-typed record instead of importing the deep
+    coordinator internal.
+    """
+
+    success: bool
+    validated: bool
+    validation_errors: Mapping[str, str]
+
+
+# aiohomematic OPERATIONS / FLAGS bitmasks (aiohomematic.const.Operations / Flag).
+_OP_READ: Final = 1
+_OP_WRITE: Final = 2
+_OP_EVENT: Final = 4
+_FLAG_VISIBLE: Final = 1
+_FLAG_INTERNAL: Final = 2
+_FLAG_SERVICE: Final = 8
+
+
+def _ui_schema_to_parameter_data(*, ui_schema: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    """
+    Translate the daemon's channel *ui-schema* into aiohomematic's ``ParameterData`` map.
+
+    The daemon serves a rich, list-shaped renderable descriptor
+    (``{parameters: [{name, type, min, max, operations: {read,write,event},
+    flags: {visible,…}, value_list: [{value,key,label}]}]}``), but
+    ``homematicip_local``'s ``FormSchemaGenerator`` and the config-session
+    validator (both from ``aiohomematic_config``) expect aiohomematic's
+    ``Mapping[str, ParameterData]`` — parameter *name* → a dict with the
+    upper-cased ``TYPE`` / ``MIN`` / ``MAX`` / ``DEFAULT`` / ``UNIT`` /
+    ``VALUE_LIST`` / ``OPERATIONS`` / ``FLAGS`` keys and integer operation/flag
+    bitmasks. Without this the panel's form generation and change validation
+    see an empty descriptor and render/validate nothing.
+    """
+    result: dict[str, dict[str, Any]] = {}
+    for param in ui_schema.get("parameters") or ():
+        name = param.get("name")
+        if not name:
+            continue
+        ops = param.get("operations") or {}
+        flags = param.get("flags") or {}
+        data: dict[str, Any] = {
+            "ID": name,
+            "TYPE": param.get("type"),
+            "OPERATIONS": (
+                (_OP_READ if ops.get("read") else 0)
+                | (_OP_WRITE if ops.get("write") else 0)
+                | (_OP_EVENT if ops.get("event") else 0)
+            ),
+            "FLAGS": (
+                (_FLAG_VISIBLE if flags.get("visible") else 0)
+                | (_FLAG_INTERNAL if flags.get("internal") else 0)
+                | (_FLAG_SERVICE if flags.get("service") else 0)
+            ),
+        }
+        for wire_key, pd_key in (("min", "MIN"), ("max", "MAX"), ("default", "DEFAULT"), ("unit", "UNIT")):
+            if (value := param.get(wire_key)) is not None:
+                data[pd_key] = value
+        if value_list := param.get("value_list"):
+            # aiohomematic's VALUE_LIST is an index-ordered tuple of the enum keys.
+            data["VALUE_LIST"] = tuple(entry["key"] for entry in sorted(value_list, key=lambda e: e.get("value", 0)))
+        result[name] = data
+    return result
+
+
 class _Configuration:
     """
     ``central.configuration`` surface (paramset values + descriptors).
@@ -532,9 +609,9 @@ class _Configuration:
         interface_id: str | None = None,
         **_kwargs: Any,
     ) -> dict[str, Any]:
-        """Return renderable parameter descriptions for a channel paramset (ui-schema)."""
+        """Return the channel paramset descriptions as aiohomematic ``ParameterData`` (from the daemon ui-schema)."""
         device, channel = _split_channel_address(channel_address=channel_address)
-        return await self._client.devices.get_ui_schema(
+        ui_schema = await self._client.devices.get_ui_schema(
             address=device,
             channel=channel,
             paramset=_paramset_token(paramset_key=paramset_key),
@@ -542,6 +619,42 @@ class _Configuration:
             locale=locale,
             expert=expert,
         )
+        return _ui_schema_to_parameter_data(ui_schema=ui_schema)
+
+    async def put_paramset(
+        self,
+        *,
+        channel_address: str,
+        paramset_key: Any,
+        values: dict[str, Any],
+        validate: bool = True,
+        interface_id: str | None = None,
+        **_kwargs: Any,
+    ) -> _PutParamsetResult:
+        """
+        Validate (against the ui-schema descriptions) and write a channel paramset.
+
+        Mirrors aiohomematic's ``ConfigurationCoordinator.put_paramset``: when
+        ``validate`` is set, the values are checked against the parameter
+        descriptions first and a failing result is returned *without* writing;
+        otherwise the whole map is written transactionally
+        (``PUT /devices/{addr}/paramsets/{key}``). The daemon raises a typed
+        ``BaseHomematicException`` on a rejected write, which the handler maps
+        to ``write_failed``.
+        """
+        token = _paramset_token(paramset_key=paramset_key)
+        if validate:
+            descriptions = await self.get_paramset_description(
+                channel_address=channel_address, paramset_key=paramset_key
+            )
+            if failures := validate_paramset(descriptions=descriptions, values=values):
+                return _PutParamsetResult(
+                    success=False,
+                    validated=True,
+                    validation_errors={param: result.reason for param, result in failures.items()},
+                )
+        await self._client.datapoints.put_paramset(address=channel_address, paramset_key=token, values=values)
+        return _PutParamsetResult(success=True, validated=validate, validation_errors={})
 
     async def get_link_paramset_description(
         self,
@@ -553,9 +666,9 @@ class _Configuration:
         interface_id: str | None = None,
         **_kwargs: Any,
     ) -> dict[str, Any]:
-        """Return renderable LINK-paramset descriptions between a channel and a peer."""
+        """Return LINK-paramset descriptions (as aiohomematic ``ParameterData``) between a channel and a peer."""
         device, channel = _split_channel_address(channel_address=channel_address)
-        return await self._client.devices.get_ui_schema(
+        ui_schema = await self._client.devices.get_ui_schema(
             address=device,
             channel=channel,
             paramset="LINK",
@@ -563,6 +676,7 @@ class _Configuration:
             locale=locale,
             expert=expert,
         )
+        return _ui_schema_to_parameter_data(ui_schema=ui_schema)
 
     def get_configurable_devices(self, *, locale: str = "en", **_kwargs: Any) -> tuple[ConfigurableDevice, ...]:
         """Return configurable-device descriptors for the config UI."""
@@ -897,11 +1011,22 @@ class LoomCentralAdapter:
         except Exception:  # noqa: BLE001 — channel has no attached week profile
             _LOGGER.debug("no week profile on %s:%s", device.address, channel_no, exc_info=True)
             return
-        wp_dp = WeekProfileDp(
+        # Climate schedules get the ClimateWeekProfileDp (satisfies
+        # ClimateWeekProfileDataPointProtocol); simple schedules get the base
+        # WeekProfileDp — the isinstance split the schedule facade and the HA
+        # climate/sensor entities branch on, mirroring the reference's
+        # ClimateWeekProfile / DefaultWeekProfile classes.
+        wp_cls = (
+            ClimateWeekProfileDp
+            if str(getattr(week_profile.schedule_type, "value", "")) == "climate"
+            else WeekProfileDp
+        )
+        wp_dp = wp_cls(
             store=store,
             device=device,
             channel_no=channel_no,
             week_profile=week_profile,
+            schedules_ops=self._client.schedules,
         )
         try:
             schedule = await self._client.schedules.get_channel_schedule(address=device.address, channel=channel_no)

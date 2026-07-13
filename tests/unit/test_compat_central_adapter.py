@@ -21,8 +21,13 @@ from openccu_loom_types.rest import DataPointSummary, Snapshot
 import pytest
 
 from openccu_loom_client import BasicAuth, BearerAuth
+from openccu_loom_client.compat.aiohomematic._upstream import ParamsetKey
 from openccu_loom_client.compat.aiohomematic.central import CentralConfig, check_config
-from openccu_loom_client.compat.aiohomematic.central.adapter import _JsonRpcClient
+from openccu_loom_client.compat.aiohomematic.central.adapter import (
+    _Configuration,
+    _JsonRpcClient,
+    _ui_schema_to_parameter_data,
+)
 from tests.helpers import MockDaemon
 
 
@@ -585,3 +590,118 @@ class TestUnIgnoreCandidates:
         mock.get(f"{_BASE}/visibility/unignore/candidates", status=500)
         await central.query_facade.prefetch_un_ignore_candidates()
         assert central.query_facade.get_un_ignore_candidates() == []
+
+
+class TestParamsetDescriptionTransform:
+    """The daemon ui-schema is translated into aiohomematic's ``ParameterData`` map."""
+
+    def test_ui_schema_to_parameter_data(self) -> None:
+        ui_schema = {
+            "parameters": [
+                {
+                    "name": "ON_TIME",
+                    "type": "FLOAT",
+                    "unit": "s",
+                    "min": 0.0,
+                    "max": 100.0,
+                    "default": 0.0,
+                    "operations": {"read": True, "write": True, "event": False},
+                    "flags": {"visible": True, "internal": False, "service": False},
+                },
+                {
+                    "name": "CH_MODE",
+                    "type": "ENUM",
+                    "operations": {"read": True, "write": True, "event": True},
+                    "flags": {"visible": True, "internal": False, "service": True},
+                    # value list intentionally out of order to prove index sorting.
+                    "value_list": [
+                        {"value": 2, "key": "AUTO"},
+                        {"value": 0, "key": "NORMAL"},
+                        {"value": 1, "key": "MANU"},
+                    ],
+                },
+            ]
+        }
+        result = _ui_schema_to_parameter_data(ui_schema=ui_schema)
+        assert result["ON_TIME"] == {
+            "ID": "ON_TIME",
+            "TYPE": "FLOAT",
+            "OPERATIONS": 3,  # READ | WRITE
+            "FLAGS": 1,  # VISIBLE
+            "MIN": 0.0,
+            "MAX": 100.0,
+            "DEFAULT": 0.0,
+            "UNIT": "s",
+        }
+        assert result["CH_MODE"]["OPERATIONS"] == 7  # READ | WRITE | EVENT
+        assert result["CH_MODE"]["FLAGS"] == 9  # VISIBLE | SERVICE
+        # VALUE_LIST is an index-ordered tuple of the enum keys.
+        assert result["CH_MODE"]["VALUE_LIST"] == ("NORMAL", "MANU", "AUTO")
+
+    def test_ui_schema_skips_nameless_parameters(self) -> None:
+        assert _ui_schema_to_parameter_data(ui_schema={"parameters": [{"type": "FLOAT"}]}) == {}
+        assert _ui_schema_to_parameter_data(ui_schema={}) == {}
+
+
+class TestPutParamset:
+    """put_paramset validates against the ui-schema descriptions before writing."""
+
+    @staticmethod
+    def _config() -> tuple[_Configuration, SimpleNamespace]:
+        calls: list[dict[str, object]] = []
+        ui_schema = {
+            "parameters": [
+                {
+                    "name": "ON_TIME",
+                    "type": "FLOAT",
+                    "min": 0.0,
+                    "max": 100.0,
+                    "operations": {"read": True, "write": True, "event": False},
+                    "flags": {"visible": True},
+                }
+            ]
+        }
+
+        async def _get_ui_schema(**_kwargs: object) -> dict[str, object]:
+            return ui_schema
+
+        async def _put_paramset(**kwargs: object) -> None:
+            calls.append(kwargs)
+
+        client = SimpleNamespace(
+            devices=SimpleNamespace(get_ui_schema=_get_ui_schema),
+            datapoints=SimpleNamespace(put_paramset=_put_paramset),
+        )
+        return _Configuration(client=client), SimpleNamespace(calls=calls)
+
+    async def test_valid_write_succeeds(self) -> None:
+        config, spy = self._config()
+        result = await config.put_paramset(
+            channel_address="ABC:1", paramset_key=ParamsetKey.MASTER, values={"ON_TIME": 50.0}
+        )
+        assert result.success is True
+        assert result.validated is True
+        assert dict(result.validation_errors) == {}
+        assert spy.calls == [{"address": "ABC:1", "paramset_key": "MASTER", "values": {"ON_TIME": 50.0}}]
+
+    async def test_invalid_value_is_not_written(self) -> None:
+        config, spy = self._config()
+        result = await config.put_paramset(
+            channel_address="ABC:1", paramset_key=ParamsetKey.MASTER, values={"ON_TIME": 9999.0}
+        )
+        assert result.success is False
+        assert result.validated is True
+        assert "ON_TIME" in result.validation_errors
+        assert spy.calls == []
+
+    async def test_validate_false_bypasses_validation(self) -> None:
+        config, spy = self._config()
+        result = await config.put_paramset(
+            channel_address="ABC:1",
+            paramset_key=ParamsetKey.MASTER,
+            values={"ON_TIME": 9999.0},
+            validate=False,
+        )
+        assert result.success is True
+        assert result.validated is False
+        assert len(spy.calls) == 1

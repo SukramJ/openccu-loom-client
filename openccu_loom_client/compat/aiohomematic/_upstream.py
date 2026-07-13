@@ -41,14 +41,21 @@ from aiohomematic.const import (
     INSTALL_MODE_ADDRESS,
     PROGRAM_ADDRESS,
     SYSVAR_ADDRESS,
+    CallSource,
     CCUType,
     CentralState,
     DataPointCategory,
     DataPointKey,
+    DataPointUsage,
     DeviceTriggerEventType,
     ParamsetKey,
+    ScheduleField,
+    ScheduleProfile,
+    WeekdayStr,
 )
 from aiohomematic.model.custom import ClimateMode, ClimateProfile
+from aiohomematic.model.schedule_models import TargetChannelInfo
+from aiohomematic.parameter_tools import validate_paramset
 
 __all__ = [
     "HUB_ADDRESS",
@@ -56,6 +63,7 @@ __all__ = [
     "PROGRAM_ADDRESS",
     "SYSVAR_ADDRESS",
     "CCUType",
+    "CallSource",
     "CentralState",
     "CentralStateChangedEvent",
     "ClimateMode",
@@ -63,6 +71,7 @@ __all__ = [
     "DataPointCategory",
     "DataPointKey",
     "DataPointStateChangedEvent",
+    "DataPointUsage",
     "DataPointsCreatedEvent",
     "DeviceLifecycleEvent",
     "DeviceLifecycleEventType",
@@ -72,4 +81,9 @@ __all__ = [
     "Looper",
     "OptimisticRollbackEvent",
     "ParamsetKey",
+    "ScheduleField",
+    "ScheduleProfile",
+    "TargetChannelInfo",
+    "WeekdayStr",
+    "validate_paramset",
 ]
