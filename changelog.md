@@ -1,3 +1,38 @@
+# Version 2026.7.10 (2026-07-13)
+
+Frontend compat, part 3: the **CCU dashboard**. It was unreachable on a loom
+entry and, once reachable, most of its commands broke on shape mismatches.
+
+- Fix: **the CCU tab was hidden on loom entries.** The config panel gates it on
+  `permissions.backend === "CCU"`, and `backend` is `central.model` — which the
+  loom adapter reports as `"openccu-loom"` (its backend-form identity;
+  deliberately not `"CCU"`, since that value also drives entity dispatch). The
+  whole dashboard was therefore invisible to loom-backed entries even though the
+  adapter serves every one of its commands. Fixed frontend-side by gating on the
+  _set_ of backends that serve the `ccu/*` surface (companion PR).
+- Fix: **message / inbox commands return records and bools.** `json_rpc_client`
+  now hands back aiohomematic's `ServiceMessageData` / `AlarmMessageData` /
+  `InboxDeviceData` dataclasses (the handlers call `dataclasses.asdict()` on the
+  lists) and `bool` from the mutations. Returning `None` made every
+  acknowledge/accept report `*_failed` to the panel **even when the CCU-side
+  write had succeeded**. `acknowledge_message` now covers both stores — the HA
+  service _and_ alarm handlers route through the one aiohomematic primitive,
+  while the daemon splits the endpoints. `rename_device` takes the reference's
+  `new_name` kwarg and raises a catchable error for an unknown ise_id.
+- Fix: **integration dashboard.** `central.health` is a _property_ with
+  `to_dict()` (an async method raised `AttributeError: 'method' object has no
+attribute 'to_dict'`); `client_coordinator.clients` yields records with
+  `interface_id` + `command_throttle` (bare id strings raised `AttributeError`);
+  `incident_store.get_incidents_by_interface` returns records with `to_dict()`;
+  and `clear_incidents` now actually reaches the daemon (`DELETE /incidents`)
+  instead of being a client-side no-op. Each of these took down the _whole_ tab,
+  because the panel fetches its four sections in one `Promise.all`.
+- Feat: **device surface the dashboard reads.** `Device.availability` returns an
+  `AvailabilityInfo` record with snake_case members (`is_reachable`, …; the wire
+  record spells them PascalCase), `Device.firmware_updatable`,
+  `Device.get_generic_data_point(parameter=…)` (the signal-quality view looks the
+  RSSI up by bare parameter) and `Device.update_firmware()` → `bool`.
+
 # Version 2026.7.9 (2026-07-13)
 
 Frontend compat, part 2: **direct links** and — the load-bearing one — the

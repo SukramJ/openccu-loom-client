@@ -12,26 +12,31 @@ rather than returning a wrong shape.
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 
 from aiohomematic.central.events import EventBus as AioEventBus
 from openccu_loom_types import DAEMON_API_VERSION
 from openccu_loom_types.enums import DataPointCategory
-from openccu_loom_types.rest import DataPointSummary, Link, Snapshot
+from openccu_loom_types.rest import AlarmMessage, DataPointSummary, Link, ServiceMessage, Snapshot
 import pytest
 
 from openccu_loom_client import BasicAuth, BearerAuth
 from openccu_loom_client.compat.aiohomematic._upstream import ParamsetKey
 from openccu_loom_client.compat.aiohomematic.central import CentralConfig, check_config
 from openccu_loom_client.compat.aiohomematic.central.adapter import (
+    _ClientCoordinator,
     _Configuration,
+    _HealthSnapshot,
+    _IncidentStore,
     _JsonRpcClient,
     _LinkCoordinator,
     _ui_schema_to_parameter_data,
 )
-from openccu_loom_client.exceptions import LoomConflictError
+from openccu_loom_client.exceptions import LoomConflictError, LoomNotFoundError
 from tests.helpers import MockDaemon
 
 
@@ -227,7 +232,9 @@ class TestActionCoordinators:
     async def test_json_rpc_client_get_alarm_messages(self, connected) -> None:
         central, mock = connected
         mock.get(f"{_BASE}/alarm-messages", payload=[])
-        assert await central.json_rpc_client.get_alarm_messages() == []
+        # Records are aiohomematic dataclasses now (the handler asdict()s them),
+        # so the empty case is an empty tuple rather than the raw wire list.
+        assert await central.json_rpc_client.get_alarm_messages() == ()
 
     async def test_json_rpc_client_accept_inbox_device(self, connected) -> None:
         central, mock = connected
@@ -542,13 +549,17 @@ class TestRenameDeviceByIseId:
             ],
             calls,
         )
-        await _JsonRpcClient(client=client).rename_device(ise_id=4712, name="Kitchen")
+        # The handler passes aiohomematic's `new_name` kwarg and tests the bool.
+        assert await _JsonRpcClient(client=client).rename_device(ise_id=4712, new_name="Kitchen") is True
         assert calls == [("VCU0000002", "Kitchen")]
 
-    async def test_unknown_ise_id_raises(self) -> None:
+    async def test_unknown_ise_id_raises_a_handler_catchable_error(self) -> None:
+        """A bare ValueError escapes `except BaseHomematicException` and leaks an unknown_error."""
+        from aiohomematic.exceptions import BaseHomematicException
+
         client = self._fake_client([SimpleNamespace(ise_id=1, address="VCU1")], [])
-        with pytest.raises(ValueError, match="ise_id 9999"):
-            await _JsonRpcClient(client=client).rename_device(ise_id=9999, name="x")
+        with pytest.raises(BaseHomematicException):
+            await _JsonRpcClient(client=client).rename_device(ise_id=9999, new_name="x")
 
 
 class TestCheckConfig:
@@ -820,3 +831,188 @@ class TestLinkCoordinator:
         assert calls["linkable"]["channel"] == 1
         assert calls["linkable"]["interface"] == "home:HmIP-RF"
         assert dataclasses.asdict(channels[0])["address"] == "CCC:3"
+
+
+class TestJsonRpcClientRecords:
+    """
+    The CCU dashboard's message/inbox commands.
+
+    The handlers call `dataclasses.asdict()` on the lists and test the mutations
+    for a truthy result (`if not success: send_error(..., "..._failed")`), so the
+    surface must hand back aiohomematic record dataclasses and `bool`.
+    """
+
+    @staticmethod
+    def _client() -> tuple[_JsonRpcClient, dict[str, Any]]:
+        timestamp = datetime(2026, 7, 13, 10, 0, tzinfo=UTC)
+        service = ServiceMessage.model_validate(
+            {
+                "central": "home",
+                "id": "S1",
+                "name": "LOW_BAT",
+                "address": "VCU1:0",
+                "device_name": "Lamp",
+                "type": "LOW_BAT",
+                "description": "battery",
+                "priority": 1,
+                "timestamp": timestamp,
+                "counter": 2,
+                "quittable": True,
+                "display_name": "Low battery",
+            }
+        )
+        alarm = AlarmMessage.model_validate(
+            {
+                "central": "home",
+                "id": "A1",
+                "name": "ERROR",
+                "description": "d",
+                "device_name": "Lamp",
+                "address": "VCU1:0",
+                "state_value": "1",
+                "timestamp": timestamp,
+                "counter": 1,
+                "last_trigger": "2026-07-13T09:00:00Z",
+                "display_name": "Error",
+                "rooms": ["Kitchen"],
+            }
+        )
+        acks: dict[str, Any] = {"calls": []}
+
+        async def ack_service(*, message_id: str) -> None:
+            acks["calls"].append(("service", message_id))
+
+        async def ack_alarm(*, message_id: str) -> None:
+            acks["calls"].append(("alarm", message_id))
+
+        async def ret(value: Any) -> Any:
+            return value
+
+        hub = SimpleNamespace(
+            list_service_messages=lambda: ret([service]),
+            list_alarm_messages=lambda: ret([alarm]),
+            list_inbox=lambda: ret([{"central": "home", "address": "NEW1", "model": "HmIP-PS", "serial": "SER1"}]),
+            ack_service_message=ack_service,
+            ack_alarm_message=ack_alarm,
+        )
+        devices = SimpleNamespace(
+            accept_device=lambda **_kw: ret(None),
+            patch_device=lambda **_kw: ret(None),
+        )
+        store = SimpleNamespace(devices=[SimpleNamespace(address="VCU1", ise_id=4711)])
+        client = SimpleNamespace(hub=hub, devices=devices, store=store)
+        return _JsonRpcClient(client=client), acks
+
+    async def test_service_messages_are_asdict_able_records(self) -> None:
+        json_rpc, _ = self._client()
+        messages = await json_rpc.get_service_messages()
+        payload = dataclasses.asdict(messages[0])
+        assert payload["msg_id"] == "S1"
+        assert payload["msg_type_name"] == "LOW_BAT"
+        assert payload["quittable"] is True
+        assert payload["timestamp"].startswith("2026-07-13T10:00")
+
+    async def test_alarm_messages_are_asdict_able_records(self) -> None:
+        json_rpc, _ = self._client()
+        alarms = await json_rpc.get_alarm_messages()
+        payload = dataclasses.asdict(alarms[0])
+        assert payload["alarm_id"] == "A1"
+        assert payload["rooms"] == ("Kitchen",)
+
+    async def test_inbox_devices_are_asdict_able_records(self) -> None:
+        json_rpc, _ = self._client()
+        devices = await json_rpc.get_inbox_devices()
+        assert dataclasses.asdict(devices[0]) == {
+            "device_id": "SER1",
+            "address": "NEW1",
+            "name": "NEW1",
+            "device_type": "HmIP-PS",
+            "interface": "",
+        }
+
+    async def test_mutations_return_true(self) -> None:
+        """A None return made every accept/ack report failure to the panel."""
+        json_rpc, acks = self._client()
+        assert await json_rpc.accept_device_in_inbox(device_address="NEW1") is True
+        assert await json_rpc.acknowledge_message(message_id="S1") is True
+        assert await json_rpc.rename_device(ise_id=4711, new_name="Neu") is True
+        assert acks["calls"] == [("service", "S1")]
+
+    async def test_acknowledge_falls_back_to_the_alarm_store(self) -> None:
+        """Both HA ack handlers route through the one primitive; the daemon splits the endpoints."""
+        json_rpc, acks = self._client()
+
+        async def ack_404(*, message_id: str) -> None:
+            raise LoomNotFoundError(status=404, problem=None, raw_body=None, method="POST", url="/x")
+
+        json_rpc._client.hub.ack_service_message = ack_404
+        assert await json_rpc.acknowledge_message(message_id="A1") is True
+        assert acks["calls"] == [("alarm", "A1")]
+
+    async def test_unknown_ise_id_raises_a_handler_catchable_error(self) -> None:
+        from aiohomematic.exceptions import BaseHomematicException
+
+        json_rpc, _ = self._client()
+        with pytest.raises(BaseHomematicException):
+            await json_rpc.rename_device(ise_id=9999, new_name="x")
+
+
+class TestIntegrationDashboardSurface:
+    """
+    The integration dashboard fetches its four sections in one Promise.all.
+
+    Any one of them raising takes the whole tab down, so each must hand back the
+    shape the handler reads rather than an AttributeError.
+    """
+
+    def test_clients_are_records_with_a_throttle(self) -> None:
+        """The throttle view reads client.interface_id + client.command_throttle.* per client."""
+        coordinator = _ClientCoordinator(client=SimpleNamespace())
+        coordinator._interface_ids = frozenset({"home:HmIP-RF", "home:BidCos-RF"})
+        stats = {
+            client.interface_id: {
+                "interval": client.command_throttle.interval,
+                "is_enabled": client.command_throttle.is_enabled,
+                "queue_size": client.command_throttle.queue_size,
+            }
+            for client in coordinator.clients
+        }
+        assert set(stats) == {"home:HmIP-RF", "home:BidCos-RF"}
+        # The daemon serialises commands itself — throttling is honestly reported as off.
+        assert stats["home:HmIP-RF"] == {"interval": 0.0, "is_enabled": False, "queue_size": 0}
+
+    def test_health_snapshot_to_dict(self) -> None:
+        """ws_get_system_health calls central.health.to_dict() — no await, so health is a property."""
+        assert _HealthSnapshot(payload=None).to_dict() == {}
+        assert _HealthSnapshot(payload={"status": "ok"}).to_dict() == {"status": "ok"}
+
+    async def test_incidents_by_interface_are_to_dict_able(self) -> None:
+        incident = {"id": "1", "interface_id": "home:HmIP-RF", "severity": "warn", "summary": "s"}
+
+        async def list_incidents() -> dict[str, Any]:
+            return {"incidents": [incident, {"id": "2", "interface_id": "other"}]}
+
+        store = _IncidentStore(
+            client=SimpleNamespace(diagnostics=SimpleNamespace(list_incidents=list_incidents)),
+            looper=SimpleNamespace(),
+        )
+        incidents = await store.get_incidents_by_interface(interface_id="home:HmIP-RF")
+        # The handler does [i.to_dict() for i in incidents] — plain dicts raised AttributeError.
+        assert [i.to_dict() for i in incidents] == [incident]
+
+    async def test_clear_incidents_reaches_the_daemon(self) -> None:
+        """A client-side no-op left the list unchanged and the panel button dead."""
+        calls: list[str] = []
+
+        async def clear() -> None:
+            calls.append("DELETE /incidents")
+
+        store = _IncidentStore(
+            client=SimpleNamespace(diagnostics=SimpleNamespace(clear_incidents=clear)),
+            looper=SimpleNamespace(
+                create_task=lambda **kwargs: asyncio.get_running_loop().create_task(kwargs["target"])
+            ),
+        )
+        store.clear_incidents()
+        await asyncio.sleep(0)
+        assert calls == ["DELETE /incidents"]
