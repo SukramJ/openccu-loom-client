@@ -271,6 +271,13 @@ class TestSystemAdminExtensions:
             "url": "http://127.0.0.1",
             "is_ha_app": False,
             "configured_interfaces": [],
+            # Required since types 0.1.55 / daemon api 2.19.0.
+            "readiness": {
+                "phase": "ready",
+                "ready": True,
+                "interfaces_loaded": 1,
+                "interfaces_total": 1,
+            },
         }
         mock.get("/api/v1/system/ccu", payload={"entries": [entry]})
         ccus = await SystemOperations(transport=t).list_system_ccus()

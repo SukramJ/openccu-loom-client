@@ -24,6 +24,7 @@ from openccu_loom_client.events.synthetic import (
     new_optimistic_rollback_event,
 )
 from openccu_loom_client.events.types import (
+    CentralReadinessChangedEvent,
     CentralStateChangedEvent,
     CustomDataPointStateChangedEvent,
     DataPointValueChangedEvent,
@@ -52,6 +53,7 @@ from openccu_loom_client.events.types import (
 
 __all__ = [
     # General
+    "CentralReadinessChangedEvent",
     "CentralStateChangedEvent",
     "CustomDataPointStateChangedEvent",
     "DataPointValueChangedEvent",

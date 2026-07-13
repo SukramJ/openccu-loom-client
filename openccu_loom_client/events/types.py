@@ -25,6 +25,7 @@ from typing import Any, ClassVar, Final
 
 from openccu_loom_types.rest import Kind1 as Kind
 from openccu_loom_types.ws import (
+    CentralReadinessChangedPayload,
     CentralStateChangedPayload,
     CustomDataPointStateChangedPayload,
     DataPointValueChangedPayload,
@@ -159,6 +160,26 @@ class CentralStateChangedEvent(LoomEvent):
 
     payload: CentralStateChangedPayload
     type_id: ClassVar[str] = "central.state_changed"
+
+    def __post_init__(self) -> None:
+        """Default the routing key to the payload's central name."""
+        if self.event_key is None:
+            self.event_key = self.payload.central
+
+
+@dataclass(slots=True, kw_only=True)
+class CentralReadinessChangedEvent(LoomEvent):
+    """
+    The central's southbound bring-up advanced (daemon api 2.19.0).
+
+    Reports the bring-up ``phase`` (``waiting_for_ccu`` → ``loading_hub`` →
+    ``loading_devices`` → ``ready``), the latched ``ready`` flag and the
+    interface-wiring progress. Consumers can gate on ``ready`` instead of
+    inferring readiness from the lifecycle state alone.
+    """
+
+    payload: CentralReadinessChangedPayload
+    type_id: ClassVar[str] = "central.readiness_changed"
 
     def __post_init__(self) -> None:
         """Default the routing key to the payload's central name."""
@@ -450,6 +471,7 @@ _EVENT_REGISTRY: Final[dict[str, tuple[Callable[..., LoomEvent], type[BaseModel]
         CustomDataPointStateChangedPayload,
     ),
     CentralStateChangedEvent.type_id: (CentralStateChangedEvent, CentralStateChangedPayload),
+    CentralReadinessChangedEvent.type_id: (CentralReadinessChangedEvent, CentralReadinessChangedPayload),
     SystemStatusChangedEvent.type_id: (SystemStatusChangedEvent, SystemStatusChangedPayload),
     SysvarChangedEvent.type_id: (SysvarChangedEvent, SysvarChangedPayload),
     ProgramExecutedEvent.type_id: (ProgramExecutedEvent, ProgramExecutedPayload),

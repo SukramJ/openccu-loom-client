@@ -4,17 +4,34 @@
 """
 ``aiohomematic.model.week_profile_data_point`` twins — schedule data points.
 
-Two per-device schedule entities mirror aiohomematic's week-profile
+Three per-device schedule entities mirror aiohomematic's week-profile
 layer:
 
 - :class:`WeekProfileDp` (category ``week_profile`` → HA sensor): the
   number of active schedule entries plus the schedule metadata the HA
-  sensor renders as attributes. Backed by the daemon's
-  ``GET …/week_profile`` descriptor and ``GET …/schedule`` payload.
+  sensor renders as attributes, and the *device*-schedule read/write
+  surface (``get_schedule`` / ``set_schedule`` / ``set_schedule_enabled``)
+  the config panel's simple-schedule editor and the HACS schedule cards
+  drive. Satisfies :class:`WeekProfileDataPointProtocol`. Backed by the
+  daemon's ``GET …/week_profile`` descriptor and ``…/schedule`` payload.
+- :class:`ClimateWeekProfileDp` (subclass): adds the profile-/weekday-level
+  climate surface (``get_schedule_profile`` / ``set_schedule_weekday`` /
+  ``current_schedule_profile`` / …) so it satisfies the
+  ``@runtime_checkable`` :class:`ClimateWeekProfileDataPointProtocol`. Only
+  climate schedules get this class, so ``isinstance(…, Climate…Protocol)``
+  distinguishes climate from simple schedules exactly like the reference
+  (``ClimateWeekProfile`` vs ``DefaultWeekProfile``) — the config-panel
+  schedule facade and the HA climate/sensor entities branch on that check.
 - :class:`ScheduleChannelSwitch` (category ``schedule_switch`` → HA
-  switch, disabled by default): one switch per
-  ``schedule_enabled`` channel key, toggling the channel's week-program
-  participation via ``PUT …/week_profile/channel-locks/{key}``.
+  switch, disabled by default): one switch per ``schedule_enabled``
+  channel key, toggling the channel's week-program participation.
+
+The frontend consumes profile data as ``{weekday: {base_temperature,
+periods: [{starttime, endtime, temperature}]}}`` and simple schedules as
+``{entries: {slot: SimpleScheduleEntry}}`` — the loom wire models
+(``ClimatePeriod.start_time``/``end_time``, ``SimpleScheduleEntry.slot_no``)
+are translated to those key names here so the shape matches the aiohomematic
+backend the cards were written against.
 
 Unique ids match aiohomematic's registry exactly
 (``loom_week_profile_<addr>_week_profile`` and
@@ -28,8 +45,17 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, ClassVar, Final
 
 from openccu_loom_types.enums import DataPointCategory
+from openccu_loom_types.rest import ClimatePeriod, ClimateProfile, ClimateWeekday, SimpleScheduleEntry
 
 from openccu_loom_client.canonical import canonical_unique_id
+from openccu_loom_client.compat.aiohomematic._upstream import (
+    CallSource,
+    DataPointUsage,
+    ScheduleField,
+    ScheduleProfile,
+    TargetChannelInfo,
+    WeekdayStr,
+)
 from openccu_loom_client.compat.aiohomematic.model._protocol_surface import _CommonProtocolSurface, _NameData
 from openccu_loom_client.compat.aiohomematic.model.hub._surface import _HubEntitySurface
 
@@ -47,6 +73,51 @@ _MAX_CLIMATE_ENTRIES: Final = 13 * 7 * 6
 _MAX_SIMPLE_ENTRIES: Final = 24
 
 _SCHEDULE_KIND_CLIMATE: Final = "climate"
+
+# aiohomematic's per-frontend key names (``starttime``/``endtime``) differ
+# from the loom wire model's (``start_time``/``end_time``); the cards were
+# written against the former.
+_PERIOD_START: Final = "starttime"
+_PERIOD_END: Final = "endtime"
+_PERIOD_TEMP: Final = "temperature"
+_WEEKDAY_BASE_TEMP: Final = "base_temperature"
+_WEEKDAY_PERIODS: Final = "periods"
+
+
+def _periods_to_frontend(*, periods: list[ClimatePeriod]) -> list[dict[str, Any]]:
+    """Render wire climate periods as the ``{starttime, endtime, temperature}`` dicts the cards read."""
+    return [
+        {_PERIOD_START: period.start_time, _PERIOD_END: period.end_time, _PERIOD_TEMP: period.temperature}
+        for period in periods
+    ]
+
+
+def _weekday_to_frontend(*, weekday: ClimateWeekday) -> dict[str, Any]:
+    """Render a wire climate weekday as ``{base_temperature, periods: [...]}``."""
+    return {
+        _WEEKDAY_BASE_TEMP: weekday.base_temperature,
+        _WEEKDAY_PERIODS: _periods_to_frontend(periods=weekday.periods),
+    }
+
+
+def _profile_to_frontend(*, profile: ClimateProfile) -> dict[str, Any]:
+    """Render a wire climate profile as ``{weekday: {base_temperature, periods}}``."""
+    return {weekday_key: _weekday_to_frontend(weekday=weekday) for weekday_key, weekday in profile.weekdays.items()}
+
+
+def _weekday_from_frontend(*, weekday_data: dict[str, Any]) -> ClimateWeekday:
+    """Parse a ``{base_temperature, periods: [{starttime, endtime, temperature}]}`` dict into the wire model."""
+    return ClimateWeekday(
+        base_temperature=weekday_data[_WEEKDAY_BASE_TEMP],
+        periods=[
+            ClimatePeriod(
+                start_time=period[_PERIOD_START],
+                end_time=period[_PERIOD_END],
+                temperature=period[_PERIOD_TEMP],
+            )
+            for period in weekday_data.get(_WEEKDAY_PERIODS, [])
+        ],
+    )
 
 
 class _ScheduleEntityBase(_HubEntitySurface, _CommonProtocolSurface):
@@ -95,7 +166,14 @@ class _ScheduleEntityBase(_HubEntitySurface, _CommonProtocolSurface):
 
 
 class WeekProfileDp(_ScheduleEntityBase):
-    """Week-profile data point: active-entry count + schedule metadata."""
+    """
+    Week-profile data point: active-entry count + simple-schedule surface.
+
+    Satisfies ``WeekProfileDataPointProtocol`` (device-level schedule access
+    for non-climate schedules). Climate schedules use the
+    :class:`ClimateWeekProfileDp` subclass, which additionally satisfies
+    ``ClimateWeekProfileDataPointProtocol``.
+    """
 
     _category: ClassVar[DataPointCategory] = DataPointCategory.WeekProfile
 
@@ -106,10 +184,12 @@ class WeekProfileDp(_ScheduleEntityBase):
         device: Device,
         channel_no: int,
         week_profile: WeekProfileResponse,
+        schedules_ops: SchedulesOperations,
     ) -> None:
-        """Bind the data point to the daemon's week-profile descriptor."""
+        """Bind the data point to the daemon's week-profile descriptor and schedule operations."""
         super().__init__(store=store, device=device, channel_no=channel_no)
         self._week_profile = week_profile
+        self._schedules_ops = schedules_ops
         self._schedule: Schedule | None = None
         self._schedule_enabled: dict[str, bool] | None = (
             dict(week_profile.schedule_enabled) if week_profile.schedule_enabled else None
@@ -136,9 +216,61 @@ class WeekProfileDp(_ScheduleEntityBase):
         return f"{self._device.name} Week Profile"
 
     @property
+    def translated_name(self) -> str:
+        """Return the translated data-point name (loom has no translation table → raw name)."""
+        return self.name
+
+    @property
+    def translated_full_name(self) -> str:
+        """Return the translated display name (loom has no translation table → raw full name)."""
+        return self.full_name
+
+    @property
     def translation_key(self) -> str:
         """Return the HA translation key."""
         return "week_profile"
+
+    @property
+    def name_data(self) -> _NameData:
+        """Return the name data the HA sensor entity reads."""
+        return _NameData(parameter_name=self.name, name=self.name, full_name=self.full_name)
+
+    # ---- base-protocol tail (neutral, mirrors aiohomematic's defaults for a schedule DP) ----
+
+    @property
+    def function(self) -> str | None:
+        """Return the channel function (schedule DPs carry none)."""
+        return None
+
+    @property
+    def is_in_multiple_channels(self) -> bool:
+        """Return whether the parameter spans channels (never, for a schedule DP)."""
+        return False
+
+    @property
+    def timer_on_time(self) -> float | None:
+        """Return the on-time (schedule DPs have none)."""
+        return None
+
+    @property
+    def timer_on_time_running(self) -> bool:
+        """Return whether an on-time is running (never, for a schedule DP)."""
+        return False
+
+    def force_usage(self, *, forced_usage: DataPointUsage) -> None:
+        """Force the data-point usage (no-op: schedule DPs are always data points)."""
+
+    def reset_timer_on_time(self) -> None:
+        """Reset the on-time (no-op: schedule DPs have no timer)."""
+
+    def set_timer_on_time(self, *, on_time: float) -> None:
+        """Set the on-time (no-op: schedule DPs have no timer)."""
+
+    async def load_data_point_value(self, *, call_source: CallSource, direct_call: bool = False) -> None:
+        """Load the data-point value (schedule data is populated during bootstrap / reload_schedule)."""
+
+    def fire_schedule_updated(self) -> None:
+        """Notify subscribers that the schedule changed (no-op: no per-DP event bus on the loom path)."""
 
     # ---- value ----
 
@@ -209,6 +341,58 @@ class WeekProfileDp(_ScheduleEntityBase):
             return sum(len(weekday.periods) for profile in profiles.values() for weekday in profile.weekdays.values())
         return len(schedule.simple_entries or [])
 
+    async def _reload_schedule(self, *, force_load: bool = False) -> Schedule:
+        """Fetch (or return the cached) channel schedule, refreshing the entry count."""
+        if force_load or self._schedule is None:
+            schedule = await self._schedules_ops.get_channel_schedule(
+                address=self._device.address, channel=self._channel_no
+            )
+            self.update_from(schedule=schedule)
+        assert self._schedule is not None  # noqa: S101 - update_from always sets it
+        return self._schedule
+
+    # ---- device (simple) schedule read/write (WeekProfileDataPointProtocol) ----
+
+    async def get_schedule(self, *, force_load: bool = False) -> dict[str, Any]:
+        """
+        Fetch and return the simple schedule as ``{"entries": {slot: entry}}``.
+
+        Mirrors aiohomematic's ``DefaultWeekProfile`` dump: the frontend's
+        ``ScheduleData.entries`` is a slot-keyed map of ``SimpleScheduleEntry``.
+        """
+        schedule = await self._reload_schedule(force_load=force_load)
+        entries = {
+            str(entry.slot_no): entry.model_dump(mode="json", exclude={"slot_no"})
+            for entry in (schedule.simple_entries or [])
+        }
+        return {"entries": entries}
+
+    async def set_schedule(self, *, schedule_data: dict[str, Any]) -> None:
+        """Write a simple schedule (``{"entries": {slot: entry}}``) back to the daemon."""
+        raw_entries = schedule_data.get("entries", schedule_data)
+        entries = [
+            SimpleScheduleEntry.model_validate({**entry, "slot_no": int(slot)}) for slot, entry in raw_entries.items()
+        ]
+        base = await self._reload_schedule()
+        new_schedule = base.model_copy(update={"simple_entries": entries})
+        await self._schedules_ops.put_channel_schedule(
+            address=self._device.address, channel=self._channel_no, schedule=new_schedule
+        )
+        self.update_from(schedule=new_schedule)
+
+    async def set_schedule_enabled(self, *, enabled: bool, channel_key: str | None = None) -> None:
+        """Enable or disable the weekly program for one channel key, or all known keys when ``None``."""
+        keys = [channel_key] if channel_key is not None else list(self._schedule_enabled or {})
+        for key in keys:
+            await self._schedules_ops.set_channel_lock(
+                address=self._device.address, channel=self._channel_no, key=key, enabled=enabled
+            )
+            self.set_channel_enabled(channel_key=key, enabled=enabled)
+
+    async def reload_schedule(self) -> None:
+        """Reload the schedule from the daemon and refresh the entry count."""
+        await self._reload_schedule(force_load=True)
+
     # ---- schedule metadata (read by the HA week-profile sensor) ----
 
     @property
@@ -240,6 +424,18 @@ class WeekProfileDp(_ScheduleEntityBase):
         """Return the per-channel schedule enabled map, or ``None``."""
         return dict(self._schedule_enabled) if self._schedule_enabled is not None else None
 
+    @property
+    def supported_schedule_fields(self) -> frozenset[ScheduleField]:
+        """
+        Return the schedule fields the device advertises.
+
+        The daemon does not expose the device's MASTER-paramset schedule-field
+        descriptor, so this is empty; the simple-schedule editor then renders
+        its per-domain default field set (mirrors aiohomematic when the
+        descriptor is absent).
+        """
+        return frozenset()
+
     def set_channel_enabled(self, *, channel_key: str, enabled: bool) -> None:
         """Record an optimistic per-channel enabled flag (after a lock write)."""
         if self._schedule_enabled is None:
@@ -269,19 +465,211 @@ class WeekProfileDp(_ScheduleEntityBase):
         return None
 
     @property
-    def available_profiles(self) -> tuple[str, ...]:
-        """Return the available climate profiles (P1…P6)."""
-        return tuple(self._week_profile.available_profiles or ())
+    def available_target_channels(self) -> dict[str, TargetChannelInfo]:
+        """Return the actuator channels the schedule targets, as aiohomematic ``TargetChannelInfo`` dataclasses."""
+        targets = self._week_profile.available_target_channels or {}
+        return {
+            key: TargetChannelInfo(
+                channel_no=info.channel_no,
+                channel_address=info.channel_address,
+                name=info.name,
+                channel_type=info.channel_type,
+            )
+            for key, info in targets.items()
+        }
+
+
+class ClimateWeekProfileDp(WeekProfileDp):
+    """
+    Climate week-profile data point: adds the profile-/weekday-level surface.
+
+    Satisfies the ``@runtime_checkable`` ``ClimateWeekProfileDataPointProtocol``
+    so the schedule facade's ``isinstance`` gate and the HA climate/sensor
+    entities recognise it as climate-capable. Simple (non-climate) schedules
+    use the plain :class:`WeekProfileDp`, which does *not* satisfy the climate
+    protocol — mirroring aiohomematic's ``ClimateWeekProfile`` /
+    ``DefaultWeekProfile`` split.
+    """
+
+    def __init__(
+        self,
+        *,
+        store: LoomStore,
+        device: Device,
+        channel_no: int,
+        week_profile: WeekProfileResponse,
+        schedules_ops: SchedulesOperations,
+    ) -> None:
+        """Bind the climate data point and seed the editor's current-profile pointer from the descriptor."""
+        super().__init__(
+            store=store,
+            device=device,
+            channel_no=channel_no,
+            week_profile=week_profile,
+            schedules_ops=schedules_ops,
+        )
+        self._current_schedule_profile: ScheduleProfile = (
+            _to_schedule_profile(value=week_profile.current_profile, default=None) or ScheduleProfile.P1
+        )
+
+    # ---- profile metadata ----
 
     @property
-    def current_profile(self) -> str | None:
-        """Return the active climate profile, or ``None``."""
-        return self._week_profile.current_profile
+    def available_profiles(self) -> tuple[ScheduleProfile, ...]:
+        """Return the available climate profiles (P1…P6) as ``ScheduleProfile`` enums."""
+        return tuple(
+            profile
+            for name in (self._week_profile.available_profiles or ())
+            if (profile := _to_schedule_profile(value=name, default=None)) is not None
+        )
 
     @property
-    def available_target_channels(self) -> dict[str, Any]:
-        """Return the target-channel map (not modelled on the loom backend)."""
-        return {}
+    def current_schedule_profile(self) -> ScheduleProfile:
+        """Return the profile the editor is currently viewing (local pointer, like the reference)."""
+        return self._current_schedule_profile
+
+    @property
+    def schedule_profile_nos(self) -> int:
+        """Return the number of supported profiles."""
+        return self._week_profile.profile_count or len(self.available_profiles)
+
+    @property
+    def device_active_profile_index(self) -> int | None:
+        """Return the 1-based active-profile index the device reports, or ``None``."""
+        if self._schedule is not None:
+            return self._schedule.active_profile_index
+        return None
+
+    @property
+    def current_profile_schedule(self) -> dict[str, Any] | None:
+        """Return the cached schedule of the current profile as ``{weekday: {...}}``, or ``None``."""
+        if self._schedule is None or not self._schedule.profiles:
+            return None
+        profile = self._schedule.profiles.get(self._current_schedule_profile.value)
+        if profile is None:
+            return None
+        return _profile_to_frontend(profile=profile)
+
+    def set_current_schedule_profile(self, *, profile: ScheduleProfile) -> None:
+        """Set the profile the editor views (local pointer only; the device's active profile is a separate DP)."""
+        self._current_schedule_profile = profile
+        self._modified = datetime.now(tz=UTC)
+
+    # ---- profile / weekday read ----
+
+    async def get_schedule(self, *, force_load: bool = False) -> dict[str, Any]:
+        """Return the whole climate schedule as ``{profile: {weekday: {...}}}``."""
+        schedule = await self._reload_schedule(force_load=force_load)
+        return {name: _profile_to_frontend(profile=profile) for name, profile in (schedule.profiles or {}).items()}
+
+    async def get_schedule_profile(self, *, profile: ScheduleProfile, force_load: bool = False) -> dict[str, Any]:
+        """Return a single profile as ``{weekday: {base_temperature, periods: [...]}}``."""
+        schedule = await self._reload_schedule(force_load=force_load)
+        profile_obj = (schedule.profiles or {}).get(profile.value)
+        if profile_obj is None:
+            return {}
+        return _profile_to_frontend(profile=profile_obj)
+
+    async def get_schedule_weekday(
+        self, *, profile: ScheduleProfile, weekday: WeekdayStr, force_load: bool = False
+    ) -> dict[str, Any]:
+        """Return a single weekday as ``{base_temperature, periods: [...]}``."""
+        schedule = await self._reload_schedule(force_load=force_load)
+        profile_obj = (schedule.profiles or {}).get(profile.value)
+        if profile_obj is None or (weekday_obj := profile_obj.weekdays.get(weekday.value)) is None:
+            return {}
+        return _weekday_to_frontend(weekday=weekday_obj)
+
+    # ---- profile / weekday write ----
+
+    async def set_schedule_weekday(
+        self, *, profile: ScheduleProfile, weekday: WeekdayStr, weekday_data: dict[str, Any]
+    ) -> None:
+        """Write a single weekday of a profile back to the daemon."""
+        schedule = await self._reload_schedule()
+        profiles = dict(schedule.profiles or {})
+        profile_obj = profiles.get(profile.value)
+        weekdays = dict(profile_obj.weekdays) if profile_obj is not None else {}
+        weekdays[weekday.value] = _weekday_from_frontend(weekday_data=weekday_data)
+        profiles[profile.value] = (
+            profile_obj.model_copy(update={"weekdays": weekdays})
+            if profile_obj is not None
+            else ClimateProfile(weekdays=weekdays)
+        )
+        await self._put_profiles(schedule=schedule, profiles=profiles)
+
+    async def set_schedule_profile(self, *, profile: ScheduleProfile, profile_data: dict[str, Any]) -> None:
+        """Write a whole profile (``{weekday: {...}}``) back to the daemon."""
+        schedule = await self._reload_schedule()
+        profiles = dict(schedule.profiles or {})
+        profiles[profile.value] = ClimateProfile(
+            weekdays={
+                weekday_key: _weekday_from_frontend(weekday_data=weekday_data)
+                for weekday_key, weekday_data in profile_data.items()
+            }
+        )
+        await self._put_profiles(schedule=schedule, profiles=profiles)
+
+    async def set_schedule(self, *, schedule_data: dict[str, Any]) -> None:
+        """Write the whole climate schedule (``{profile: {weekday: {...}}}``) back to the daemon."""
+        schedule = await self._reload_schedule()
+        profiles = {
+            profile_key: ClimateProfile(
+                weekdays={
+                    weekday_key: _weekday_from_frontend(weekday_data=weekday_data)
+                    for weekday_key, weekday_data in profile_data.items()
+                }
+            )
+            for profile_key, profile_data in schedule_data.items()
+        }
+        await self._put_profiles(schedule=schedule, profiles=profiles)
+
+    async def _put_profiles(self, *, schedule: Schedule, profiles: dict[str, ClimateProfile]) -> None:
+        """Persist an updated profile map to the daemon and refresh the cache."""
+        new_schedule = schedule.model_copy(update={"profiles": profiles})
+        await self._schedules_ops.put_channel_schedule(
+            address=self._device.address, channel=self._channel_no, schedule=new_schedule
+        )
+        self.update_from(schedule=new_schedule)
+
+    # ---- cross-device copy ----
+
+    async def copy_schedule(self, *, target_data_point: ClimateWeekProfileDp) -> None:
+        """Copy the whole schedule to another climate device."""
+        await self._schedules_ops.copy_schedule(
+            src_address=self._device.address, dst_address=target_data_point.device.address
+        )
+
+    async def copy_schedule_profile(
+        self,
+        *,
+        source_profile: ScheduleProfile,
+        target_profile: ScheduleProfile,
+        target_data_point: ClimateWeekProfileDp | None = None,
+    ) -> None:
+        """Copy one profile to another profile (on this or a target device)."""
+        target = target_data_point or self
+        await self._schedules_ops.copy_climate_profile(
+            src_channel_address=self.schedule_channel_address,
+            src_profile=_profile_index(profile=source_profile),
+            dst_channel_address=target.schedule_channel_address,
+            dst_profile=_profile_index(profile=target_profile),
+        )
+
+
+def _to_schedule_profile(*, value: Any, default: ScheduleProfile | None) -> ScheduleProfile | None:
+    """Map a wire profile string (``"P1"``…) to a ``ScheduleProfile`` enum, falling back to ``default``."""
+    if value is None:
+        return default
+    try:
+        return ScheduleProfile(str(value))
+    except ValueError:
+        return default
+
+
+def _profile_index(*, profile: ScheduleProfile) -> int:
+    """Return the 1-based profile index (``P1`` → ``1``) the daemon copy endpoint expects."""
+    return int(profile.value[1:])
 
 
 class ScheduleChannelSwitch(_ScheduleEntityBase):
@@ -382,4 +770,4 @@ class ScheduleChannelSwitch(_ScheduleEntityBase):
         self._modified = datetime.now(tz=UTC)
 
 
-__all__ = ["ScheduleChannelSwitch", "WeekProfileDp"]
+__all__ = ["ClimateWeekProfileDp", "ScheduleChannelSwitch", "WeekProfileDp"]

@@ -1,3 +1,36 @@
+# Version 2026.7.8 (2026-07-13)
+
+Tracks the `openccu-loom-types` 0.1.55 build (daemon API 2.18.0 → 2.19.0,
+openccu-loom 0.40.0). Unlike the last few maintenance bumps this one is **not**
+wire-neutral: the daemon now surfaces per-CCU **operational readiness**, which
+lands as one new broadcast and one new _required_ REST field, so the client
+needs matching bindings.
+
+(0.1.55 is generated from openccu-loom **v0.39.0**, which is where readiness
+landed; **v0.40.0 is contract-identical** — same API 2.19.0, no `openapi.yaml`
+/ `pkg/hmapi` delta, its only change being a daemon-internal JSON-RPC session
+-leak fix. So this types build is the right pin for a 0.40.0 daemon.)
+
+- Feat: **bind the new `central.readiness_changed` broadcast** as
+  `CentralReadinessChangedEvent` (payload `CentralReadinessChangedPayload`:
+  `central`, `phase`, `ready`, `interfaces_loaded`, `interfaces_total`; routed
+  on the central name like `CentralStateChangedEvent`). The daemon reports the
+  southbound bring-up phase (`waiting_for_ccu` → `loading_hub` →
+  `loading_devices` → `ready`) plus the latched `ready` flag and interface
+  wiring progress, so consumers can gate on real readiness instead of inferring
+  it from the lifecycle state alone. This also closes the registry-coverage
+  drift check, which had started failing as soon as the daemon advertised the
+  broadcast.
+- Chore: **bump `openccu-loom-types` to 0.1.55.** The breaking part of the wire
+  delta is a new **required** `readiness` object on `SystemCCUEntry`
+  (`GET /system/ccu`) — a `Readiness` model (`phase`, `ready`,
+  `interfaces_loaded`, `interfaces_total`) plus the `Phase` / `ReadinessPhase`
+  enums. `SystemCCUEntry` is validated as a whole (`system.list_system_ccus`),
+  so an entry without it now fails validation; this release adds the field to
+  the fixtures and keeps the pass-through untouched. Note this is what broke
+  the serial read-out (`_refresh_system_information` parses `/system/ccu`)
+  against a 0.1.55-shaped payload.
+
 # Version 2026.7.7 (2026-07-12)
 
 Maintenance release tracking the daemon's `openccu-loom-types` 0.1.54 build
