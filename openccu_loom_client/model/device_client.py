@@ -21,6 +21,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, Final
 
+from openccu_loom_client.exceptions import LoomUnsupportedOperationError
 from openccu_loom_client.operations.datapoints import DataPointsOperations
 from openccu_loom_client.operations.links import LinksOperations
 
@@ -87,14 +88,46 @@ class DeviceClient:
         return await self._links.get_link_paramset(address=channel_address, peer=token)
 
     async def put_paramset(
-        self, *, channel_address: str, paramset_key: Any, values: dict[str, Any], **_kwargs: Any
+        self,
+        *,
+        channel_address: str,
+        values: dict[str, Any],
+        paramset_key: Any = None,
+        paramset_key_or_link_address: Any = None,
+        **_kwargs: Any,
     ) -> None:
-        """Write a whole paramset; a peer-address ``paramset_key`` writes the link paramset."""
-        token = _paramset_token(paramset_key=paramset_key)
+        """
+        Write a whole paramset; a peer-address key writes the link paramset.
+
+        ``homematicip_local`` spells the selector ``paramset_key_or_link_address``
+        on the *write* path (``ws_put_link_paramset``) and ``paramset_key`` on the
+        read path — mirroring aiohomematic. Both are accepted; a plain
+        ``MASTER``/``VALUES`` token goes to the data-point paramset, anything else
+        is a peer channel address and routes to the LINK paramset.
+        """
+        selector = paramset_key_or_link_address if paramset_key_or_link_address is not None else paramset_key
+        if selector is None:
+            raise ValueError("put_paramset requires paramset_key (or paramset_key_or_link_address)")
+        token = _paramset_token(paramset_key=selector)
         if token in _PARAMSET_KEYS:
             await self._datapoints.put_paramset(address=channel_address, paramset_key=token, values=values)
             return
         await self._links.put_link_paramset(address=channel_address, peer=token, values=values)
+
+    async def determine_parameter(self, *, channel_address: str, parameter: str, **_kwargs: Any) -> Any:
+        """
+        Auto-detect a parameter value from the device.
+
+        Not supported on the loom backend: the daemon exposes no
+        determine-parameter endpoint (aiohomematic drives it over raw XML-RPC).
+        Raised as a loom exception rather than an ``AttributeError`` so
+        ``ws_determine_parameter``'s ``except BaseHomematicException`` catches it
+        and reports ``determine_failed`` with this message, instead of leaking a
+        bare ``unknown_error`` to the config panel.
+        """
+        raise LoomUnsupportedOperationError(
+            f"determine_parameter({channel_address}/{parameter}) is not supported by the openccu-loom daemon"
+        )
 
     async def get_link_peers(self, *, channel_address: str, **_kwargs: Any) -> tuple[str, ...]:
         """Return the channel addresses directly linked to ``channel_address``."""

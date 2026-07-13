@@ -207,15 +207,61 @@ class TestDeviceClientLinks:
         assert result == {"SHORT_ON_TIME": 5}
         assert _find_get(mock).path == "/api/v1/devices/VCU1:1/link-ps/VCU2:3"
 
+    @staticmethod
+    def _arm_link_write(mock) -> None:
+        """Arm the edit-lock gated LINK-paramset write: open the session, write, release."""
+        mock.post(
+            "/api/v1/sessions/edit",
+            payload={
+                "token": "tok-abc",
+                "key": "channel:VCU1:1:LINK:VCU2:3",
+                "expires": "2026-07-13T12:00:00Z",
+            },
+        )
+        mock.put("/api/v1/devices/VCU1:1/link-ps/VCU2:3", status=202)
+        mock.delete("/api/v1/sessions/edit", status=204)
+
     async def test_put_paramset_with_peer_writes_link_paramset(self, http) -> None:
         t, mock = http
-        mock.put("/api/v1/devices/VCU1:1/link-ps/VCU2:3", status=202)
+        self._arm_link_write(mock)
         await DeviceClient(transport=t, device_address="VCU1").put_paramset(
             channel_address="VCU1:1", paramset_key="VCU2:3", values={"SHORT_ON_TIME": 9}
         )
         put = _find_call(mock, "PUT")
         assert put.path == "/api/v1/devices/VCU1:1/link-ps/VCU2:3"
         assert put.json() == {"SHORT_ON_TIME": 9}
+        # Without the edit token the daemon rejects a LINK write with 423 Locked.
+        assert put.headers.get("X-Edit-Token") == "tok-abc"
+        # The lock is opened on the peer's key and released again.
+        opened = _find_call(mock, "POST")
+        assert opened.json() == {"key": "channel:VCU1:1:LINK:VCU2:3"}
+        assert _find_call(mock, "DELETE").path == "/api/v1/sessions/edit"
+
+    async def test_put_paramset_accepts_the_handlers_link_address_kwarg(self, http) -> None:
+        """ws_put_link_paramset spells the selector `paramset_key_or_link_address`."""
+        t, mock = http
+        self._arm_link_write(mock)
+        await DeviceClient(transport=t, device_address="VCU1").put_paramset(
+            channel_address="VCU1:1",
+            paramset_key_or_link_address="VCU2:3",
+            values={"SHORT_ON_TIME": 9},
+            check_against_pd=True,
+        )
+        assert _find_call(mock, "PUT").path == "/api/v1/devices/VCU1:1/link-ps/VCU2:3"
+
+    async def test_determine_parameter_is_a_catchable_unsupported_error(self, http) -> None:
+        """The daemon has no determine endpoint; an AttributeError would leak an unknown_error."""
+        from aiohomematic.exceptions import BaseHomematicException
+
+        from openccu_loom_client.exceptions import LoomUnsupportedOperationError
+
+        t, _mock = http
+        client = DeviceClient(transport=t, device_address="VCU1")
+        with pytest.raises(LoomUnsupportedOperationError) as excinfo:
+            await client.determine_parameter(channel_address="VCU1:1", parameter="SHORT_ON_TIME")
+        # The handler's `except BaseHomematicException` must catch it.
+        assert isinstance(excinfo.value, BaseHomematicException)
+        assert "not supported" in str(excinfo.value)
 
     async def test_get_link_peers_filters_both_directions(self, http) -> None:
         t, mock = http

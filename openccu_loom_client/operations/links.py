@@ -22,11 +22,14 @@ paramset is a free-form ``map[string]any`` and stays a dict.
 
 from __future__ import annotations
 
+import contextlib
 from typing import Any
 
 from openccu_loom_types.rest import AddLinkRequest, CentralLinksStatus, Link
 
+from openccu_loom_client.exceptions import BaseLoomException
 from openccu_loom_client.operations._base import _OperationsBase
+from openccu_loom_client.operations.sessions import SessionsOperations
 
 
 class LinksOperations(_OperationsBase):
@@ -106,14 +109,28 @@ class LinksOperations(_OperationsBase):
         """
         Write the LINK paramset to a peer.
 
-        Wire: ``PUT /devices/{addr}/link-ps/{peer}``.
+        Wire: ``PUT /devices/{addr}/link-ps/{peer}``. A LINK paramset is
+        per-peer configuration behind the daemon's per-resource **edit lock**:
+        without a valid ``X-Edit-Token`` for the key
+        ``channel:{addr}:LINK:{peer}`` the daemon rejects the write with
+        ``423 Locked``. So the lock is opened, the write performed, and the lock
+        released again — even if the write fails.
         """
-        await self._transport.request(
-            method="PUT",
-            path=f"/devices/{address}/link-ps/{peer}",
-            json_body=values,
-            allow_retry=True,
-        )
+        sessions = SessionsOperations(transport=self._transport)
+        session = await sessions.acquire(key=f"channel:{address}:LINK:{peer}")
+        token = session.get("token")
+        try:
+            await self._transport.request(
+                method="PUT",
+                path=f"/devices/{address}/link-ps/{peer}",
+                json_body=values,
+                headers={"X-Edit-Token": token} if token else None,
+                allow_retry=True,
+            )
+        finally:
+            # Never let a release failure mask the write's own outcome.
+            with contextlib.suppress(BaseLoomException):
+                await sessions.release()
 
     async def linkable_channels(
         self,

@@ -174,6 +174,22 @@ class DiagnosticsOperations(_OperationsBase):
 
     # ---- incidents / metrics ----
 
+    async def clear_cache(self, *, kind: str = "global") -> None:
+        """
+        Clear the CCU-derivable caches and let the daemon re-pull them fresh.
+
+        Wire: ``POST /admin/cache/clear`` with a ``CacheClearRequest``. This is
+        the daemon analogue of aiohomematic's ``clear_all`` (device + paramset
+        descriptions, device details, data cache) — a values-cache reset alone
+        only covers a fraction of it.
+        """
+        await self._transport.request(
+            method="POST",
+            path="/admin/cache/clear",
+            json_body={"kind": kind},
+            allow_retry=False,
+        )
+
     async def clear_incidents(self) -> None:
         """
         Drop the daemon's recorded incidents.
