@@ -149,6 +149,8 @@ _CCU_ENTRY = {
     "is_ha_app": False,
     "configured_interfaces": [],
     "serial": "0000DAEMON1234",  # daemon-reported serial → suffix daemon1234
+    # Required since types 0.1.55 / daemon api 2.19.0.
+    "readiness": {"phase": "ready", "ready": True, "interfaces_loaded": 1, "interfaces_total": 1},
 }
 
 
