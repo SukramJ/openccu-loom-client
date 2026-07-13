@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import logging
@@ -50,7 +51,9 @@ from openccu_loom_types.enums import CentralState, DataPointCategory
 from openccu_loom_client.compat.aiohomematic._upstream import (
     DataPointCategory as AioDataPointCategory,
     DataPointsCreatedEvent as AioDataPointsCreatedEvent,
+    DeviceLink,
     EventBus as AioEventBus,
+    LinkableChannel,
     Looper,
     validate_paramset,
 )
@@ -77,6 +80,7 @@ from openccu_loom_client.compat.aiohomematic.model.week_profile import (
     ScheduleChannelSwitch,
     WeekProfileDp,
 )
+from openccu_loom_client.exceptions import BaseLoomException
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
@@ -452,37 +456,118 @@ class _JsonRpcClient:
         await self._client.devices.patch_device(address=address, name=name)
 
 
+# The daemon's wire `Link` / `LinkableChannel` models are field-for-field
+# identical to aiohomematic's `DeviceLink` / `LinkableChannel` dataclasses, so
+# the conversion is a straight copy. It has to happen, though:
+# `homematicip_local`'s link handlers call `dataclasses.asdict()` on whatever
+# the coordinator returns, which throws on a pydantic model.
+_DEVICE_LINK_INT_FIELDS: Final = frozenset({"flags"})
+
+
+def _as_dict(*, entry: Any) -> dict[str, Any]:
+    """Return a wire model (or plain mapping) as a dict."""
+    return dict(entry.model_dump(mode="json")) if hasattr(entry, "model_dump") else dict(entry)
+
+
+def _to_device_link(*, link: Any) -> DeviceLink:
+    """Convert a wire ``Link`` into aiohomematic's ``DeviceLink`` dataclass."""
+    data = _as_dict(entry=link)
+    values: dict[str, Any] = {}
+    for field in dataclasses.fields(DeviceLink):
+        value = data.get(field.name)
+        if value is None:
+            # The dataclass types the optional wire fields as plain str / int.
+            value = 0 if field.name in _DEVICE_LINK_INT_FIELDS else ""
+        values[field.name] = value
+    return DeviceLink(**values)
+
+
+def _to_linkable_channel(*, entry: Any) -> LinkableChannel:
+    """Convert a wire ``LinkableChannel`` into aiohomematic's dataclass."""
+    data = _as_dict(entry=entry)
+    return LinkableChannel(
+        **{field.name: (data.get(field.name) or "") for field in dataclasses.fields(LinkableChannel)}
+    )
+
+
 class _LinkCoordinator:
-    """``central.link`` surface (direct links)."""
+    """
+    ``central.link`` surface (direct links).
+
+    Signatures mirror aiohomematic's ``LinkCoordinator`` exactly — the HA
+    handlers address channels by full ``"<device>:<channel>"`` address, expect a
+    ``bool`` back from the mutations (they render ``add_link_failed`` /
+    ``remove_link_failed`` on a falsy result) and call ``dataclasses.asdict()``
+    on the read results.
+    """
 
     def __init__(self, *, client: LoomClient) -> None:
         self._client = client
 
-    async def add_link(self, *, address: str, sender_address: str, receiver_address: str, **kwargs: Any) -> None:
-        await self._client.links.add_link(
-            address=address,
-            sender_address=sender_address,
-            receiver_address=receiver_address,
-            name=kwargs.get("name"),
-            description=kwargs.get("description"),
-        )
+    async def add_link(
+        self,
+        *,
+        sender_channel_address: str,
+        receiver_channel_address: str,
+        name: str = "",
+        description: str = "created by HA",
+    ) -> bool:
+        """Create a direct link (sender → receiver). Returns ``False`` on a daemon refusal."""
+        device, _ = _split_channel_address(channel_address=sender_channel_address)
+        try:
+            await self._client.links.add_link(
+                address=device,
+                sender_address=sender_channel_address,
+                receiver_address=receiver_channel_address,
+                name=name or f"{sender_channel_address} -> {receiver_channel_address}",
+                description=description,
+            )
+        except BaseLoomException:
+            _LOGGER.debug("add_link %s -> %s failed", sender_channel_address, receiver_channel_address, exc_info=True)
+            return False
+        return True
 
-    async def remove_link(self, *, address: str, sender: str, receiver: str) -> None:
-        await self._client.links.remove_link(address=address, sender=sender, receiver=receiver)
+    async def remove_link(self, *, sender_channel_address: str, receiver_channel_address: str) -> bool:
+        """Remove a direct link. Returns ``False`` on a daemon refusal."""
+        device, _ = _split_channel_address(channel_address=sender_channel_address)
+        try:
+            await self._client.links.remove_link(
+                address=device, sender=sender_channel_address, receiver=receiver_channel_address
+            )
+        except BaseLoomException:
+            _LOGGER.debug(
+                "remove_link %s -> %s failed", sender_channel_address, receiver_channel_address, exc_info=True
+            )
+            return False
+        return True
 
-    async def get_device_links(self, *, address: str, locale: str = "en") -> Any:
-        return await self._client.links.list_links(address=address, locale=locale)
+    async def get_device_links(self, *, device_address: str, locale: str = "en") -> tuple[DeviceLink, ...]:
+        """Return the device's direct links as aiohomematic ``DeviceLink`` dataclasses."""
+        links = await self._client.links.list_links(address=device_address, locale=locale)
+        return tuple(_to_device_link(link=link) for link in links)
 
     async def get_linkable_channels(
-        self, *, address: str, channel: int, role: str, interface: str, locale: str = "en"
-    ) -> Any:
-        return await self._client.links.linkable_channels(
-            address=address,
+        self, *, interface_id: str, source_channel_address: str, role: str, locale: str = "en"
+    ) -> tuple[LinkableChannel, ...]:
+        """
+        Return the channels eligible to link against ``source_channel_address``.
+
+        Async on the loom backend (the daemon computes the candidates from the
+        link-peer role metadata, which the client store does not hold), whereas
+        aiohomematic answers it synchronously from its cached model. The HA
+        handler dual-awaits via ``isawaitable``, the same accommodation it
+        already makes for ``get_paramset_description``.
+        """
+        device, channel = _split_channel_address(channel_address=source_channel_address)
+        payload = await self._client.links.linkable_channels(
+            address=device,
             channel=channel,
             role=role,
-            interface=interface,
+            interface=interface_id,
             locale=locale,
         )
+        entries = payload.get("channels", []) if isinstance(payload, dict) else (payload or [])
+        return tuple(_to_linkable_channel(entry=entry) for entry in entries)
 
 
 def _paramset_token(*, paramset_key: Any) -> str:

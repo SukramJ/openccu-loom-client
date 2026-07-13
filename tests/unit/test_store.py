@@ -839,3 +839,86 @@ class TestCustomDataPointChannelIndex:
         )
         assert store.get_custom_data_point_by_channel(address="VCU0001", channel_no=1) is None
         assert store.get_custom_data_point_by_channel(address="VCU0001", channel_no=3) is None
+
+
+class TestAiohomematicModelCompat:
+    """
+    Device/Channel members `homematicip_local`'s config + link handlers read.
+
+    The handlers address channels by full ``"<device>:<channel>"`` address and
+    read ``channel.type_name`` / ``device.sub_model`` (aiohomematic's spelling)
+    when building the config form and the link views.
+    """
+
+    @staticmethod
+    def _store_with_channel() -> LoomStore:
+        store = LoomStore()
+        store.set_serial(serial="ABC1234567")
+        store.set_central_name(central_name="home")
+        store.attach_device_detail(
+            detail=DeviceDetail.model_validate(
+                {
+                    "address": "VCU1",
+                    "interface": "HmIP-RF",
+                    "interface_id": "home-HmIP-RF",
+                    "model": "HmIP-PS",
+                    "sub_model": "VARIANT-B",
+                    "name": "Lamp",
+                    "available": True,
+                    "channels_count": 1,
+                    "updatable": False,
+                    "update_available": False,
+                    "master_pushes_config_pending": False,
+                    "has_sub_devices": False,
+                    "firmware": {},
+                    "availability": {},
+                    "channels": [
+                        {
+                            "address": "VCU1:3",
+                            "number": 3,
+                            "name": "Ch3",
+                            "type": "SWITCH_VIRTUAL_RECEIVER",
+                            "type_label": "Switch",
+                            "paramset_key": "VALUES",
+                            "paramset_keys": ["VALUES", "MASTER"],
+                            "data_points_count": 0,
+                            "is_group_master": False,
+                            "is_in_multi_group": False,
+                            "is_custom_dp_primary": False,
+                            "data_points": [],
+                        }
+                    ],
+                }
+            )
+        )
+        return store
+
+    def test_get_channel_by_channel_address(self) -> None:
+        device = self._store_with_channel().get_device(address="VCU1")
+        assert device is not None
+        channel = device.get_channel(channel_address="VCU1:3")
+        assert channel is not None
+        assert channel.address == "VCU1:3"
+
+    def test_get_channel_by_number_still_works(self) -> None:
+        """The loom-internal callers pass `number` — it must keep resolving."""
+        device = self._store_with_channel().get_device(address="VCU1")
+        assert device is not None
+        channel = device.get_channel(number=3)
+        assert channel is not None
+        assert channel.address == "VCU1:3"
+
+    def test_foreign_or_malformed_channel_address_is_none(self) -> None:
+        device = self._store_with_channel().get_device(address="VCU1")
+        assert device is not None
+        assert device.get_channel(channel_address="OTHER:3") is None
+        assert device.get_channel(channel_address="VCU1:xx") is None
+        assert device.get_channel() is None
+
+    def test_type_name_and_sub_model(self) -> None:
+        device = self._store_with_channel().get_device(address="VCU1")
+        assert device is not None
+        assert device.sub_model == "VARIANT-B"
+        channel = device.get_channel(channel_address="VCU1:3")
+        assert channel is not None
+        assert channel.type_name == "SWITCH_VIRTUAL_RECEIVER"

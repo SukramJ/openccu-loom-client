@@ -9,12 +9,23 @@ response. The `type` field is one of a fixed set of URIs declared in
 ``openccu_loom_types.rest.Code`` — this module maps each URI to a
 typed Python exception so consumers can ``except`` on the failure
 class rather than parse the status code or URI themselves.
+
+The hierarchy is rooted in aiohomematic's ``BaseHomematicException`` (a hard
+runtime dependency — see CLAUDE.md "alternative backend"). That is load-bearing
+for the HA integration: ``homematicip_local`` catches
+``aiohomematic.exceptions.BaseHomematicException`` — the *real* aiohomematic
+class, not the compat shim's alias — around every backend call, and maps it to a
+typed websocket error (``write_failed``, ``read_failed``, …). A loom exception
+that did not derive from it escaped those handlers and surfaced to the config
+panel as a generic ``unknown_error``, losing both the error code and the
+daemon's problem+json title.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
+from aiohomematic.exceptions import BaseHomematicException
 from openccu_loom_types.rest import Code, Problem
 
 # Stable problem-type URI prefix the daemon uses for its error catalogue.
@@ -22,8 +33,20 @@ from openccu_loom_types.rest import Code, Problem
 _PROBLEM_URI_PREFIX = "https://openccu-loom.dev/errors/"
 
 
-class BaseLoomException(Exception):
+class BaseLoomException(BaseHomematicException):
     """Base class for all exceptions raised by this package."""
+
+    def __init__(self, *args: Any) -> None:
+        """
+        Initialize with the concrete class name, mirroring aiohomematic's convention.
+
+        aiohomematic's base takes a leading ``name`` argument and reduces the
+        remainder to the message (``ClientException("boom")`` → ``name`` =
+        ``"ClientException"``, ``str(err)`` = ``"boom"``). Passing the concrete
+        class name here keeps ``str(err)`` — which the HA handlers forward as the
+        websocket error message — exactly what the raiser wrote.
+        """
+        super().__init__(type(self).__name__, *args)
 
 
 class LoomTransportError(BaseLoomException):

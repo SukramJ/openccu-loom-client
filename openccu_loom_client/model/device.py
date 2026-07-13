@@ -112,6 +112,16 @@ class Device:
         return self._summary.model
 
     @property
+    def sub_model(self) -> str | None:
+        """
+        Return the device sub-model, or ``None``.
+
+        Mirrors aiohomematic's ``Device.sub_model`` — the config panel's form
+        generator takes it to pick model-variant-specific field metadata.
+        """
+        return self._summary.sub_model
+
+    @property
     def icon(self) -> str | None:
         """
         Return the icon filename for the device model, or ``None``.
@@ -316,8 +326,23 @@ class Device:
         """Return a mapping-like view over this device's channels."""
         return _ChannelsView(store=self._store, device_address=self.address)
 
-    def get_channel(self, *, number: int) -> Channel | None:
-        """Return one channel by number, or ``None`` if absent."""
+    def get_channel(self, *, number: int | None = None, channel_address: str | None = None) -> Channel | None:
+        """
+        Return one channel by number, or by full channel address.
+
+        ``channel_address`` is aiohomematic's lookup key (``Device.get_channel``
+        takes ``"ABC1234567:3"``), which ``homematicip_local``'s config/link
+        handlers pass straight through; ``number`` is the loom-internal form.
+        A foreign or malformed address resolves to ``None``, like the reference's
+        keyed dict lookup.
+        """
+        if channel_address is not None:
+            address, _, channel = channel_address.partition(":")
+            if address != self.address or not channel.isdigit():
+                return None
+            number = int(channel)
+        if number is None:
+            return None
         return self._store.get_channel(address=self.address, number=number)
 
     # ---- mutation hooks (called by the store) ----
