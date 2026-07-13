@@ -58,6 +58,18 @@ class LoomTransportError(BaseLoomException):
     """
 
 
+class LoomUnsupportedOperationError(BaseLoomException):
+    """
+    The operation has no equivalent on the daemon-mediated backend.
+
+    Not an HTTP failure — the request is never made. Raised where aiohomematic
+    drives the CCU over raw XML-RPC and the daemon exposes no endpoint for it
+    (e.g. ``determine_parameter``). Being a :class:`BaseLoomException` it is an
+    aiohomematic exception too, so ``homematicip_local``'s handlers catch it and
+    render their own typed error rather than a generic ``unknown_error``.
+    """
+
+
 class LoomHttpError(BaseLoomException):
     """
     The daemon answered with a non-2xx status.

@@ -1,7 +1,9 @@
 # Version 2026.7.10 (2026-07-13)
 
-Frontend compat, part 3: the **CCU dashboard**. It was unreachable on a loom
-entry and, once reachable, most of its commands broke on shape mismatches.
+Frontend compat, parts 3 + 4: the **CCU dashboard**, plus the tail of the audit
+(direct-link paramset writes, the unsupported `determine_parameter`, and the
+cache-clear scope). The dashboard was unreachable on a loom entry and, once
+reachable, most of its commands broke on shape mismatches.
 
 - Fix: **the CCU tab was hidden on loom entries.** The config panel gates it on
   `permissions.backend === "CCU"`, and `backend` is `central.model` — which the
@@ -32,6 +34,31 @@ attribute 'to_dict'`); `client_coordinator.clients` yields records with
   record spells them PascalCase), `Device.firmware_updatable`,
   `Device.get_generic_data_point(parameter=…)` (the signal-quality view looks the
   RSSI up by bare parameter) and `Device.update_firmware()` → `bool`.
+
+- Fix: **a LINK-paramset write now takes the daemon's edit lock.** The daemon
+  gates `PUT /devices/{addr}/link-ps/{peer}` behind a per-resource edit lock and
+  rejects a token-less write with `423 Locked`. `LinksOperations.put_link_paramset`
+  opens the session (`POST /sessions/edit`, key `channel:{addr}:LINK:{peer}`),
+  passes the token as `X-Edit-Token` and releases the lock again — even when the
+  write fails.
+- Fix: **`DeviceClient.put_paramset` accepts `paramset_key_or_link_address`.**
+  `homematicip_local` spells the selector that way on the _write_ path
+  (`ws_put_link_paramset`) and `paramset_key` on the read path, mirroring
+  aiohomematic. The write previously died with a `TypeError` at argument binding
+  (the required `paramset_key` was never passed) before the daemon was reached.
+- Fix: **`DeviceClient.determine_parameter` raises a catchable error.** The
+  daemon exposes no determine-parameter endpoint (aiohomematic drives it over
+  raw XML-RPC), and the missing method surfaced as an `AttributeError` — which
+  escapes `except BaseHomematicException` and reaches the panel as a generic
+  `unknown_error`. It now raises the new `LoomUnsupportedOperationError` (a
+  `BaseLoomException`, hence an aiohomematic exception), so the handler reports
+  `determine_failed` with a message that says why. Real support needs a daemon
+  endpoint.
+- Fix: **`cache_coordinator.clear_all` clears what aiohomematic clears.** It
+  reset only the daemon's persistent VALUES cache, whereas the reference drops
+  device + paramset descriptions, device details and the data cache. It now calls
+  the daemon's `POST /admin/cache/clear`; the narrower values-cache reset stays
+  available on `client.diagnostics.reset_values_cache`.
 
 # Version 2026.7.9 (2026-07-13)
 

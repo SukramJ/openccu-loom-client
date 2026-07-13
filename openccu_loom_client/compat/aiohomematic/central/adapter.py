@@ -494,7 +494,15 @@ class _CacheCoordinator:
         self._recorder = _Recorder(client=client)
 
     async def clear_all(self) -> None:
-        await self._client.diagnostics.reset_values_cache()
+        """
+        Clear the CCU-derivable caches.
+
+        Mirrors aiohomematic's ``clear_all`` scope (device + paramset
+        descriptions, device details, data cache) via the daemon's
+        ``POST /admin/cache/clear``. The narrower values-cache reset stays
+        available on ``client.diagnostics.reset_values_cache``.
+        """
+        await self._client.diagnostics.clear_cache()
 
     @property
     def incident_store(self) -> _IncidentStore:

@@ -34,6 +34,7 @@ from openccu_loom_client.exceptions import (
     LoomServiceUnreadyError,
     LoomTransportError,
     LoomUnsupportedError,
+    LoomUnsupportedOperationError,
     LoomUpstreamUnavailableError,
     LoomValidationError,
 )
@@ -58,6 +59,7 @@ __all__ = [
     "LoomStore",
     "LoomTransportError",
     "LoomUnsupportedError",
+    "LoomUnsupportedOperationError",
     "LoomUpstreamUnavailableError",
     "LoomValidationError",
     "SessionAuth",
