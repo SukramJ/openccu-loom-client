@@ -37,6 +37,7 @@ from aiohomematic.central.events import (
     EventBus,
     OptimisticRollbackEvent,
 )
+from aiohomematic.central.health import CentralHealth
 from aiohomematic.const import (
     HUB_ADDRESS,
     INSTALL_MODE_ADDRESS,
@@ -46,15 +47,18 @@ from aiohomematic.const import (
     CallSource,
     CCUType,
     CentralState,
+    ClientState,
     DataPointCategory,
     DataPointKey,
     DataPointUsage,
     DeviceTriggerEventType,
     InboxDeviceData,
+    Interface,
     ParamsetKey,
     ScheduleField,
     ScheduleProfile,
     ServiceMessageData,
+    SystemInformation,
     WeekdayStr,
 )
 from aiohomematic.model.custom import ClimateMode, ClimateProfile
@@ -69,8 +73,10 @@ __all__ = [
     "AlarmMessageData",
     "CCUType",
     "CallSource",
+    "CentralHealth",
     "CentralState",
     "CentralStateChangedEvent",
+    "ClientState",
     "ClimateMode",
     "ClimateProfile",
     "DataPointCategory",
@@ -85,6 +91,7 @@ __all__ = [
     "DeviceTriggerEventType",
     "EventBus",
     "InboxDeviceData",
+    "Interface",
     "LinkableChannel",
     "Looper",
     "OptimisticRollbackEvent",
@@ -92,6 +99,7 @@ __all__ = [
     "ScheduleField",
     "ScheduleProfile",
     "ServiceMessageData",
+    "SystemInformation",
     "TargetChannelInfo",
     "WeekdayStr",
     "validate_paramset",

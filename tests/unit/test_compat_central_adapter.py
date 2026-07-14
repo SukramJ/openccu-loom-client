@@ -30,7 +30,6 @@ from openccu_loom_client.compat.aiohomematic.central import CentralConfig, check
 from openccu_loom_client.compat.aiohomematic.central.adapter import (
     _ClientCoordinator,
     _Configuration,
-    _HealthSnapshot,
     _IncidentStore,
     _JsonRpcClient,
     _LinkCoordinator,
@@ -981,10 +980,30 @@ class TestIntegrationDashboardSurface:
         # The daemon serialises commands itself — throttling is honestly reported as off.
         assert stats["home:HmIP-RF"] == {"interval": 0.0, "is_enabled": False, "queue_size": 0}
 
-    def test_health_snapshot_to_dict(self) -> None:
-        """ws_get_system_health calls central.health.to_dict() — no await, so health is a property."""
-        assert _HealthSnapshot(payload=None).to_dict() == {}
-        assert _HealthSnapshot(payload={"status": "ok"}).to_dict() == {"status": "ok"}
+    async def test_health_is_the_shape_the_card_renders(self, connected) -> None:
+        """
+        The health card is typed against SystemHealthData: central_state + overall_health_score.
+
+        ws_get_system_health does `central.health.to_dict()` (no await), and the
+        daemon's own /health probe ({status, components}) carries none of the
+        fields the card reads — so the real upstream CentralHealth is built.
+        """
+        central, mock = connected
+        mock.get(
+            f"{_BASE}/interfaces",
+            payload=[
+                {"id": "home:HmIP-RF", "name": "HmIP-RF", "connected": True, "interface": "HmIP-RF"},
+                {"id": "home:BidCos-RF", "name": "BidCos-RF", "connected": False, "interface": "BidCos-RF"},
+            ],
+        )
+        await central.client_coordinator.refresh()
+        health = central.health.to_dict()
+        assert "central_state" in health
+        assert "overall_health_score" in health
+        # One of the two interfaces is connected.
+        assert health["healthy_clients"] == ["home:HmIP-RF"]
+        assert health["failed_clients"] == ["home:BidCos-RF"]
+        assert health["overall_health_score"] == 0.5
 
     async def test_incidents_by_interface_are_to_dict_able(self) -> None:
         incident = {"id": "1", "interface_id": "home:HmIP-RF", "severity": "warn", "summary": "s"}
