@@ -17,7 +17,6 @@ from __future__ import annotations
 import re
 from typing import Any, Final
 
-# ---- enum re-exports (single source of truth: openccu_loom_types) ----
 from openccu_loom_types.enums import (
     Backend,
     CacheType,
@@ -51,6 +50,9 @@ from openccu_loom_types.enums import (
     ProductGroup,
     ProgramTrigger,
 )
+
+# ---- enum re-exports (single source of truth: openccu_loom_types) ----
+from openccu_loom_client.compat.aiohomematic._upstream import CCUType as AiohomematicCCUType, SystemInformation
 
 # ---- config-key constants ----
 
@@ -167,31 +169,43 @@ class TimeoutConfig:
         self.command_throttle_interval = command_throttle_interval
 
 
-class SystemInformation:
-    """Stand-in for aiohomematic's system info bundle."""
+def make_system_information(
+    *,
+    serial: str | None = None,
+    version: str | None = None,
+    available_interfaces: tuple[str, ...] = (),
+    hostname: str | None = None,
+    is_ha_app: bool = False,
+    auth_enabled: bool | None = None,
+    https_redirect_enabled: bool | None = None,
+    ccu_type: Any = None,
+) -> SystemInformation:
+    """
+    Build aiohomematic's ``SystemInformation`` for the loom backend.
 
-    def __init__(
-        self,
-        *,
-        serial: str | None = None,
-        version: str | None = None,
-        available_interfaces: tuple[str, ...] = (),
-        ccu_type: Any = None,
-    ) -> None:
-        """Store the CCU serial, version, interfaces and CCU type."""
-        self.serial = serial
-        self.version = version
-        self.available_interfaces = available_interfaces
-        # The HA hub-update entity branches on
-        # ``system_information.ccu_type == CCUType.OPENCCU`` (release-notes
-        # URL); the loom daemon always fronts an OpenCCU-class central.
-        if ccu_type is None:
-            # aiohomematic's CCUType (distinct from the openccu_loom_types enum
-            # re-exported above) is the one that carries ``OPENCCU``.
-            from openccu_loom_client.compat.aiohomematic._upstream import CCUType as _AiohCCUType  # noqa: PLC0415
+    Reused rather than re-implemented on purpose: the CCU dashboard's
+    ``ws_get_system_information`` reads the *whole* bundle — including
+    ``hostname`` / ``auth_enabled`` / ``https_redirect_enabled`` and the
+    ``has_backup`` / ``has_system_update`` **computed properties** (derived from
+    ``ccu_type``). A hand-rolled stand-in that carried only serial/version/
+    interfaces/ccu_type raised ``AttributeError: hostname`` — and since that
+    command is part of the dashboard's ``Promise.all``, it took the whole CCU tab
+    down with it.
 
-            ccu_type = _AiohCCUType.OPENCCU
-        self.ccu_type = ccu_type
+    ``ccu_type`` defaults to ``OPENCCU``: the HA hub-update entity branches on it
+    for the release-notes URL, and the loom daemon always fronts an OpenCCU-class
+    central.
+    """
+    return SystemInformation(
+        serial=serial,
+        version=version or "",
+        available_interfaces=available_interfaces,
+        hostname=hostname or "",
+        is_ha_app=is_ha_app,
+        auth_enabled=auth_enabled,
+        https_redirect_enabled=https_redirect_enabled,
+        ccu_type=ccu_type if ccu_type is not None else AiohomematicCCUType.OPENCCU,
+    )
 
 
 # ---- helper: default port per interface ----

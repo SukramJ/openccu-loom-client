@@ -989,10 +989,36 @@ class TestSystemInformationCcuType:
     def test_defaults_to_openccu(self) -> None:
         from aiohomematic.const import CCUType
 
-        from openccu_loom_client.compat.aiohomematic.const import SystemInformation
+        from openccu_loom_client.compat.aiohomematic.const import make_system_information
 
-        info = SystemInformation(serial="ABC", version="3.87")
+        info = make_system_information(serial="ABC", version="3.87")
         assert info.ccu_type == CCUType.OPENCCU
+
+    def test_carries_the_whole_bundle_the_ccu_dashboard_reads(self) -> None:
+        """
+        ws_get_system_information reads every member — a missing one killed the CCU tab.
+
+        The handler is part of the dashboard's Promise.all, so an
+        ``AttributeError: hostname`` on the old hand-rolled stand-in took the
+        whole tab down. ``has_backup`` / ``has_system_update`` are computed from
+        ``ccu_type``, which is why the real upstream record is reused.
+        """
+        from openccu_loom_client.compat.aiohomematic.const import make_system_information
+
+        info = make_system_information(
+            serial="ABC",
+            version="3.87",
+            available_interfaces=("home:HmIP-RF",),
+            hostname="ccu.local",
+            auth_enabled=True,
+        )
+        assert info.hostname == "ccu.local"
+        assert info.auth_enabled is True
+        assert info.https_redirect_enabled is None
+        assert info.is_ha_app is False
+        # Computed from ccu_type == OPENCCU.
+        assert info.has_backup is True
+        assert info.has_system_update is True
 
 
 class TestCalculatedTranslatedName:

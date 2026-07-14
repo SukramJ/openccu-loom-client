@@ -1,3 +1,33 @@
+# Version 2026.7.11 (2026-07-14)
+
+Hotfix: the config panel's **CCU** and **Integration** tabs did not load at all
+on a loom-backed entry. Both dashboards fetch their sections in a single
+`Promise.all`, so one failing command takes the whole tab down — and each tab had
+exactly one.
+
+- Fix: **`system_information` was missing five of the eight members the CCU
+  dashboard reads.** The hand-rolled stand-in carried only
+  serial/version/available_interfaces/ccu_type, so `ws_get_system_information`
+  died with `AttributeError: hostname` — killing the entire CCU tab. It now
+  builds aiohomematic's **real `SystemInformation`** record, which also supplies
+  `auth_enabled` / `https_redirect_enabled` / `is_ha_app` and the `has_backup` /
+  `has_system_update` **computed properties** (derived from `ccu_type`).
+  `hostname` and `is_ha_app` come from the daemon's `/system/ccu` entry.
+- Fix: **`central.health` returned the daemon's health probe, not the shape the
+  card renders.** The integration dashboard's health card is typed against
+  `SystemHealthData` — `central_state` + `overall_health_score` + `client_health`
+  — which is what aiohomematic's `CentralHealth.to_dict()` emits. It was handed
+  the daemon's `{status, components}` probe instead, so the card found none of
+  its fields. `central.health` now builds the **real `CentralHealth`** from the
+  live state: the lifecycle state plus one connection record per wired interface
+  (connected → healthy), so `overall_health_score` and the healthy/failed client
+  lists are meaningful.
+- Chore: `client_coordinator` keeps the daemon's full per-interface state records
+  (`states`), not just the ids — the health record needs the `connected` flag.
+
+Both fixes reuse the upstream records instead of mirroring them, so the shape
+cannot drift from what `homematicip_local` reads.
+
 # Version 2026.7.10 (2026-07-13)
 
 Frontend compat, parts 3 + 4: the **CCU dashboard**, plus the tail of the audit

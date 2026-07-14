@@ -50,11 +50,15 @@ from openccu_loom_types.enums import CentralState, DataPointCategory
 
 from openccu_loom_client.compat.aiohomematic._upstream import (
     AlarmMessageData,
+    CentralHealth,
+    CentralState as AioCentralState,
+    ClientState as AioClientState,
     DataPointCategory as AioDataPointCategory,
     DataPointsCreatedEvent as AioDataPointsCreatedEvent,
     DeviceLink,
     EventBus as AioEventBus,
     InboxDeviceData,
+    Interface as AioInterface,
     LinkableChannel,
     Looper,
     ServiceMessageData,
@@ -67,7 +71,7 @@ from openccu_loom_client.compat.aiohomematic.central.configurable_devices import
 from openccu_loom_client.compat.aiohomematic.central.hub_coordinator import _HubCoordinator
 from openccu_loom_client.compat.aiohomematic.central.refresh import install_refresh_bridge
 from openccu_loom_client.compat.aiohomematic.central.state_paths import device_state_path, parse_device_state_path
-from openccu_loom_client.compat.aiohomematic.const import SystemInformation
+from openccu_loom_client.compat.aiohomematic.const import SystemInformation, make_system_information
 from openccu_loom_client.compat.aiohomematic.model.calculated import make_calculated_data_point
 from openccu_loom_client.compat.aiohomematic.model.combined import CombinedDurationDp, channel_has_duration_pair
 from openccu_loom_client.compat.aiohomematic.model.custom import (
@@ -340,10 +344,17 @@ class _ClientCoordinator:
     def __init__(self, *, client: LoomClient) -> None:
         self._client = client
         self._interface_ids: frozenset[str] = frozenset()
+        self._states: tuple[Any, ...] = ()
 
     async def refresh(self) -> None:
         states = await self._client.system.list_interfaces()
+        self._states = tuple(states)
         self._interface_ids = frozenset(i.id for i in states)
+
+    @property
+    def states(self) -> tuple[Any, ...]:
+        """Return the daemon's per-interface state records (id / interface / connected)."""
+        return self._states
 
     def has_client(self, *, interface_id: str) -> bool:
         return interface_id in self._interface_ids
@@ -399,19 +410,23 @@ class _InterfaceClient:
     command_throttle: _CommandThrottle = dataclasses.field(default_factory=_CommandThrottle)
 
 
-@dataclass(frozen=True, slots=True)
-class _HealthSnapshot:
-    """The daemon's last health report. The HA handler calls ``to_dict()`` on it."""
+def _to_aio_central_state(*, state: Any) -> AioCentralState:
+    """Map the loom lifecycle state onto aiohomematic's ``CentralState`` (same value vocabulary)."""
+    token = str(getattr(state, "value", state))
+    try:
+        return AioCentralState(token)
+    except ValueError:
+        return AioCentralState.STARTING
 
-    payload: Any = None
 
-    def to_dict(self) -> dict[str, Any]:
-        """Return the health report as a plain dict (empty before the first refresh)."""
-        if self.payload is None:
-            return {}
-        if hasattr(self.payload, "model_dump"):
-            return dict(self.payload.model_dump(mode="json"))
-        return dict(self.payload)
+def _to_aio_interface(*, value: Any) -> AioInterface | None:
+    """Map a daemon interface token (``HmIP-RF``) onto aiohomematic's ``Interface``, or ``None``."""
+    if value is None:
+        return None
+    try:
+        return AioInterface(str(getattr(value, "value", value)))
+    except ValueError:
+        return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -966,7 +981,7 @@ class LoomCentralAdapter:
         # the live keys match the one-time HA registry migration.
         self._serial = serial
         self._state: CentralState = CentralState.Stopped
-        self._system_information = SystemInformation()
+        self._system_information = make_system_information()
         # Make the store build categorised Dp* / CustomDp* instances so
         # HA-side isinstance dispatch works on the live objects. Must be
         # set before bootstrap() runs.
@@ -986,7 +1001,6 @@ class LoomCentralAdapter:
         # real aiohomematic EventBus (not the loom wire bus) as ``event_bus``
         # and the bridges publish real aiohomematic events onto it.
         self._looper: Final = Looper()
-        self._health: Any = None
         self._ha_bus: Final = AioEventBus(task_scheduler=self._looper)
         # Adapter-built data points without a store summary (week
         # profiles, schedule switches, combined numbers); shared with
@@ -1062,30 +1076,34 @@ class LoomCentralAdapter:
         return self._ha_bus
 
     @property
-    def health(self) -> _HealthSnapshot:
+    def health(self) -> CentralHealth:
         """
-        Return the daemon's health report.
+        Return the central's health as aiohomematic's ``CentralHealth``.
 
-        A *property* returning a record with ``to_dict()`` — that is the shape
-        ``ws_get_system_health`` consumes (``control.central.health.to_dict()``,
-        no await), and an async method there raised
-        ``AttributeError: 'method' object has no attribute 'to_dict'``, taking
-        the whole integration dashboard down with it (the panel fetches its four
-        sections in one ``Promise.all``). The snapshot is refreshed at start and
-        on the hub-reconcile tick, mirroring aiohomematic's cached health object.
+        A *property* (``ws_get_system_health`` does ``central.health.to_dict()``
+        with no await) returning the **real upstream record**, not the daemon's
+        ``/health`` probe: the integration dashboard's health card is typed
+        against ``SystemHealthData`` — ``central_state`` + ``overall_health_score``
+        + ``client_health`` — which is exactly what ``CentralHealth.to_dict()``
+        emits. Handing it the daemon's ``{status, components}`` probe instead gave
+        the card none of the fields it renders.
+
+        Built fresh from the live state (lifecycle state + one connection record
+        per wired interface), so it needs no refresh cadence of its own.
         """
-        return _HealthSnapshot(payload=self._health)
-
-    async def refresh_health(self) -> None:
-        """Re-pull the daemon's health report into the cached snapshot."""
-        self._health = await self._client.system.get_health()
-
-    async def _refresh_health_safely(self) -> None:
-        """Seed the health snapshot; a failure must never abort start()."""
-        try:
-            await self.refresh_health()
-        except Exception:  # noqa: BLE001 — health is diagnostic, not load-bearing for start
-            _LOGGER.debug("initial health refresh failed", exc_info=True)
+        health = CentralHealth()
+        health.update_central_state(state=_to_aio_central_state(state=self._state))
+        for state in self.client_coordinator.states:
+            interface = _to_aio_interface(value=getattr(state, "interface", None))
+            if interface is None:
+                continue
+            connection = health.register_client(interface_id=state.id, interface=interface)
+            connection.client_state = (
+                AioClientState.CONNECTED if getattr(state, "connected", False) else AioClientState.DISCONNECTED
+            )
+            if health.primary_interface is None:
+                health.primary_interface = interface
+        return health
 
     # ---- lifecycle ----
 
@@ -1094,7 +1112,6 @@ class LoomCentralAdapter:
         try:
             await self._client.connect()
             await self._refresh_system_information()
-            await self._refresh_health_safely()
             await self.client_coordinator.refresh()
             self._state = CentralState.Starting
             await self._client.bootstrap()
@@ -1149,10 +1166,6 @@ class LoomCentralAdapter:
                 await self.hub_coordinator.fetch_hub_singleton_data(scheduled=True)
             except Exception:  # noqa: BLE001 — keep the reconcile loop alive
                 _LOGGER.debug("hub singleton reconcile failed", exc_info=True)
-            try:
-                await self.refresh_health()
-            except Exception:  # noqa: BLE001 — keep the reconcile loop alive
-                _LOGGER.debug("health refresh failed", exc_info=True)
 
     async def _emit_data_points_created(self) -> None:
         """Publish a real ``DataPointsCreatedEvent`` grouped by aiohomematic category."""
@@ -1446,8 +1459,15 @@ class LoomCentralAdapter:
             interfaces = tuple(i.id for i in await self._client.system.list_interfaces())
         except Exception:  # noqa: BLE001 — interfaces endpoint is optional
             _LOGGER.debug("interfaces unavailable during system-information refresh")
-        self._system_information = SystemInformation(
+        self._system_information = make_system_information(
             serial=serial,
             version=info.version,
             available_interfaces=interfaces,
+            # The CCU dashboard renders these; the daemon reports them on the
+            # /system/ccu entry. Auth is always on (the client cannot connect
+            # without an auth method); the daemon does not surface an
+            # https-redirect flag, so it stays unknown.
+            hostname=getattr(ccu_entry, "hostname", None) if ccu_entry is not None else None,
+            is_ha_app=bool(getattr(ccu_entry, "is_ha_app", False)) if ccu_entry is not None else False,
+            auth_enabled=True,
         )
