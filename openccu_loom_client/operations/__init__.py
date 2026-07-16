@@ -12,6 +12,7 @@ the wire so callers can reason about the round-trips that happen.
 
 from __future__ import annotations
 
+from openccu_loom_client.operations.alarm import AlarmOperations
 from openccu_loom_client.operations.auth import AuthOperations
 from openccu_loom_client.operations.backup import BackupOperations
 from openccu_loom_client.operations.centrals import CentralsOperations
@@ -31,6 +32,7 @@ from openccu_loom_client.operations.visibility import VisibilityOperations
 
 __all__ = [
     # General
+    "AlarmOperations",
     "AuthOperations",
     "BackupOperations",
     "CentralsOperations",

@@ -51,7 +51,9 @@ from openccu_loom_client.events import (
     event_from_envelope,
     new_data_points_created_event,
 )
+from openccu_loom_client.exceptions import LoomNotFoundError
 from openccu_loom_client.operations import (
+    AlarmOperations,
     AuthOperations,
     BackupOperations,
     CentralsOperations,
@@ -85,8 +87,10 @@ _LOGGER: Final = logging.getLogger(__name__)
 # datapoint value pushes, custom-DP state pushes, plus device +
 # central + system + hub events from every CCU. ``datapoint.*`` and
 # ``custom_data_point.*`` are the live-state plane — without them every
-# entity freezes on its bootstrap value. Callers that want narrower
-# scope can pass an explicit list to start_events().
+# entity freezes on its bootstrap value. ``alarm.*`` carries the alarm
+# panel plane (daemon ≥ 0.42.0); a daemon without the alarm subsystem
+# simply never publishes on it. Callers that want narrower scope can
+# pass an explicit list to start_events().
 _DEFAULT_WS_SUBSCRIPTIONS: Final = (
     "datapoint.*",
     "custom_data_point.*",
@@ -94,6 +98,7 @@ _DEFAULT_WS_SUBSCRIPTIONS: Final = (
     "central.*",
     "system.*",
     "hub.*",
+    "alarm.*",
 )
 
 # Minimum spacing between replay-lost re-bootstraps, measured from the end of
@@ -166,6 +171,7 @@ class LoomClient:
         self.system: Final = SystemOperations(transport=self._http)
         self.schedules: Final = SchedulesOperations(transport=self._http)
         self.links: Final = LinksOperations(transport=self._http)
+        self.alarm: Final = AlarmOperations(transport=self._http)
         # Admin / ops surface — present for completeness; HA typically
         # touches only auth (token provisioning) and diagnostics.
         self.auth: Final = AuthOperations(transport=self._http)
@@ -244,7 +250,11 @@ class LoomClient:
            DPs from the nested snapshot — no extra REST call. If the
            daemon did not return ``device_channels`` (older daemon), fall
            back to one ``GET …/data-points`` per channel.
-        4. Emit one :class:`DataPointsCreatedEvent` carrying every
+        4. Attach the alarm-panel catalogue (``GET /alarm/panels`` +
+           ``GET /alarm/state``). A 404 means the daemon's alarm
+           subsystem is disabled (its routes are unmounted; there is no
+           ``/info`` capability token yet) — the section is skipped.
+        5. Emit one :class:`DataPointsCreatedEvent` carrying every
            device the store now knows, so HA-side spawn-entities
            subscribers fire once at the end of bootstrap.
 
@@ -273,6 +283,8 @@ class LoomClient:
                 channel_data_points=dp_map.get(device_summary.address),
             )
 
+        await self._bootstrap_alarm_panels()
+
         # Announce the bootstrap completion as one batch event.
         await self._bus.publish(
             event=new_data_points_created_event(
@@ -283,6 +295,27 @@ class LoomClient:
                 central=central_name,
             )
         )
+
+    async def _bootstrap_alarm_panels(self) -> None:
+        """
+        Populate the store's alarm-panel section (daemon ≥ 0.42.0).
+
+        Feature-detects by probing ``GET /alarm/panels``: the daemon
+        leaves every ``/alarm`` route unmounted when the alarm subsystem
+        is disabled, so a :class:`LoomNotFoundError` means "no alarm" —
+        the store section stays empty. Live updates then ride the
+        ``alarm.*`` WS topics bound by the bridge.
+        """
+        try:
+            panels = await self.alarm.list_panels()
+        except LoomNotFoundError:
+            _LOGGER.debug("daemon has no /alarm surface — alarm subsystem disabled, skipping panels")
+            return
+        self._store.attach_alarm_panels(panels=panels)
+        if not panels:
+            return
+        statuses = await self.alarm.get_area_statuses()
+        self._store.attach_alarm_area_statuses(statuses=statuses)
 
     async def start_events(
         self,

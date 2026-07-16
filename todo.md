@@ -168,6 +168,43 @@ Cross-repo (homematicip_local), after the client items:
       aiohomematic's are sync/cached. `await` them on the loom path:
       `get_paramset_description`, `get_link_paramset_description`.
 
+## P1 — alarm control panel (loom-only, daemon ≥ 0.42.0 / API 2.22.0)
+
+Client-side surface is DONE (2026-07-16, types 0.1.56): `operations/alarm.py`,
+store panel section + `alarm.*` WS bindings, `model/AlarmPanel` (master
+fan-out mirrors the daemon's MQTT `MasterArm`), compat
+`LoomDpAlarmControlPanel` + adapter announce + refresh-bridge keys (the
+daemon-computed `openccu-loom_alarm_<area>` unique_id is consumed verbatim).
+Cross-repo remainder:
+
+- [ ] **aiohomematic**: add `DataPointCategory.ALARM_CONTROL_PANEL` +
+      `DataPointType.ALARM_CONTROL_PANEL` + `CATEGORIES` entry (pure
+      vocabulary, no model class — aiohomematic never spawns one).
+      `homematicip_local` derives `HMIP_LOCAL_PLATFORMS` from `CATEGORIES`,
+      so the platform only mounts once this lands. The adapter announce
+      gates on `ValueError` until then (pinned by
+      `test_batch_announce_gates_on_missing_aio_category`).
+- [ ] **homematicip_local**: new `alarm_control_panel.py` platform
+      (loom-only dispatch on `LoomDpAlarmControlPanel`, no aio twin in the
+      `backend_types.py` tuple — degrade to an empty tuple when
+      `openccu-loom-client` is missing). Map `supported_modes` →
+      `AlarmControlPanelEntityFeature`; state token comes daemon-computed.
+      Optional custom services: `alarm_silence` / `alarm_silence_all` /
+      `acknowledge` (HA has no native silence verb).
+- [ ] **daemon ask — `alarm.v1` capability token in `/info`**: the `/alarm`
+      routes are silently unmounted when the subsystem is off, contradicting
+      the daemon's own capability principle (`info.go`). Until then the
+      client 404-probes (`LoomClient._bootstrap_alarm_panels`).
+- [ ] **daemon ask — code policy on the panel entity**: `AlarmPanelEntity`
+      does not carry `code_arm_required`/`code_disarm_required` (the MQTT
+      discovery embeds them from the area policy). The compat panel
+      conservatively reports `False` (daemon enforces server-side either
+      way); flip to real values once the entity exposes the policy.
+- [ ] **panel removal → HA entity removal**: `alarm.panel_changed` with
+      `removed` drops the store panel, but the HA entity lingers until
+      reload (same as sysvar deletion today). Wire a lifecycle event when
+      the HA side grows a removal path.
+
 ## P2 — verification gaps (e2e)
 
 - [ ] `rename_device(ise_id)`: implemented + unit-tested, but godevccu does

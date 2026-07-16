@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING, Any, Final
 from urllib.parse import quote
 
 from openccu_loom_types.rest import (
+    AlarmPanelEntity,
     CalculatedDPSummary,
     ChannelSummary,
     CustomDPSummary,
@@ -46,12 +47,28 @@ from openccu_loom_types.rest import (
 )
 
 from openccu_loom_client.canonical import serial_suffix as canonical_serial_suffix
-from openccu_loom_client.model import Channel, CustomDataPoint, DataPoint, Device, Program, Sysvar
+from openccu_loom_client.model import (
+    MASTER_AREA_ID,
+    AlarmPanel,
+    Channel,
+    CustomDataPoint,
+    DataPoint,
+    Device,
+    Program,
+    Sysvar,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
+    from openccu_loom_types.rest import AlarmAreaStatus
     from openccu_loom_types.ws import (
+        AlarmCountdownPayload,
+        AlarmHealthChangedPayload,
+        AlarmPanelChangedPayload,
+        AlarmReadinessChangedPayload,
+        AlarmStateChangedPayload,
+        AlarmTriggeredPayload,
         CustomDataPointStateChangedPayload,
         DataPointValueChangedPayload,
         DeviceCreatedPayload,
@@ -123,6 +140,19 @@ class LoomStore:
         self._cdp_by_channel: dict[tuple[str, int], CustomDataPoint] = {}
         self._programs: dict[str, Program] = {}
         self._sysvars: dict[str, Sysvar] = {}
+        # Alarm panels keyed by the daemon-computed ``unique_id`` (one per
+        # alarm area + the aggregate master; daemon ≥ 0.42.0). Empty when the
+        # daemon's alarm subsystem is disabled — the /alarm routes are then
+        # unmounted and bootstrap skips the section.
+        self._alarm_panels: dict[str, AlarmPanel] = {}
+        # Secondary index area_id → panel (the ``alarm.*`` pushes are
+        # area-scoped; only ``alarm.panel_changed`` carries the unique_id).
+        self._alarm_panel_by_area: dict[str, AlarmPanel] = {}
+        # Engine-global health verdict from ``alarm.health_changed``.
+        self._alarm_healthy: bool = True
+        # Factory hook (compat layer) that builds categorised AlarmPanel
+        # subclasses — same pattern as ``set_data_point_factory``.
+        self._alarm_panel_factory: Callable[..., AlarmPanel] | None = None
         # Optional hook: a callable that builds a DataPoint (or a
         # categorised subclass of it) from the same arguments
         # DataPoint takes. The aiohomematic-compat layer injects a
@@ -475,6 +505,245 @@ class LoomStore:
     def get_sysvar(self, *, name: str) -> Sysvar | None:
         """Return the system variable for the given name, or ``None``."""
         return self._sysvars.get(name)
+
+    # ---- alarm panels ----
+
+    @property
+    def alarm_panels(self) -> Iterable[AlarmPanel]:
+        """Every alarm panel currently known (empty when alarm is disabled)."""
+        return self._alarm_panels.values()
+
+    @property
+    def alarm_healthy(self) -> bool:
+        """The engine-global alarm health verdict (``alarm.health_changed``)."""
+        return self._alarm_healthy
+
+    def get_alarm_panel(self, *, unique_id: str) -> AlarmPanel | None:
+        """Return the panel for the daemon-computed unique id, or ``None``."""
+        return self._alarm_panels.get(unique_id)
+
+    def get_alarm_panel_by_area(self, *, area_id: str) -> AlarmPanel | None:
+        """Return the panel of one alarm area (or the master), or ``None``."""
+        return self._alarm_panel_by_area.get(area_id)
+
+    def set_alarm_panel_factory(self, *, factory: Callable[..., AlarmPanel] | None) -> None:
+        """
+        Install a factory that builds (subclasses of) :class:`AlarmPanel`.
+
+        Must be set before :meth:`attach_alarm_panels` runs. The
+        aiohomematic-compat layer uses this to have the store hold the
+        categorised alarm-control-panel class so HA-side ``isinstance``
+        dispatch works on the live store objects.
+        """
+        self._alarm_panel_factory = factory
+
+    def _build_alarm_panel(self, *, summary: AlarmPanelEntity) -> AlarmPanel:
+        if self._alarm_panel_factory is not None:
+            return self._alarm_panel_factory(summary=summary, store=self)
+        return AlarmPanel(summary=summary, store=self)
+
+    def _register_alarm_panel(self, *, panel: AlarmPanel) -> None:
+        self._alarm_panels[panel.unique_id] = panel
+        self._alarm_panel_by_area[panel.area_id] = panel
+
+    def _drop_alarm_panel(self, *, unique_id: str) -> None:
+        panel = self._alarm_panels.pop(unique_id, None)
+        if panel is not None:
+            self._alarm_panel_by_area.pop(panel.area_id, None)
+
+    def attach_alarm_panels(self, *, panels: list[AlarmPanelEntity]) -> None:
+        """
+        Replace the alarm-panel catalogue (``GET /alarm/panels``).
+
+        Reconciles in place: an existing panel keeps its live instance
+        (summary replaced), new panels are built, vanished panels are
+        dropped — same never-rebuild-on-update discipline as
+        :meth:`attach_custom_data_points`.
+        """
+        incoming = {entity.unique_id for entity in panels}
+        stale = [uid for uid in self._alarm_panels if uid not in incoming]
+        for uid in stale:
+            self._drop_alarm_panel(unique_id=uid)
+        for entity in panels:
+            existing = self._alarm_panels.get(entity.unique_id)
+            if existing is not None:
+                existing._replace_summary(summary=entity)
+                # Keep the area index in lock-step (the area id of an
+                # existing unique_id cannot really change, but cheap).
+                self._alarm_panel_by_area[entity.area_id] = existing
+                continue
+            self._register_alarm_panel(panel=self._build_alarm_panel(summary=entity))
+
+    def attach_alarm_area_statuses(self, *, statuses: list[AlarmAreaStatus]) -> None:
+        """
+        Seed the live area detail (``GET /alarm/state``) onto the panels.
+
+        Unknown areas are ignored — :meth:`attach_alarm_panels` owns
+        catalogue parity.
+        """
+        for status in statuses:
+            panel = self._alarm_panel_by_area.get(status.id)
+            if panel is not None:
+                panel._replace_status(status=status)
+
+    def apply_alarm_panel_changed(self, *, payload: AlarmPanelChangedPayload) -> None:
+        """
+        Apply an ``alarm.panel_changed`` push (state/availability/lifecycle).
+
+        ``removed`` drops the panel. A push for an unknown panel seeds a
+        stub entry (mirroring :meth:`apply_device_created`) — the payload
+        carries everything but ``supported_modes``, which the next
+        catalogue reconcile (``GET /alarm/panels``) fills in.
+        """
+        if payload.removed:
+            self._drop_alarm_panel(unique_id=payload.unique_id)
+            return
+        panel = self._alarm_panels.get(payload.unique_id)
+        if panel is None:
+            stub = AlarmPanelEntity.model_validate(
+                {
+                    "unique_id": payload.unique_id,
+                    "area_id": payload.area_id,
+                    "name": payload.name,
+                    "category": "alarm_control_panel",
+                    "state": payload.state,
+                    "available": payload.available,
+                    "master": payload.area_id == MASTER_AREA_ID,
+                }
+            )
+            self._register_alarm_panel(panel=self._build_alarm_panel(summary=stub))
+            return
+        panel._replace_summary(
+            summary=panel.summary.model_copy(
+                update={
+                    "name": payload.name,
+                    "state": payload.state,
+                    "available": payload.available,
+                }
+            )
+        )
+
+    def apply_alarm_state_changed(self, *, payload: AlarmStateChangedPayload) -> None:
+        """
+        Fold an ``alarm.state_changed`` push into the area's live detail.
+
+        Only the area-level detail (mode, countdown lifetime) updates
+        here — the HA state token travels on the parallel
+        ``alarm.panel_changed`` push, so it is never re-derived
+        client-side.
+        """
+        panel = self._alarm_panel_by_area.get(payload.area_id)
+        if panel is None:
+            return
+        panel._set_mode(mode=payload.mode.value if payload.mode is not None else None)
+        # A countdown only survives the arming/pending phases; any other
+        # transition ends it (the daemon stops ticking without a
+        # terminating push).
+        if payload.new_state.value not in ("arming", "pending"):
+            panel._clear_countdown()
+
+    def apply_alarm_countdown(self, *, payload: AlarmCountdownPayload) -> None:
+        """Fold an ``alarm.countdown`` tick into the area's live detail."""
+        panel = self._alarm_panel_by_area.get(payload.area_id)
+        if panel is None:
+            return
+        panel._set_countdown(
+            kind=payload.kind.value,
+            remaining_s=payload.remaining_s,
+            total_s=payload.total_s,
+        )
+
+    def apply_alarm_readiness_changed(self, *, payload: AlarmReadinessChangedPayload) -> None:
+        """Replace the area's per-mode readiness from an ``alarm.readiness_changed`` push."""
+        panel = self._alarm_panel_by_area.get(payload.area_id)
+        if panel is None:
+            return
+        panel._set_readiness(readiness=payload.readiness)
+
+    def apply_alarm_triggered(self, *, payload: AlarmTriggeredPayload) -> None:
+        """Record the trigger detail (incident id, cause, sensor) on the panel."""
+        panel = self._alarm_panel_by_area.get(payload.area_id)
+        if panel is None:
+            return
+        panel._record_incident(
+            incident_id=payload.incident_id,
+            cause=payload.cause,
+            sensor_name=payload.sensor_name,
+        )
+
+    def apply_alarm_health_changed(self, *, payload: AlarmHealthChangedPayload) -> None:
+        """Latch the engine-global health flag (panel availability rides ``panel_changed``)."""
+        self._alarm_healthy = payload.healthy
+
+    async def arm_alarm_area(
+        self,
+        *,
+        area_id: str,
+        mode: str,
+        code: str | None = None,
+        force: bool | None = None,
+        skip_delay: bool | None = None,
+        bypass: list[str] | None = None,
+    ) -> None:
+        """
+        Arm one alarm area.
+
+        Wire: ``POST /alarm/areas/{id}/arm``. Not retried — arming has
+        side effects (exit delay, chirps) and readiness may change
+        between attempts. The resulting state travels back via the
+        ``alarm.panel_changed`` push.
+        """
+        transport = self._require_transport()
+        body: dict[str, Any] = {"mode": mode}
+        if force is not None:
+            body["force"] = force
+        if skip_delay is not None:
+            body["skip_delay"] = skip_delay
+        if bypass is not None:
+            body["bypass"] = bypass
+        if code is not None:
+            body["code"] = code
+        await transport.request(
+            method="POST",
+            path=f"/alarm/areas/{quote(area_id, safe='')}/arm",
+            json_body=body,
+            allow_retry=False,
+        )
+
+    async def disarm_alarm_area(self, *, area_id: str, code: str | None = None) -> None:
+        """Disarm one alarm area. Wire: ``POST /alarm/areas/{id}/disarm``. Not retried."""
+        transport = self._require_transport()
+        await transport.request(
+            method="POST",
+            path=f"/alarm/areas/{quote(area_id, safe='')}/disarm",
+            json_body={"code": code} if code is not None else {},
+            allow_retry=False,
+        )
+
+    async def silence_alarm_area(self, *, area_id: str, code: str | None = None) -> None:
+        """Silence one area's sounding outputs. Wire: ``POST /alarm/areas/{id}/silence``."""
+        transport = self._require_transport()
+        await transport.request(
+            method="POST",
+            path=f"/alarm/areas/{quote(area_id, safe='')}/silence",
+            json_body={"code": code} if code is not None else {},
+            allow_retry=False,
+        )
+
+    async def acknowledge_alarm_area(self, *, area_id: str, code: str | None = None) -> None:
+        """Acknowledge an ended incident. Wire: ``POST /alarm/areas/{id}/acknowledge``."""
+        transport = self._require_transport()
+        await transport.request(
+            method="POST",
+            path=f"/alarm/areas/{quote(area_id, safe='')}/acknowledge",
+            json_body={"code": code} if code is not None else {},
+            allow_retry=False,
+        )
+
+    async def silence_all_alarm_areas(self) -> None:
+        """Silence every sounding output (break-glass). Wire: ``POST /alarm/silence-all``."""
+        transport = self._require_transport()
+        await transport.request(method="POST", path="/alarm/silence-all", allow_retry=False)
 
     # ---- CDP attach ----
 

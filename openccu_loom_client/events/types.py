@@ -25,6 +25,15 @@ from typing import Any, ClassVar, Final
 
 from openccu_loom_types.rest import Kind1 as Kind
 from openccu_loom_types.ws import (
+    AlarmCountdownPayload,
+    AlarmHealthChangedPayload,
+    AlarmJournalAppendedPayload,
+    AlarmPanelChangedPayload,
+    AlarmReadinessChangedPayload,
+    AlarmReminderPayload,
+    AlarmStateChangedPayload,
+    AlarmTriggeredPayload,
+    AlarmWalkTestProgressPayload,
     CentralReadinessChangedPayload,
     CentralStateChangedPayload,
     CustomDataPointStateChangedPayload,
@@ -399,6 +408,137 @@ class DataPointOptimisticRolledBackEvent(LoomEvent):
 
 
 @dataclass(slots=True, kw_only=True)
+class AlarmStateChangedEvent(LoomEvent):
+    """
+    An alarm area's arm-state machine advanced (daemon api ≥ 2.22.0).
+
+    Carries the ``old_state`` → ``new_state`` transition plus the active
+    ``mode`` and — on a trigger — the ``incident_id``. Keyed by
+    ``area_id`` so a subscriber can scope to one area; the compat
+    refresh bridge resolves the area to its panel entity.
+    """
+
+    payload: AlarmStateChangedPayload
+    type_id: ClassVar[str] = "alarm.state_changed"
+
+    def __post_init__(self) -> None:
+        """Default the routing key to the payload's area id."""
+        if self.event_key is None:
+            self.event_key = self.payload.area_id
+
+
+@dataclass(slots=True, kw_only=True)
+class AlarmCountdownEvent(LoomEvent):
+    """An exit/entry countdown tick for one alarm area."""
+
+    payload: AlarmCountdownPayload
+    type_id: ClassVar[str] = "alarm.countdown"
+
+    def __post_init__(self) -> None:
+        """Default the routing key to the payload's area id."""
+        if self.event_key is None:
+            self.event_key = self.payload.area_id
+
+
+@dataclass(slots=True, kw_only=True)
+class AlarmReadinessChangedEvent(LoomEvent):
+    """One alarm area's per-mode readiness (blockers/warnings) changed."""
+
+    payload: AlarmReadinessChangedPayload
+    type_id: ClassVar[str] = "alarm.readiness_changed"
+
+    def __post_init__(self) -> None:
+        """Default the routing key to the payload's area id."""
+        if self.event_key is None:
+            self.event_key = self.payload.area_id
+
+
+@dataclass(slots=True, kw_only=True)
+class AlarmTriggeredEvent(LoomEvent):
+    """An alarm area entered the triggered state (new incident)."""
+
+    payload: AlarmTriggeredPayload
+    type_id: ClassVar[str] = "alarm.triggered"
+
+    def __post_init__(self) -> None:
+        """Default the routing key to the payload's area id."""
+        if self.event_key is None:
+            self.event_key = self.payload.area_id
+
+
+@dataclass(slots=True, kw_only=True)
+class AlarmJournalAppendedEvent(LoomEvent):
+    """
+    A new alarm-journal entry was written.
+
+    ``area_id`` is ``None`` for engine-global entries, so the routing
+    key stays unset for those — area-scoped subscribers only see their
+    own entries, unscoped subscribers see everything.
+    """
+
+    payload: AlarmJournalAppendedPayload
+    type_id: ClassVar[str] = "alarm.journal_appended"
+
+    def __post_init__(self) -> None:
+        """Default the routing key to the payload's area id (if any)."""
+        if self.event_key is None:
+            self.event_key = self.payload.area_id
+
+
+@dataclass(slots=True, kw_only=True)
+class AlarmWalkTestProgressEvent(LoomEvent):
+    """A sensor was seen during an active walk test."""
+
+    payload: AlarmWalkTestProgressPayload
+    type_id: ClassVar[str] = "alarm.walktest_progress"
+
+    def __post_init__(self) -> None:
+        """Default the routing key to the payload's area id."""
+        if self.event_key is None:
+            self.event_key = self.payload.area_id
+
+
+@dataclass(slots=True, kw_only=True)
+class AlarmHealthChangedEvent(LoomEvent):
+    """The alarm engine's overall health flag flipped (engine-global)."""
+
+    payload: AlarmHealthChangedPayload
+    type_id: ClassVar[str] = "alarm.health_changed"
+
+
+@dataclass(slots=True, kw_only=True)
+class AlarmPanelChangedEvent(LoomEvent):
+    """
+    A panel entity changed (state/availability) or was added/removed.
+
+    Keyed by the daemon-computed panel ``unique_id`` — the same key the
+    compat layer hands HA entities, so a panel entity can subscribe to
+    exactly its own changes (mirroring ``datapoint.value_changed``).
+    """
+
+    payload: AlarmPanelChangedPayload
+    type_id: ClassVar[str] = "alarm.panel_changed"
+
+    def __post_init__(self) -> None:
+        """Default the routing key to the payload's panel unique id."""
+        if self.event_key is None:
+            self.event_key = self.payload.unique_id
+
+
+@dataclass(slots=True, kw_only=True)
+class AlarmReminderEvent(LoomEvent):
+    """An arm-schedule reminder fired for one alarm area."""
+
+    payload: AlarmReminderPayload
+    type_id: ClassVar[str] = "alarm.reminder"
+
+    def __post_init__(self) -> None:
+        """Default the routing key to the payload's area id."""
+        if self.event_key is None:
+            self.event_key = self.payload.area_id
+
+
+@dataclass(slots=True, kw_only=True)
 class MatterCommissioningProgressEvent(LoomEvent):
     """Progress update while a Matter device is being commissioned."""
 
@@ -489,6 +629,15 @@ _EVENT_REGISTRY: Final[dict[str, tuple[Callable[..., LoomEvent], type[BaseModel]
         DataPointOptimisticRolledBackEvent,
         OptimisticRollbackPayload,
     ),
+    AlarmStateChangedEvent.type_id: (AlarmStateChangedEvent, AlarmStateChangedPayload),
+    AlarmCountdownEvent.type_id: (AlarmCountdownEvent, AlarmCountdownPayload),
+    AlarmReadinessChangedEvent.type_id: (AlarmReadinessChangedEvent, AlarmReadinessChangedPayload),
+    AlarmTriggeredEvent.type_id: (AlarmTriggeredEvent, AlarmTriggeredPayload),
+    AlarmJournalAppendedEvent.type_id: (AlarmJournalAppendedEvent, AlarmJournalAppendedPayload),
+    AlarmWalkTestProgressEvent.type_id: (AlarmWalkTestProgressEvent, AlarmWalkTestProgressPayload),
+    AlarmHealthChangedEvent.type_id: (AlarmHealthChangedEvent, AlarmHealthChangedPayload),
+    AlarmPanelChangedEvent.type_id: (AlarmPanelChangedEvent, AlarmPanelChangedPayload),
+    AlarmReminderEvent.type_id: (AlarmReminderEvent, AlarmReminderPayload),
     MatterCommissioningProgressEvent.type_id: (
         MatterCommissioningProgressEvent,
         MatterCommissioningProgressPayload,
