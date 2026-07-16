@@ -72,6 +72,17 @@ class TestLoomDpAlarmControlPanel:
         assert panel.is_valid is True
         assert panel.state_uncertain is False
 
+    def test_satisfies_callback_data_point_protocol(self) -> None:
+        # homematicip_local's generic hub entity base gates its whole
+        # register/subscribe lifecycle on this structural isinstance —
+        # if the twin loses a protocol member, the HA entity silently
+        # freezes on its spawn state.
+        from aiohomematic.interfaces.model import CallbackDataPointProtocol
+
+        store = _store_with_compat_panels(_panel_entity())
+        panel = store.get_alarm_panel_by_area(area_id="eg")
+        assert isinstance(panel, CallbackDataPointProtocol)
+
     def test_registration_lifecycle(self) -> None:
         store = _store_with_compat_panels(_panel_entity())
         panel = store.get_alarm_panel_by_area(area_id="eg")

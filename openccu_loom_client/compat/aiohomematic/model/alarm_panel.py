@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from openccu_loom_types.enums import DataPointCategory
 
+from openccu_loom_client.compat.aiohomematic.model._protocol_surface import _HubProtocolSurface
 from openccu_loom_client.compat.aiohomematic.model.hub._surface import _HubEntitySurface
 from openccu_loom_client.model.alarm_panel import AlarmPanel
 
@@ -34,7 +35,7 @@ if TYPE_CHECKING:
     from openccu_loom_client.store import LoomStore
 
 
-class LoomDpAlarmControlPanel(_HubEntitySurface, AlarmPanel):
+class LoomDpAlarmControlPanel(_HubEntitySurface, _HubProtocolSurface, AlarmPanel):
     """
     Alarm panel with the aiohomematic-shaped entity surface on top.
 
@@ -42,9 +43,20 @@ class LoomDpAlarmControlPanel(_HubEntitySurface, AlarmPanel):
     ``arming``/``pending``/``triggered``/``armed_home``/…), commands
     route through the domain wrapper's :meth:`arm`/:meth:`disarm`/
     :meth:`silence`/:meth:`acknowledge` (master panels fan out).
+
+    ``_HubProtocolSurface`` fills aiohomematic's protocol long tail so
+    the structural ``isinstance`` checks in ``homematicip_local``'s
+    generic hub entity base hold — most importantly
+    ``CallbackDataPointProtocol``, which gates the register/subscribe
+    lifecycle in ``async_added_to_hass``. The domain wrapper's own
+    members (``available``, ``summary``, ``unique_id``, …) precede the
+    mixin in the MRO and win.
     """
 
     _category: ClassVar[DataPointCategory] = DataPointCategory.AlarmControlPanel
+
+    if TYPE_CHECKING:
+        summary: AlarmPanelEntity  # narrows the hub-surface union (sysvar-twin pattern)
 
     def __init__(self, *, summary: AlarmPanelEntity, store: LoomStore) -> None:
         """Bind the panel and enable it by default (unlike generic sysvars)."""
@@ -55,6 +67,11 @@ class LoomDpAlarmControlPanel(_HubEntitySurface, AlarmPanel):
     def channel(self) -> None:
         """Return ``None`` — panels attach to the central hub device."""
         return None
+
+    @property
+    def available(self) -> bool:
+        """The alarm-health verdict (wins over the hub tail's always-True)."""
+        return self._summary.available
 
     @property
     def value(self) -> str:
