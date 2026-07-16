@@ -43,6 +43,7 @@ from openccu_loom_client.compat.aiohomematic._upstream import (
     DataPointStateChangedEvent,
     DeviceLifecycleEvent,
     DeviceLifecycleEventType,
+    DeviceRemovedEvent as AioDeviceRemovedEvent,
     DeviceTriggerEvent,
     DeviceTriggerEventType,
     OptimisticRollbackEvent,
@@ -264,6 +265,12 @@ def _wire_alarm_events(*, group: SubscriptionGroup, store: LoomStore, ha_bus: Ai
     countdown tick, readiness, trigger) resolve area → panel through the
     store. State itself travels on ``panel_changed`` — the detail pushes
     only refresh the entity's extra attributes.
+
+    A ``panel_changed`` with ``removed`` (area deleted, or the master
+    dematerialising at < 2 areas) becomes aiohomematic's data-point
+    flavour of :class:`DeviceRemovedEvent` (only ``unique_id`` set) —
+    the generic hub entity base subscribes to exactly that key and
+    removes itself from the entity registry.
     """
 
     async def _ping(*, ts: Any, unique_id: str, value: Any = None) -> None:
@@ -275,6 +282,11 @@ def _wire_alarm_events(*, group: SubscriptionGroup, store: LoomStore, ha_bus: Ai
             await _ping(ts=ts, unique_id=panel.unique_id)
 
     async def on_panel_changed(event: AlarmPanelChangedEvent) -> None:
+        if event.payload.removed:
+            await ha_bus.publish(
+                event=AioDeviceRemovedEvent(timestamp=datetime.now(tz=UTC), unique_id=event.payload.unique_id)
+            )
+            return
         await _ping(ts=event.ts, unique_id=event.payload.unique_id, value=event.payload.state)
 
     async def on_alarm_state(event: AlarmStateChangedEvent) -> None:

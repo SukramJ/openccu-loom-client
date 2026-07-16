@@ -200,10 +200,11 @@ Cross-repo remainder:
       discovery embeds them from the area policy). The compat panel
       conservatively reports `False` (daemon enforces server-side either
       way); flip to real values once the entity exposes the policy.
-- [ ] **panel removal → HA entity removal**: `alarm.panel_changed` with
-      `removed` drops the store panel, but the HA entity lingers until
-      reload (same as sysvar deletion today). Wire a lifecycle event when
-      the HA side grows a removal path.
+- [x] **panel removal → HA entity removal.** DONE (2026-07-16): the refresh
+      bridge translates `alarm.panel_changed` + `removed` into aiohomematic's
+      data-point-flavoured `DeviceRemovedEvent` (only `unique_id` set) — the
+      generic hub entity base already subscribes to that key and removes
+      itself from the entity registry.
 
 ## P2 — verification gaps (e2e)
 

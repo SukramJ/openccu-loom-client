@@ -253,6 +253,41 @@ class TestRefreshBridgeAlarm:
         await looper.block_till_done()
         assert seen == ["openccu-loom_alarm_eg"]
 
+    async def test_panel_removed_publishes_device_removed(self) -> None:
+        from aiohomematic.central.events import DeviceRemovedEvent as AioDeviceRemovedEvent
+
+        bus = EventBus()
+        group = bus.create_subscription_group(name="t")
+        looper = Looper()
+        ha_bus = AioEventBus(task_scheduler=looper)
+        removed: list[str] = []
+        entity_group = ha_bus.create_subscription_group(name="entity")
+        entity_group.subscribe(
+            event_type=AioDeviceRemovedEvent,
+            event_key="openccu-loom_alarm_eg",
+            handler=lambda *, event: removed.append(event.unique_id),
+        )
+        install_refresh_bridge(group=group, store=LoomStore(), ha_bus=ha_bus, central_name="home")
+        await bus.publish(
+            event=AlarmPanelChangedEvent(
+                seq=1,
+                kind=Kind.change,
+                ts="2026-07-16T08:00:00Z",
+                payload=AlarmPanelChangedPayload.model_validate(
+                    {
+                        "unique_id": "openccu-loom_alarm_eg",
+                        "area_id": "eg",
+                        "name": "EG",
+                        "state": "disarmed",
+                        "available": True,
+                        "removed": True,
+                    }
+                ),
+            )
+        )
+        await looper.block_till_done()
+        assert removed == ["openccu-loom_alarm_eg"]
+
     async def test_area_event_without_panel_is_silent(self) -> None:
         bus = EventBus()
         group = bus.create_subscription_group(name="t")
