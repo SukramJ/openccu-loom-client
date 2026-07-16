@@ -177,25 +177,30 @@ fan-out mirrors the daemon's MQTT `MasterArm`), compat
 daemon-computed `openccu-loom_alarm_<area>` unique_id is consumed verbatim).
 Cross-repo remainder:
 
-- [ ] **aiohomematic**: add `DataPointCategory.ALARM_CONTROL_PANEL` +
+- [ ] **aiohomematic**: PR open — SukramJ/aiohomematic#3296 (2026-07-16).
+      Add `DataPointCategory.ALARM_CONTROL_PANEL` +
       `DataPointType.ALARM_CONTROL_PANEL` + `CATEGORIES` entry (pure
       vocabulary, no model class — aiohomematic never spawns one).
       `homematicip_local` derives `HMIP_LOCAL_PLATFORMS` from `CATEGORIES`,
       so the platform only mounts once this lands. The adapter announce
       gates on `ValueError` until then (pinned by
       `test_batch_announce_gates_on_missing_aio_category`).
-- [ ] **homematicip_local**: new `alarm_control_panel.py` platform
+- [ ] **homematicip_local**: draft PR open — SukramJ/homematicip_local#1210
+      (2026-07-16; draft until aiohomematic 2026.7.7 + this client 2026.7.12
+      are released). New `alarm_control_panel.py` platform
       (loom-only dispatch on `LoomDpAlarmControlPanel`, no aio twin in the
       `backend_types.py` tuple — degrade to an empty tuple when
       `openccu-loom-client` is missing). Map `supported_modes` →
       `AlarmControlPanelEntityFeature`; state token comes daemon-computed.
       Optional custom services: `alarm_silence` / `alarm_silence_all` /
       `acknowledge` (HA has no native silence verb).
-- [ ] **daemon ask — `alarm.v1` capability token in `/info`**: the `/alarm`
+- [ ] **daemon ask — `alarm.v1` capability token in `/info`**: filed as
+      SukramJ/openccu-loom#357 (2026-07-16). The `/alarm`
       routes are silently unmounted when the subsystem is off, contradicting
       the daemon's own capability principle (`info.go`). Until then the
       client 404-probes (`LoomClient._bootstrap_alarm_panels`).
-- [ ] **daemon ask — code policy on the panel entity**: `AlarmPanelEntity`
+- [ ] **daemon ask — code policy on the panel entity**: filed as
+      SukramJ/openccu-loom#358 (2026-07-16). `AlarmPanelEntity`
       does not carry `code_arm_required`/`code_disarm_required` (the MQTT
       discovery embeds them from the area policy). The compat panel
       conservatively reports `False` (daemon enforces server-side either
