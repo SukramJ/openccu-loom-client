@@ -4,6 +4,7 @@
     "ACTION": "action",
     "ACTION_NUMBER": "action_number",
     "ACTION_SELECT": "action_select",
+    "ALARM_CONTROL_PANEL": "alarm_control_panel",
     "BINARY_SENSOR": "binary_sensor",
     "BUTTON": "button",
     "CLIMATE": "climate",
@@ -34,6 +35,7 @@
     "WEEK_PROFILE": "week_profile"
   },
   "DataPointType": {
+    "ALARM_CONTROL_PANEL": "alarm_control_panel",
     "BINARY_SENSOR": "binary_sensor",
     "BUTTON": "button",
     "CLIMATE": "climate",

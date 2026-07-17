@@ -1,3 +1,48 @@
+# Version 2026.7.12 (2026-07-16)
+
+Alarm control panel, client side complete (daemon ≥ 0.42.0 / API 2.22.0,
+types 0.1.56). The daemon's native alarm system ("Alarmanlage") is now a
+first-class surface of this client — REST, WebSocket, store, domain model and
+the aiohomematic-compat layer. The HA platform itself lands in
+`homematicip_local` (loom-only — aiohomematic has no alarm engine); the
+cross-repo remainder is tracked in `todo.md`.
+
+- Feature: **`operations/alarm.py`** — all 21 `/alarm` routes as `client.alarm`
+  (areas, sensors/outputs, arm/disarm/silence/acknowledge, silence-all,
+  readiness, panels, journal, walk test, output test fire, codes). Retries only
+  on idempotent calls; the verbs and the output test fire are never retried.
+- Feature: **nine `alarm.*` WS events** bound end-to-end (`alarm.state_changed`,
+  `.countdown`, `.readiness_changed`, `.triggered`, `.journal_appended`,
+  `.walktest_progress`, `.health_changed`, `.panel_changed`, `.reminder`) —
+  the broadcast drift-guard is green again. `alarm.*` joined the default WS
+  subscriptions.
+- Feature: **store panel section + `model/AlarmPanel`.** Panels are keyed by the
+  daemon-computed `unique_id` (`openccu-loom_alarm_<area>`, consumed verbatim —
+  never re-derived) with an area secondary index; live detail (mode, countdown,
+  readiness, incident) held as plain fields (the payload auto-enums are
+  class-distinct across schemas). Master verbs mirror the daemon's MQTT
+  semantics: `arm` fans out to mode-capable areas only, `silence` uses
+  `/alarm/silence-all`.
+- Feature: **compat `LoomDpAlarmControlPanel`** — categorised
+  `alarm_control_panel` twin (loom-native, no aio class) held live in the store
+  via the factory hook; adapter announces panels (batch + runtime area-added)
+  and the refresh bridge pings `DataPointStateChangedEvent` keyed by the panel
+  `unique_id`. Announces gate gracefully while the installed aiohomematic lacks
+  the category.
+- Feature: **bootstrap feature-detection** — `/alarm` is unmounted when the
+  daemon's alarm subsystem is off (no capability token yet), so bootstrap
+  treats a 404 on `/alarm/panels` as "no alarm" instead of an error.
+- Fix: **`_category_for_type` missed aiohomematic's SCREAMING_CASE enums.** The
+  member-_name_ lookup returned `None` for `DataPointType.SIREN` & friends
+  (making type-only queries unfiltered); matching now happens on the shared
+  string value, pinned by tests.
+- Chore: `openccu-loom-types` 0.1.55 → 0.1.56; `aiohomematic` 2026.7.6 →
+  2026.7.7 (ships the `ALARM_CONTROL_PANEL` vocabulary, so the compat announce
+  paths now deliver panels — the version gate stays covered by a simulated-old
+  test); `category_golden.json` gains `alarm_control_panel`; dev-toolchain
+  bumps (mypy 2.3.0, ruff 0.15.22, coverage 7.15.2, prek 0.4.10,
+  codespell 2.4.3).
+
 # Version 2026.7.11 (2026-07-14)
 
 Hotfix: the config panel's **CCU** and **Integration** tabs did not load at all

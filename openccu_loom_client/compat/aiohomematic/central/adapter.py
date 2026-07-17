@@ -44,7 +44,7 @@ import dataclasses
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import logging
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any, Final, cast
 
 from openccu_loom_types.enums import CentralState, DataPointCategory
 
@@ -72,6 +72,7 @@ from openccu_loom_client.compat.aiohomematic.central.hub_coordinator import _Hub
 from openccu_loom_client.compat.aiohomematic.central.refresh import install_refresh_bridge
 from openccu_loom_client.compat.aiohomematic.central.state_paths import device_state_path, parse_device_state_path
 from openccu_loom_client.compat.aiohomematic.const import SystemInformation, make_system_information
+from openccu_loom_client.compat.aiohomematic.model.alarm_panel import make_alarm_panel_data_point
 from openccu_loom_client.compat.aiohomematic.model.calculated import make_calculated_data_point
 from openccu_loom_client.compat.aiohomematic.model.combined import CombinedDurationDp, channel_has_duration_pair
 from openccu_loom_client.compat.aiohomematic.model.custom import (
@@ -87,6 +88,7 @@ from openccu_loom_client.compat.aiohomematic.model.week_profile import (
     ScheduleChannelSwitch,
     WeekProfileDp,
 )
+from openccu_loom_client.events import AlarmPanelChangedEvent as LoomAlarmPanelChangedEvent
 from openccu_loom_client.exceptions import BaseLoomException, LoomHttpError, LoomNotFoundError
 
 if TYPE_CHECKING:
@@ -113,21 +115,25 @@ _WEEK_PROFILE_CHANNEL_SUFFIX: Final = "WEEK_PROFILE"
 _SUPPRESSED_CALCULATED_NAMES: Final = frozenset({"DURATION"})
 
 
+_CATEGORY_BY_VALUE: Final[dict[str, DataPointCategory]] = {member.value: member for member in DataPointCategory}
+
+
 def _category_for_type(*, data_point_type: Any) -> DataPointCategory | None:
     """
     Map a coarse ``DataPointType`` (platform) to its custom-DP category.
 
-    Custom platforms (light/cover/climate/lock/siren/valve) request data
-    points by ``data_point_type`` only; the type's name matches the
-    custom ``DataPointCategory`` member 1:1 (``Light`` → ``Light`` …).
+    Custom platforms (light/cover/climate/lock/siren/valve, and the
+    loom-only alarm panel) request data points by ``data_point_type``
+    only. Matching happens on the enum *value* (``"siren"``), which is
+    identical between the loom enums (PascalCase members) and the
+    aiohomematic enums (SCREAMING_CASE members) — a member-*name* lookup
+    would miss the aiohomematic spelling ``homematicip_local`` passes.
     Returns ``None`` for an unset type or one with no category twin.
     """
     if data_point_type is None:
         return None
-    name = getattr(data_point_type, "name", None)
-    if name is None:
-        return None
-    return DataPointCategory.__members__.get(name)
+    token = getattr(data_point_type, "value", data_point_type)
+    return _CATEGORY_BY_VALUE.get(str(token))
 
 
 # Usage verdicts that never spawn an HA entity. The daemon pipeline
@@ -267,6 +273,7 @@ class _QueryFacade:
         for dp in (
             *self._client.store.data_points,
             *self._client.store.custom_data_points,
+            *self._client.store.alarm_panels,
             *self._extra_data_points,
         ):
             dp_category = getattr(dp, "category", None)
@@ -988,6 +995,7 @@ class LoomCentralAdapter:
         client.store.set_data_point_factory(factory=make_generic_data_point)
         client.store.set_calculated_data_point_factory(factory=make_calculated_data_point)
         client.store.set_custom_data_point_factory(factory=make_custom_data_point)
+        client.store.set_alarm_panel_factory(factory=make_alarm_panel_data_point)
         # HA links every device to this central via Device.central_info.name,
         # which must equal the adapter name (the integration's instance name).
         client.store.set_central_name(central_name=name)
@@ -996,6 +1004,11 @@ class LoomCentralAdapter:
         client.store.set_locale(locale=locale)
         self._refresh_group: Any = None
         self._hub_reconcile_task: asyncio.Task[None] | None = None
+        # Alarm-panel unique_ids already announced to HA via
+        # DataPointsCreatedEvent — a live ``alarm.panel_changed`` push for a
+        # panel outside this set means a new area appeared at runtime and its
+        # entity must be spawned (mirrors the device.created reconcile).
+        self._announced_alarm_panel_ids: set[str] = set()
         # HA entities subscribe on aiohomematic's *own* event bus and match
         # events by ``type(event)``/``.key``. The adapter therefore exposes a
         # real aiohomematic EventBus (not the loom wire bus) as ``event_bus``
@@ -1140,6 +1153,11 @@ class LoomCentralAdapter:
             # onto the singletons — this replaces the old 30 s poll loop. The
             # cold-start fetch above seeded the values once; the pushes keep them live.
             self.hub_coordinator.install_push_routing(group=self._refresh_group)
+            # Spawn the HA entity for an alarm panel that appears at runtime
+            # (area created / master materialising at the second area). The
+            # wire bridge seeded the store stub before this handler runs —
+            # subscription groups fan out in registration order.
+            self._refresh_group.subscribe(event_type=LoomAlarmPanelChangedEvent, handler=self._on_alarm_panel_changed)
             # Announce every data point (generic + custom) in one batch *after*
             # the custom DPs are attached, so HA's platforms spawn entities for
             # them too. Published on the real aiohomematic bus as the real
@@ -1157,6 +1175,34 @@ class LoomCentralAdapter:
             # idempotent and None-safe, so it cleans up whatever was created.
             await self.stop()
             raise
+
+    async def _on_alarm_panel_changed(self, event: LoomAlarmPanelChangedEvent, /) -> None:
+        """Announce a net-new alarm panel to HA (entity spawn at runtime)."""
+        payload = event.payload
+        if payload.removed:
+            self._announced_alarm_panel_ids.discard(payload.unique_id)
+            return
+        if payload.unique_id in self._announced_alarm_panel_ids:
+            return
+        panel = self._client.store.get_alarm_panel(unique_id=payload.unique_id)
+        category = getattr(panel, "category", None)
+        if panel is None or category is None:
+            return
+        try:
+            aio_category = AioDataPointCategory(str(getattr(category, "value", category)))
+        except ValueError:
+            return  # installed aiohomematic lacks the category — same gate as the batch announce
+        self._announced_alarm_panel_ids.add(payload.unique_id)
+        await self._ha_bus.publish(
+            event=AioDataPointsCreatedEvent(
+                timestamp=datetime.now(tz=UTC),
+                # The compat panel satisfies the callback protocol structurally
+                # (register/unregister via the hub-entity surface); the domain
+                # base type the store getter returns doesn't carry that in its
+                # static type, hence the cast.
+                new_data_points={aio_category: (cast("Any", panel),)},
+            )
+        )
 
     async def _hub_reconcile_loop(self) -> None:
         """Re-seed the hub singletons from the aggregate every reconcile interval."""
@@ -1183,6 +1229,11 @@ class LoomCentralAdapter:
             if device.summary.updatable
         ]
         event_groups = self.query_facade.get_event_groups(registered=False)
+        alarm_panels = list(self._client.store.alarm_panels)
+        # Identity map so only panels that actually survive the category gate
+        # below count as announced — a gated panel must stay un-announced so
+        # the runtime announce can pick it up once aiohomematic is capable.
+        alarm_panel_uid_by_id = {id(panel): panel.unique_id for panel in alarm_panels}
         for dp in (
             *self._client.store.data_points,
             *self._client.store.custom_data_points,
@@ -1190,6 +1241,7 @@ class LoomCentralAdapter:
             *hub_dps,
             *update_dps,
             *event_groups,
+            *alarm_panels,
         ):
             loom_category = getattr(dp, "category", None)
             if loom_category is None:
@@ -1199,7 +1251,18 @@ class LoomCentralAdapter:
             # Loom and aiohomematic share identical category *values*; map by
             # value (the loom StrEnum's ``str()`` yields its repr, not the value).
             category_value = getattr(loom_category, "value", loom_category)
-            grouped.setdefault(AioDataPointCategory(category_value), []).append(dp)
+            try:
+                aio_category = AioDataPointCategory(category_value)
+            except ValueError:
+                # A loom-only category the installed aiohomematic does not know
+                # yet (e.g. alarm_control_panel before its enum lands upstream)
+                # — skip rather than crash; the entities appear once
+                # aiohomematic ships the member.
+                _LOGGER.debug("skipping %s data points — aiohomematic lacks the category", category_value)
+                continue
+            grouped.setdefault(aio_category, []).append(dp)
+            if (panel_uid := alarm_panel_uid_by_id.get(id(dp))) is not None:
+                self._announced_alarm_panel_ids.add(panel_uid)
         if grouped:
             await self._ha_bus.publish(
                 event=AioDataPointsCreatedEvent(

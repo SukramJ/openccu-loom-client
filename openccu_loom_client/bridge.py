@@ -22,6 +22,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from openccu_loom_client.events import (
+    AlarmCountdownEvent,
+    AlarmHealthChangedEvent,
+    AlarmPanelChangedEvent,
+    AlarmReadinessChangedEvent,
+    AlarmStateChangedEvent,
+    AlarmTriggeredEvent,
     CustomDataPointStateChangedEvent,
     DataPointValueChangedEvent,
     DeviceCreatedEvent,
@@ -44,7 +50,7 @@ def bind_ws_events_to_store(
     """
     Subscribe the standard wire→store handlers on ``group``.
 
-    Six subscriptions are installed:
+    These subscriptions are installed:
 
     - ``DataPointValueChangedEvent`` → ``store.apply_value_changed``
     - ``CustomDataPointStateChangedEvent`` →
@@ -53,8 +59,10 @@ def bind_ws_events_to_store(
     - ``DeviceRemovedEvent`` → ``store.apply_device_removed``
     - ``SysvarChangedEvent`` → ``store.apply_sysvar_changed``
     - ``ProgramExecutedEvent`` → ``store.apply_program_executed``
+    - the six ``alarm.*`` store mutations (panel/state/countdown/
+      readiness/triggered/health) → ``store.apply_alarm_*``
 
-    All six are scoped to the supplied :class:`SubscriptionGroup`
+    All of them are scoped to the supplied :class:`SubscriptionGroup`
     so the high-level client can tear them down with a single
     ``group.cancel()`` on close.
 
@@ -85,9 +93,33 @@ def bind_ws_events_to_store(
     async def on_program(event: ProgramExecutedEvent) -> None:
         store.apply_program_executed(payload=event.payload)
 
+    async def on_alarm_panel(event: AlarmPanelChangedEvent) -> None:
+        store.apply_alarm_panel_changed(payload=event.payload)
+
+    async def on_alarm_state(event: AlarmStateChangedEvent) -> None:
+        store.apply_alarm_state_changed(payload=event.payload)
+
+    async def on_alarm_countdown(event: AlarmCountdownEvent) -> None:
+        store.apply_alarm_countdown(payload=event.payload)
+
+    async def on_alarm_readiness(event: AlarmReadinessChangedEvent) -> None:
+        store.apply_alarm_readiness_changed(payload=event.payload)
+
+    async def on_alarm_triggered(event: AlarmTriggeredEvent) -> None:
+        store.apply_alarm_triggered(payload=event.payload)
+
+    async def on_alarm_health(event: AlarmHealthChangedEvent) -> None:
+        store.apply_alarm_health_changed(payload=event.payload)
+
     group.subscribe(event_type=DataPointValueChangedEvent, handler=on_value)
     group.subscribe(event_type=CustomDataPointStateChangedEvent, handler=on_cdp_state)
     group.subscribe(event_type=DeviceCreatedEvent, handler=on_created)
     group.subscribe(event_type=DeviceRemovedEvent, handler=on_removed)
     group.subscribe(event_type=SysvarChangedEvent, handler=on_sysvar)
     group.subscribe(event_type=ProgramExecutedEvent, handler=on_program)
+    group.subscribe(event_type=AlarmPanelChangedEvent, handler=on_alarm_panel)
+    group.subscribe(event_type=AlarmStateChangedEvent, handler=on_alarm_state)
+    group.subscribe(event_type=AlarmCountdownEvent, handler=on_alarm_countdown)
+    group.subscribe(event_type=AlarmReadinessChangedEvent, handler=on_alarm_readiness)
+    group.subscribe(event_type=AlarmTriggeredEvent, handler=on_alarm_triggered)
+    group.subscribe(event_type=AlarmHealthChangedEvent, handler=on_alarm_health)

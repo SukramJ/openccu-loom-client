@@ -34,7 +34,13 @@ from openccu_loom_types.enums import DataPointType, DataPointUsage, ParamsetKey
 from openccu_loom_client.compat.aiohomematic.model.naming import generic_translated_name
 
 if TYPE_CHECKING:
-    from openccu_loom_types.rest import CustomDPSummary, DataPointSummary, ProgramSummary, SysvarSummary
+    from openccu_loom_types.rest import (
+        AlarmPanelEntity,
+        CustomDPSummary,
+        DataPointSummary,
+        ProgramSummary,
+        SysvarSummary,
+    )
 
     from openccu_loom_client.model import Device
     from openccu_loom_client.store import LoomStore
@@ -512,10 +518,11 @@ class _HubProtocolSurface(_CommonProtocolSurface):
     """Protocol tail shared by hub (sysvar + program) data points."""
 
     if TYPE_CHECKING:
-        # Shared by both hub kinds, whose summary types differ — declared as a
+        # Shared by the hub kinds, whose summary types differ — declared as a
         # union so the cross-kind reads below stay ``getattr`` (a sysvar-only
         # field like ``value`` is absent on a program summary and vice versa).
-        summary: SysvarSummary | ProgramSummary
+        # The alarm panel rides the same tail (it is hub-level too).
+        summary: SysvarSummary | ProgramSummary | AlarmPanelEntity
         _store: LoomStore
 
         @property

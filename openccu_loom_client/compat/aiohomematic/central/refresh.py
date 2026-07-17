@@ -43,6 +43,7 @@ from openccu_loom_client.compat.aiohomematic._upstream import (
     DataPointStateChangedEvent,
     DeviceLifecycleEvent,
     DeviceLifecycleEventType,
+    DeviceRemovedEvent as AioDeviceRemovedEvent,
     DeviceTriggerEvent,
     DeviceTriggerEventType,
     OptimisticRollbackEvent,
@@ -51,6 +52,11 @@ from openccu_loom_client.compat.aiohomematic._upstream import (
 from openccu_loom_client.compat.aiohomematic.model.custom import custom_unique_id
 from openccu_loom_client.compat.aiohomematic.model.hub import sysvar_unique_id
 from openccu_loom_client.events import (
+    AlarmCountdownEvent,
+    AlarmPanelChangedEvent,
+    AlarmReadinessChangedEvent,
+    AlarmStateChangedEvent,
+    AlarmTriggeredEvent,
     CentralStateChangedEvent as LoomCentralStateChangedEvent,
     CustomDataPointStateChangedEvent,
     DataPointValueChangedEvent,
@@ -93,6 +99,7 @@ def install_refresh_bridge(
     _wire_value_events(group=group, store=store, ha_bus=ha_bus)
     _wire_trigger_and_rollback(group=group, store=store, ha_bus=ha_bus, event_group_resolver=event_group_resolver)
     _wire_central_and_lifecycle(group=group, ha_bus=ha_bus, central_name=central_name)
+    _wire_alarm_events(group=group, store=store, ha_bus=ha_bus)
 
 
 def _device_attrs(*, store: LoomStore, address: str) -> tuple[str, str, str | None]:
@@ -246,6 +253,59 @@ def _wire_trigger_and_rollback(
 
     group.subscribe(event_type=LoomDeviceTriggerEvent, handler=on_trigger)
     group.subscribe(event_type=DataPointOptimisticRolledBackEvent, handler=on_rollback)
+
+
+def _wire_alarm_events(*, group: SubscriptionGroup, store: LoomStore, ha_bus: AioEventBus) -> None:
+    """
+    Bridge the alarm pushes to keyed ``DataPointStateChangedEvent`` pings.
+
+    The panel entity subscribes keyed by its daemon-computed
+    ``unique_id`` (``openccu-loom_alarm_<area>``). ``alarm.panel_changed``
+    carries the key directly; the area-scoped detail pushes (state,
+    countdown tick, readiness, trigger) resolve area → panel through the
+    store. State itself travels on ``panel_changed`` — the detail pushes
+    only refresh the entity's extra attributes.
+
+    A ``panel_changed`` with ``removed`` (area deleted, or the master
+    dematerialising at < 2 areas) becomes aiohomematic's data-point
+    flavour of :class:`DeviceRemovedEvent` (only ``unique_id`` set) —
+    the generic hub entity base subscribes to exactly that key and
+    removes itself from the entity registry.
+    """
+
+    async def _ping(*, ts: Any, unique_id: str, value: Any = None) -> None:
+        await ha_bus.publish(event=DataPointStateChangedEvent(timestamp=ts, unique_id=unique_id, new_value=value))
+
+    async def _ping_area(*, ts: Any, area_id: str) -> None:
+        panel = store.get_alarm_panel_by_area(area_id=area_id)
+        if panel is not None:
+            await _ping(ts=ts, unique_id=panel.unique_id)
+
+    async def on_panel_changed(event: AlarmPanelChangedEvent) -> None:
+        if event.payload.removed:
+            await ha_bus.publish(
+                event=AioDeviceRemovedEvent(timestamp=datetime.now(tz=UTC), unique_id=event.payload.unique_id)
+            )
+            return
+        await _ping(ts=event.ts, unique_id=event.payload.unique_id, value=event.payload.state)
+
+    async def on_alarm_state(event: AlarmStateChangedEvent) -> None:
+        await _ping_area(ts=event.ts, area_id=event.payload.area_id)
+
+    async def on_countdown(event: AlarmCountdownEvent) -> None:
+        await _ping_area(ts=event.ts, area_id=event.payload.area_id)
+
+    async def on_readiness(event: AlarmReadinessChangedEvent) -> None:
+        await _ping_area(ts=event.ts, area_id=event.payload.area_id)
+
+    async def on_triggered(event: AlarmTriggeredEvent) -> None:
+        await _ping_area(ts=event.ts, area_id=event.payload.area_id)
+
+    group.subscribe(event_type=AlarmPanelChangedEvent, handler=on_panel_changed)
+    group.subscribe(event_type=AlarmStateChangedEvent, handler=on_alarm_state)
+    group.subscribe(event_type=AlarmCountdownEvent, handler=on_countdown)
+    group.subscribe(event_type=AlarmReadinessChangedEvent, handler=on_readiness)
+    group.subscribe(event_type=AlarmTriggeredEvent, handler=on_triggered)
 
 
 def _wire_central_and_lifecycle(*, group: SubscriptionGroup, ha_bus: AioEventBus, central_name: str) -> None:
