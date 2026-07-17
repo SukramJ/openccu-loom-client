@@ -1230,6 +1230,10 @@ class LoomCentralAdapter:
         ]
         event_groups = self.query_facade.get_event_groups(registered=False)
         alarm_panels = list(self._client.store.alarm_panels)
+        # Identity map so only panels that actually survive the category gate
+        # below count as announced — a gated panel must stay un-announced so
+        # the runtime announce can pick it up once aiohomematic is capable.
+        alarm_panel_uid_by_id = {id(panel): panel.unique_id for panel in alarm_panels}
         for dp in (
             *self._client.store.data_points,
             *self._client.store.custom_data_points,
@@ -1257,7 +1261,8 @@ class LoomCentralAdapter:
                 _LOGGER.debug("skipping %s data points — aiohomematic lacks the category", category_value)
                 continue
             grouped.setdefault(aio_category, []).append(dp)
-        self._announced_alarm_panel_ids.update(panel.unique_id for panel in alarm_panels)
+            if (panel_uid := alarm_panel_uid_by_id.get(id(dp))) is not None:
+                self._announced_alarm_panel_ids.add(panel_uid)
         if grouped:
             await self._ha_bus.publish(
                 event=AioDataPointsCreatedEvent(

@@ -14,11 +14,14 @@ keyed by the daemon-computed panel ``unique_id``.
 
 from __future__ import annotations
 
+from typing import Any
+
 from aiohomematic.async_support import Looper
 from aiohomematic.central.events import DataPointStateChangedEvent, EventBus as AioEventBus
 from openccu_loom_types.enums import DataPointCategory
 from openccu_loom_types.rest import AlarmPanelEntity, Kind1 as Kind
 from openccu_loom_types.ws import AlarmCountdownPayload, AlarmPanelChangedPayload
+import pytest
 
 from openccu_loom_client.compat.aiohomematic.central.adapter import _category_for_type
 from openccu_loom_client.compat.aiohomematic.central.refresh import install_refresh_bridge
@@ -160,28 +163,22 @@ class TestAdapterAlarmPanels:
             central.query_facade.get_data_points(category=DataPointCategory.AlarmControlPanel, registered=False) == ()
         )
 
-    async def test_batch_announce_gates_on_missing_aio_category(self) -> None:
-        # The installed aiohomematic (2026.7.x) does not know
-        # alarm_control_panel yet — the announce must skip the panels
-        # instead of crashing, and other categories must still land.
-        central = await self._central_with_panels()
-        seen: list[dict] = []
-        group = central.event_bus.create_subscription_group(name="spawn")
+    @staticmethod
+    def _subscribe_created(central: Any) -> list[dict]:
         from aiohomematic.central.events import DataPointsCreatedEvent as AioDataPointsCreatedEvent
 
+        seen: list[dict] = []
+        group = central.event_bus.create_subscription_group(name="spawn")
         group.subscribe(
             event_type=AioDataPointsCreatedEvent,
             event_key=None,
             handler=lambda *, event: seen.append(dict(event.new_data_points)),
         )
-        await central._emit_data_points_created()
-        await central._looper.block_till_done()
-        flat = [dp for grouped in seen for dps in grouped.values() for dp in dps]
-        assert all(not isinstance(dp, LoomDpAlarmControlPanel) for dp in flat)
+        return seen
 
-    async def test_runtime_panel_announce_gates_without_crash(self) -> None:
-        central = await self._central_with_panels()
-        event = AlarmPanelChangedEvent(
+    @staticmethod
+    def _panel_changed_event(*, removed: bool = False) -> AlarmPanelChangedEvent:
+        return AlarmPanelChangedEvent(
             seq=1,
             kind=Kind.change,
             ts="2026-07-16T08:00:00Z",
@@ -192,12 +189,71 @@ class TestAdapterAlarmPanels:
                     "name": "EG",
                     "state": "armed_away",
                     "available": True,
+                    "removed": removed,
                 }
             ),
         )
-        # Gate path (aiohomematic lacks the category): no announce, no crash,
-        # and the id stays un-announced so a future capable announce can fire.
+
+    async def test_batch_announce_groups_panels_under_aio_category(self) -> None:
+        # aiohomematic ≥ 2026.7.7 carries the ALARM_CONTROL_PANEL member,
+        # so the batch announce delivers panels under it.
+        from aiohomematic.const import DataPointCategory as AioDataPointCategory
+
+        central = await self._central_with_panels()
+        seen = self._subscribe_created(central)
+        await central._emit_data_points_created()
+        await central._looper.block_till_done()
+        panels = [
+            dp
+            for grouped in seen
+            for category, dps in grouped.items()
+            if category == AioDataPointCategory.ALARM_CONTROL_PANEL
+            for dp in dps
+        ]
+        assert len(panels) == 1
+        assert isinstance(panels[0], LoomDpAlarmControlPanel)
+        assert central._announced_alarm_panel_ids == {"openccu-loom_alarm_eg"}
+
+    async def test_runtime_panel_announce_publishes_and_dedupes(self) -> None:
+        from aiohomematic.const import DataPointCategory as AioDataPointCategory
+
+        central = await self._central_with_panels()
+        seen = self._subscribe_created(central)
+        event = self._panel_changed_event()
         await central._on_alarm_panel_changed(event)
+        await central._looper.block_till_done()
+        assert central._announced_alarm_panel_ids == {"openccu-loom_alarm_eg"}
+        assert len(seen) == 1
+        (announced,) = seen[0][AioDataPointCategory.ALARM_CONTROL_PANEL]
+        assert isinstance(announced, LoomDpAlarmControlPanel)
+        # A second push for the same panel must not re-announce ...
+        await central._on_alarm_panel_changed(event)
+        await central._looper.block_till_done()
+        assert len(seen) == 1
+        # ... and a removal discards the id so a re-created area re-announces.
+        await central._on_alarm_panel_changed(self._panel_changed_event(removed=True))
+        assert central._announced_alarm_panel_ids == set()
+
+    async def test_announce_gates_when_aiohomematic_lacks_the_category(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Simulate an aiohomematic < 2026.7.7 (no ALARM_CONTROL_PANEL member):
+        # both announce paths must skip the panels instead of crashing, and
+        # the id must stay un-announced so a capable announce can fire later.
+        from enum import StrEnum
+
+        from openccu_loom_client.compat.aiohomematic.central import adapter as adapter_module
+
+        class _OldAioDataPointCategory(StrEnum):
+            SWITCH = "switch"
+
+        monkeypatch.setattr(adapter_module, "AioDataPointCategory", _OldAioDataPointCategory)
+        central = await self._central_with_panels()
+        seen = self._subscribe_created(central)
+        await central._emit_data_points_created()
+        await central._looper.block_till_done()
+        flat = [dp for grouped in seen for dps in grouped.values() for dp in dps]
+        assert all(not isinstance(dp, LoomDpAlarmControlPanel) for dp in flat)
+        assert central._announced_alarm_panel_ids == set()
+        await central._on_alarm_panel_changed(self._panel_changed_event())
         assert central._announced_alarm_panel_ids == set()
 
 

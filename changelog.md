@@ -36,9 +36,11 @@ cross-repo remainder is tracked in `todo.md`.
   member-_name_ lookup returned `None` for `DataPointType.SIREN` & friends
   (making type-only queries unfiltered); matching now happens on the shared
   string value, pinned by tests.
-- Chore: `openccu-loom-types` 0.1.55 → 0.1.56; `category_golden.json` gains
-  `alarm_control_panel` (anticipating the aiohomematic enum addition);
-  dev-toolchain bumps (mypy 2.3.0, ruff 0.15.22, coverage 7.15.2, prek 0.4.10,
+- Chore: `openccu-loom-types` 0.1.55 → 0.1.56; `aiohomematic` 2026.7.6 →
+  2026.7.7 (ships the `ALARM_CONTROL_PANEL` vocabulary, so the compat announce
+  paths now deliver panels — the version gate stays covered by a simulated-old
+  test); `category_golden.json` gains `alarm_control_panel`; dev-toolchain
+  bumps (mypy 2.3.0, ruff 0.15.22, coverage 7.15.2, prek 0.4.10,
   codespell 2.4.3).
 
 # Version 2026.7.11 (2026-07-14)
