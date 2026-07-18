@@ -218,6 +218,19 @@ class DevicesOperations(_OperationsBase):
             allow_retry=False,
         )
 
+    async def refresh_firmware_data(self) -> None:
+        """
+        Force a daemon-wide firmware sweep (daemon ≥ 0.42.8).
+
+        Wire: ``POST /devices/firmware/refresh`` — re-reads every
+        device's firmware record (installed/available version, update
+        lifecycle state) from the CCU and propagates it onto the live
+        device models. Not retried — a duplicate sweep is wasted CCU
+        work; the periodic ``central.firmware_check`` job covers missed
+        calls.
+        """
+        await self._transport.request(method="POST", path="/devices/firmware/refresh", allow_retry=False)
+
     async def accept_device(self, *, address: str) -> None:
         """
         Promote a pending pairing candidate into the registry.

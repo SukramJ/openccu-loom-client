@@ -1,3 +1,37 @@
+# Version 2026.7.13 (2026-07-18)
+
+Alarm follow-ups for daemon ≥ 0.43.x (types 0.1.61, API 2.27.0). Both daemon
+asks from 2026.7.12 shipped upstream (openccu-loom #357/#358) and are consumed
+here; the contract delta is otherwise additive.
+
+- Feature: **effective code policy on the panel.** `AlarmPanelEntity` and every
+  `alarm.panel_changed` push now carry `code_arm_required` /
+  `code_disarm_required` (required fields — daemon-computed: area policy AND an
+  applicable enabled PIN exists; the master aggregates any-area). The domain
+  `AlarmPanel` exposes both, the compat twin's documented placeholder-False
+  properties are removed, the store propagates live policy edits from the push
+  (stub-seed included — building the entity without the fields would now fail
+  validation).
+- Feature: **`alarm.v1` capability gate.** `_bootstrap_alarm_panels` now gates
+  on the `/info` capability token (daemon ≥ 0.43.1 emits it exactly when the
+  `/alarm` surface is mounted; the types pin makes such a daemon a connect()
+  precondition). The 404 probe stays as fallback for info-less injected
+  transports.
+- Feature: **`alarm.notification` bound** (daemon ≥ 0.43.1): notification-class
+  outputs firing become `AlarmNotificationEvent` (keyed by area) — one-shot,
+  mode-filtered, never cancelled by silence. The broadcast drift-guard is green
+  again (34 broadcasts).
+- Feature: **setup-wizard candidate routes**: `client.alarm.list_output_candidates()`
+  (`GET /alarm/output-candidates` — capability-derived output classes incl.
+  localised tone/pattern/soundfile labels) and `list_remote_key_candidates()`
+  (`GET /alarm/remote-key-candidates` — keyfob/wall-button key channels for
+  guided bindings).
+- Feature: **`client.devices.refresh_firmware_data()`**
+  (`POST /devices/firmware/refresh`, daemon ≥ 0.42.8) — forces the daemon-wide
+  firmware sweep backing the update entities.
+- Chore: `openccu-loom-types` 0.1.56 → 0.1.61 (pins daemon ≥ 0.43.2 via the
+  same-major/minor-≥ handshake).
+
 # Version 2026.7.12 (2026-07-16)
 
 Alarm control panel, client side complete (daemon ≥ 0.42.0 / API 2.22.0,

@@ -9,8 +9,10 @@ verbs (arm/disarm/silence/acknowledge), panel entities, readiness,
 journal, walk test, output test fire and PIN-code administration.
 
 The daemon leaves every ``/alarm`` route unmounted when the alarm
-subsystem is disabled (there is no ``/info`` capability token for it
-yet), so callers feature-detect by treating a
+subsystem is disabled. Since daemon 0.43.1 the ``/info`` capability
+list carries ``alarm.v1`` exactly when the surface is mounted —
+callers gate on that token (as :meth:`LoomClient._bootstrap_alarm_panels`
+does) and keep treating a
 :class:`~openccu_loom_client.exceptions.LoomNotFoundError` on the
 first read as "alarm not available" rather than an error.
 """
@@ -29,7 +31,9 @@ from openccu_loom_types.rest import (
     AlarmJournalEntry,
     AlarmModeReadiness,
     AlarmOutput,
+    AlarmOutputCandidate,
     AlarmPanelEntity,
+    AlarmRemoteKeyCandidate,
     AlarmSensor,
     AlarmWalkTestStatus,
 )
@@ -151,6 +155,31 @@ class AlarmOperations(_OperationsBase):
             path=f"/alarm/areas/{quote(area_id, safe='')}/outputs",
             json_body=[self._to_json_body(output) for output in outputs],
             allow_retry=True,
+        )
+
+    # ---- enrollment candidates (setup wizard; daemon ≥ 0.43.0) ----
+
+    async def list_output_candidates(self) -> list[AlarmOutputCandidate]:
+        """
+        Return the channels that can back each device-backed output class.
+
+        Wire: ``GET /alarm/output-candidates`` — derived from the live
+        domain model (incl. ON_TIME-gated switched-siren eligibility)
+        with the device's real ENUM value lists + localised labels
+        (tones, optical patterns, soundfiles).
+        """
+        return await self._request_list(method="GET", path="/alarm/output-candidates", model=AlarmOutputCandidate)
+
+    async def list_remote_key_candidates(self) -> list[AlarmRemoteKeyCandidate]:
+        """
+        Return the physical remote/wall-button key channels for bindings.
+
+        Wire: ``GET /alarm/remote-key-candidates`` — PRESS_SHORT /
+        PRESS_LONG key channels from the live model (virtual remotes
+        excluded), for guided keyfob-arming code bindings.
+        """
+        return await self._request_list(
+            method="GET", path="/alarm/remote-key-candidates", model=AlarmRemoteKeyCandidate
         )
 
     # ---- verbs ----

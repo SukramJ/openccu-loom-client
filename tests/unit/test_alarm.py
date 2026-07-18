@@ -53,6 +53,8 @@ def _panel_entity(
     available: bool = True,
     master: bool = False,
     supported_modes: list[str] | None = None,
+    code_arm_required: bool = False,
+    code_disarm_required: bool = False,
 ) -> AlarmPanelEntity:
     return AlarmPanelEntity.model_validate(
         {
@@ -64,6 +66,8 @@ def _panel_entity(
             "available": available,
             "master": master,
             "supported_modes": supported_modes if supported_modes is not None else ["perimeter", "full"],
+            "code_arm_required": code_arm_required,
+            "code_disarm_required": code_disarm_required,
         }
     )
 
@@ -179,12 +183,37 @@ class TestAlarmApply:
                     "name": "Erdgeschoss",
                     "state": "armed_home",
                     "available": False,
+                    "code_arm_required": True,
+                    "code_disarm_required": True,
                 }
             )
         )
         assert panel is not None
         assert panel.state == "armed_home"
         assert panel.available is False
+
+    def test_panel_changed_propagates_code_policy(self) -> None:
+        # Live policy edits (code created/deleted, policy switch) ride the
+        # push — the panel must reflect them without a catalogue reconcile.
+        store = _store_with_panels(_panel_entity())
+        panel = store.get_alarm_panel_by_area(area_id="erdgeschoss")
+        assert panel is not None
+        assert panel.code_arm_required is False
+        store.apply_alarm_panel_changed(
+            payload=AlarmPanelChangedPayload.model_validate(
+                {
+                    "unique_id": "openccu-loom_alarm_erdgeschoss",
+                    "area_id": "erdgeschoss",
+                    "name": "Erdgeschoss",
+                    "state": "disarmed",
+                    "available": True,
+                    "code_arm_required": True,
+                    "code_disarm_required": True,
+                }
+            )
+        )
+        assert panel.code_arm_required is True
+        assert panel.code_disarm_required is True
 
     def test_panel_changed_removed_drops_panel(self) -> None:
         store = _store_with_panels(_panel_entity())
@@ -196,6 +225,8 @@ class TestAlarmApply:
                     "name": "Erdgeschoss",
                     "state": "disarmed",
                     "available": True,
+                    "code_arm_required": False,
+                    "code_disarm_required": False,
                     "removed": True,
                 }
             )
@@ -213,6 +244,8 @@ class TestAlarmApply:
                     "name": "Alarmanlage",
                     "state": "disarmed",
                     "available": True,
+                    "code_arm_required": True,
+                    "code_disarm_required": False,
                 }
             )
         )
@@ -445,11 +478,33 @@ class TestAlarmEventDispatch:
                     "name": "EG",
                     "state": "armed_away",
                     "available": True,
+                    "code_arm_required": False,
+                    "code_disarm_required": False,
                 },
             )
         )
         assert isinstance(event, AlarmPanelChangedEvent)
         assert event.event_key == "openccu-loom_alarm_eg"
+
+    def test_notification_keyed_by_area(self) -> None:
+        from openccu_loom_client.events.types import AlarmNotificationEvent
+
+        event = event_from_envelope(
+            envelope=_envelope(
+                type_="alarm.notification",
+                payload={
+                    "area_id": "eg",
+                    "area_name": "EG",
+                    "output_id": "out|1",
+                    "output_name": "Push",
+                    "incident_id": 9,
+                    "mode": "full",
+                },
+            )
+        )
+        assert isinstance(event, AlarmNotificationEvent)
+        assert event.event_key == "eg"
+        assert event.payload.incident_id == 9
 
     def test_journal_appended_parses_class_alias(self) -> None:
         event = event_from_envelope(
@@ -474,9 +529,12 @@ _INFO = {
     "addon_build": False,
     "started_at": "2026-05-24T10:01:00Z",
     "uptime": "PT60S",
-    "capabilities": ["rest.v1", "ws.broadcasts.v1"],
+    "capabilities": ["rest.v1", "ws.broadcasts.v1", "alarm.v1"],
     "schema_digest": "sha256:test",
 }
+
+# A daemon whose alarm subsystem is off: no ``alarm.v1`` token.
+_INFO_NO_ALARM = {**_INFO, "capabilities": ["rest.v1", "ws.broadcasts.v1"]}
 
 
 @pytest.fixture
@@ -566,8 +624,8 @@ class TestBootstrapAlarm:
             await client.close()
 
     async def test_bootstrap_skips_alarm_on_404(self, mock_daemon: MockDaemon) -> None:
-        # No /alarm stubs registered — the mock answers 404 problem+json,
-        # exactly like a daemon whose alarm subsystem is disabled.
+        # Token advertised but no /alarm stubs registered — the mock answers
+        # 404 problem+json; the fallback path must degrade to "no alarm".
         mock_daemon.get("/api/v1/info", payload=_INFO)
         mock_daemon.get("/api/v1/snapshot", payload=_EMPTY_SNAPSHOT)
         client = LoomClient(config=mock_daemon.config)
@@ -575,5 +633,19 @@ class TestBootstrapAlarm:
             await client.connect()
             await client.bootstrap()
             assert list(client.store.alarm_panels) == []
+        finally:
+            await client.close()
+
+    async def test_bootstrap_skips_alarm_without_capability(self, mock_daemon: MockDaemon) -> None:
+        # No ``alarm.v1`` token → the section is skipped without a single
+        # /alarm round-trip (the capability gate, daemon ≥ 0.43.1).
+        mock_daemon.get("/api/v1/info", payload=_INFO_NO_ALARM)
+        mock_daemon.get("/api/v1/snapshot", payload=_EMPTY_SNAPSHOT)
+        client = LoomClient(config=mock_daemon.config)
+        try:
+            await client.connect()
+            await client.bootstrap()
+            assert list(client.store.alarm_panels) == []
+            assert not any(r.path.startswith("/api/v1/alarm") for r in mock_daemon.requests)
         finally:
             await client.close()

@@ -28,6 +28,7 @@ from openccu_loom_types.ws import (
     AlarmCountdownPayload,
     AlarmHealthChangedPayload,
     AlarmJournalAppendedPayload,
+    AlarmNotificationPayload,
     AlarmPanelChangedPayload,
     AlarmReadinessChangedPayload,
     AlarmReminderPayload,
@@ -539,6 +540,25 @@ class AlarmReminderEvent(LoomEvent):
 
 
 @dataclass(slots=True, kw_only=True)
+class AlarmNotificationEvent(LoomEvent):
+    """
+    A notification-class alarm output fired (daemon ≥ 0.43.1).
+
+    One-shot, per-area and mode-filtered at fire time — never cancelled
+    by a later silence. Consumers use it for user-land escalation
+    (push message, logbook entry); it carries no panel state.
+    """
+
+    payload: AlarmNotificationPayload
+    type_id: ClassVar[str] = "alarm.notification"
+
+    def __post_init__(self) -> None:
+        """Default the routing key to the payload's area id."""
+        if self.event_key is None:
+            self.event_key = self.payload.area_id
+
+
+@dataclass(slots=True, kw_only=True)
 class MatterCommissioningProgressEvent(LoomEvent):
     """Progress update while a Matter device is being commissioned."""
 
@@ -638,6 +658,7 @@ _EVENT_REGISTRY: Final[dict[str, tuple[Callable[..., LoomEvent], type[BaseModel]
     AlarmHealthChangedEvent.type_id: (AlarmHealthChangedEvent, AlarmHealthChangedPayload),
     AlarmPanelChangedEvent.type_id: (AlarmPanelChangedEvent, AlarmPanelChangedPayload),
     AlarmReminderEvent.type_id: (AlarmReminderEvent, AlarmReminderPayload),
+    AlarmNotificationEvent.type_id: (AlarmNotificationEvent, AlarmNotificationPayload),
     MatterCommissioningProgressEvent.type_id: (
         MatterCommissioningProgressEvent,
         MatterCommissioningProgressPayload,
