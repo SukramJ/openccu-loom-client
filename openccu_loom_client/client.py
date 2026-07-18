@@ -300,12 +300,20 @@ class LoomClient:
         """
         Populate the store's alarm-panel section (daemon ≥ 0.42.0).
 
-        Feature-detects by probing ``GET /alarm/panels``: the daemon
-        leaves every ``/alarm`` route unmounted when the alarm subsystem
-        is disabled, so a :class:`LoomNotFoundError` means "no alarm" —
-        the store section stays empty. Live updates then ride the
-        ``alarm.*`` WS topics bound by the bridge.
+        Feature-detects via the ``alarm.v1`` capability token (daemon
+        ≥ 0.43.1 emits it exactly when the ``/alarm`` surface is
+        mounted; the types pin makes such a daemon a connect()
+        precondition, so an absent token reliably means "alarm off").
+        The 404 probe stays as a fallback for injected transports that
+        carry no ``/info`` payload — the daemon leaves every ``/alarm``
+        route unmounted when the subsystem is disabled, so a
+        :class:`LoomNotFoundError` equally means "no alarm". Live
+        updates then ride the ``alarm.*`` WS topics bound by the bridge.
         """
+        info = self._http.info
+        if info is not None and "alarm.v1" not in (info.capabilities or []):
+            _LOGGER.debug("daemon does not advertise alarm.v1 — alarm subsystem disabled, skipping panels")
+            return
         try:
             panels = await self.alarm.list_panels()
         except LoomNotFoundError:

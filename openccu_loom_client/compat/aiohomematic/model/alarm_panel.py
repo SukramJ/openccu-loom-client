@@ -83,29 +83,10 @@ class LoomDpAlarmControlPanel(_HubEntitySurface, _HubProtocolSurface, AlarmPanel
         """Return whether a state has been observed (always daemon-seeded)."""
         return bool(self.state)
 
-    @property
-    def code_arm_required(self) -> bool:
-        """
-        Whether arming requires a code.
-
-        The daemon enforces its per-area code policy server-side either
-        way (an arm without a required code answers 403); the flag only
-        drives HA's code-prompt UX. Conservative default: no prompt —
-        the flag flips once the daemon exposes the policy on the panel
-        entity.
-        """
-        return False
-
-    @property
-    def code_disarm_required(self) -> bool:
-        """
-        Whether disarming requires a code.
-
-        Same server-side enforcement note as :attr:`code_arm_required`;
-        HA still offers the code field on disarm when the panel reports
-        ``REMOTE_CODE`` semantics integration-side.
-        """
-        return False
+    # ``code_arm_required`` / ``code_disarm_required`` come from the domain
+    # wrapper: the daemon computes the effective policy (area policy AND an
+    # applicable enabled PIN exists; master aggregates any-area) and ships it
+    # on the panel entity + every ``alarm.panel_changed`` push (≥ 0.43.x).
 
     @property
     def additional_information(self) -> dict[str, Any]:

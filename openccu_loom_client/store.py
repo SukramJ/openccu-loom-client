@@ -593,7 +593,10 @@ class LoomStore:
         ``removed`` drops the panel. A push for an unknown panel seeds a
         stub entry (mirroring :meth:`apply_device_created`) — the payload
         carries everything but ``supported_modes``, which the next
-        catalogue reconcile (``GET /alarm/panels``) fills in.
+        catalogue reconcile (``GET /alarm/panels``) fills in. The
+        effective code policy (``code_arm_required`` /
+        ``code_disarm_required``, daemon ≥ 0.43.x) rides every push, so
+        live policy edits propagate without a reconcile.
         """
         if payload.removed:
             self._drop_alarm_panel(unique_id=payload.unique_id)
@@ -609,6 +612,8 @@ class LoomStore:
                     "state": payload.state,
                     "available": payload.available,
                     "master": payload.area_id == MASTER_AREA_ID,
+                    "code_arm_required": payload.code_arm_required,
+                    "code_disarm_required": payload.code_disarm_required,
                 }
             )
             self._register_alarm_panel(panel=self._build_alarm_panel(summary=stub))
@@ -619,6 +624,8 @@ class LoomStore:
                     "name": payload.name,
                     "state": payload.state,
                     "available": payload.available,
+                    "code_arm_required": payload.code_arm_required,
+                    "code_disarm_required": payload.code_disarm_required,
                 }
             )
         )

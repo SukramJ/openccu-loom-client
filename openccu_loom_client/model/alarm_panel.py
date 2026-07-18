@@ -119,6 +119,23 @@ class AlarmPanel:
         """The armable protection modes (``perimeter``/``full``/``night``/…)."""
         return tuple(self._summary.supported_modes or ())
 
+    @property
+    def code_arm_required(self) -> bool:
+        """
+        Effective code requirement for arming, daemon-computed.
+
+        True exactly when the daemon will demand a code: the area's
+        code policy AND an applicable enabled PIN code exists (master
+        aggregates any-area). Live policy edits arrive via
+        ``alarm.panel_changed``.
+        """
+        return bool(self._summary.code_arm_required)
+
+    @property
+    def code_disarm_required(self) -> bool:
+        """Effective code requirement for disarming (same derivation)."""
+        return bool(self._summary.code_disarm_required)
+
     # ---- live area detail (real areas only) ----
 
     @property

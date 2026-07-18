@@ -38,6 +38,8 @@ def _panel_entity(
     area_id: str = "eg",
     state: str = "disarmed",
     master: bool = False,
+    code_arm_required: bool = False,
+    code_disarm_required: bool = False,
 ) -> AlarmPanelEntity:
     return AlarmPanelEntity.model_validate(
         {
@@ -49,6 +51,8 @@ def _panel_entity(
             "available": True,
             "master": master,
             "supported_modes": ["perimeter", "full"],
+            "code_arm_required": code_arm_required,
+            "code_disarm_required": code_disarm_required,
         }
     )
 
@@ -85,6 +89,15 @@ class TestLoomDpAlarmControlPanel:
         store = _store_with_compat_panels(_panel_entity())
         panel = store.get_alarm_panel_by_area(area_id="eg")
         assert isinstance(panel, CallbackDataPointProtocol)
+
+    def test_code_policy_passthrough(self) -> None:
+        # The placeholder False properties are gone — the twin serves the
+        # daemon-computed effective policy off the summary.
+        store = _store_with_compat_panels(_panel_entity(code_arm_required=True, code_disarm_required=True))
+        panel = store.get_alarm_panel_by_area(area_id="eg")
+        assert isinstance(panel, LoomDpAlarmControlPanel)
+        assert panel.code_arm_required is True
+        assert panel.code_disarm_required is True
 
     def test_registration_lifecycle(self) -> None:
         store = _store_with_compat_panels(_panel_entity())
@@ -189,6 +202,8 @@ class TestAdapterAlarmPanels:
                     "name": "EG",
                     "state": "armed_away",
                     "available": True,
+                    "code_arm_required": False,
+                    "code_disarm_required": False,
                     "removed": removed,
                 }
             ),
@@ -287,6 +302,8 @@ class TestRefreshBridgeAlarm:
                         "name": "EG",
                         "state": "armed_away",
                         "available": True,
+                        "code_arm_required": False,
+                        "code_disarm_required": False,
                     }
                 ),
             )
@@ -347,6 +364,8 @@ class TestRefreshBridgeAlarm:
                         "name": "EG",
                         "state": "disarmed",
                         "available": True,
+                        "code_arm_required": False,
+                        "code_disarm_required": False,
                         "removed": True,
                     }
                 ),

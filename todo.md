@@ -177,30 +177,37 @@ fan-out mirrors the daemon's MQTT `MasterArm`), compat
 daemon-computed `openccu-loom_alarm_<area>` unique_id is consumed verbatim).
 Cross-repo remainder:
 
-- [ ] **aiohomematic**: PR open — SukramJ/aiohomematic#3296 (2026-07-16).
-      Add `DataPointCategory.ALARM_CONTROL_PANEL` +
+- [x] **aiohomematic**: DONE — SukramJ/aiohomematic#3296 merged, 2026.7.7
+      released (2026-07-17). Added `DataPointCategory.ALARM_CONTROL_PANEL` +
       `DataPointType.ALARM_CONTROL_PANEL` + `CATEGORIES` entry (pure
       vocabulary, no model class — aiohomematic never spawns one).
       `homematicip_local` derives `HMIP_LOCAL_PLATFORMS` from `CATEGORIES`,
       so the platform only mounts once this lands. The adapter announce
       gates on `ValueError` until then (pinned by
       `test_batch_announce_gates_on_missing_aio_category`).
-- [ ] **homematicip_local**: draft PR open — SukramJ/homematicip_local#1210
-      (2026-07-16; draft until aiohomematic 2026.7.7 + this client 2026.7.12
-      are released). New `alarm_control_panel.py` platform
+- [x] **homematicip_local**: DONE — SukramJ/homematicip_local#1210 merged.
+      New `alarm_control_panel.py` platform
       (loom-only dispatch on `LoomDpAlarmControlPanel`, no aio twin in the
       `backend_types.py` tuple — degrade to an empty tuple when
       `openccu-loom-client` is missing). Map `supported_modes` →
       `AlarmControlPanelEntityFeature`; state token comes daemon-computed.
       Optional custom services: `alarm_silence` / `alarm_silence_all` /
       `acknowledge` (HA has no native silence verb).
-- [ ] **daemon ask — `alarm.v1` capability token in `/info`**: filed as
-      SukramJ/openccu-loom#357 (2026-07-16). The `/alarm`
+- [x] **daemon ask — `alarm.v1` capability token in `/info`**: DONE — filed
+      as SukramJ/openccu-loom#357, shipped in daemon 0.43.x (documented in
+      the Info contract, types 0.1.61). The client gates
+      `_bootstrap_alarm_panels` on the token since 2026.7.13 (404 probe
+      kept as fallback for info-less injected transports). The `/alarm`
       routes are silently unmounted when the subsystem is off, contradicting
       the daemon's own capability principle (`info.go`). Until then the
       client 404-probes (`LoomClient._bootstrap_alarm_panels`).
-- [ ] **daemon ask — code policy on the panel entity**: filed as
-      SukramJ/openccu-loom#358 (2026-07-16). `AlarmPanelEntity`
+- [x] **daemon ask — code policy on the panel entity**: DONE — filed as
+      SukramJ/openccu-loom#358, shipped in daemon 0.43.x (types 0.1.61):
+      `code_arm_required`/`code_disarm_required` are REQUIRED fields on
+      `AlarmPanelEntity` + `AlarmPanelChangedPayload` (effective policy,
+      master aggregates any-area). Client 2026.7.13 passes them through
+      (domain properties + compat twin, placeholder-False removed);
+      homematicip_local follow-up: `code_format` prompt UX. `AlarmPanelEntity`
       does not carry `code_arm_required`/`code_disarm_required` (the MQTT
       discovery embeds them from the area policy). The compat panel
       conservatively reports `False` (daemon enforces server-side either
