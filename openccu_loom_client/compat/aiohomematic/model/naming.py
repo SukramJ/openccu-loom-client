@@ -5,13 +5,13 @@
 aiohomematic-schema display names for loom data points.
 
 The HA integration renders ``dp.translated_name`` (device prefix
-stripped) as the entity name, so the loom twins must build the same
-strings aiohomematic's ``model/support.py`` produces:
+stripped) as the entity name.
 
-* generic DPs — ``get_data_point_name_data``: the (possibly renamed)
-  CCU channel name, the parameter translation (suppressed when the
-  daemon marks the label omitted) and a `` chN`` postfix when the
-  parameter lives on several channels of the device.
+* generic DPs need no composition here: the daemon is the single
+  naming authority (>= 0.45.0) and ships the fully composed name —
+  including the ambiguity-gated `` chN`` multi-channel marker and the
+  channel-level collapse for label-omitted primary parameters — in the
+  wire ``translated_name``. The compat layer renders it verbatim.
 * custom DPs — ``get_custom_data_point_name``: the channel name with a
   ``ch<no>``/``vch<no>`` marker for primary/secondary channels of a
   channel group; the device's *only* primary channel collapses to the
@@ -91,47 +91,6 @@ def channel_display_name(*, store: LoomStore, device: Device, channel_no: int) -
     return name.strip()
 
 
-def generic_translated_name(
-    *,
-    store: LoomStore,
-    device: Device,
-    channel_no: int,
-    parameter: str,
-    translation: str | None,
-    label_omitted: bool,
-) -> str | None:
-    """
-    Build a generic DP's translated display name (aiohomematic schema).
-
-    ``translation`` is the daemon's locale-resolved entity label — it
-    already carries the channel-name part of aiohomematic's
-    ``get_data_point_name_data`` composition (a renamed channel ships
-    e.g. "Messwertkanal Strom"), so only the `` chN`` multi-channel
-    postfix is appended here. ``label_omitted`` marks the channel's
-    primary parameter whose label is suppressed (CCU translation ``""``)
-    — its name reduces to the channel name plus the postfix. The postfix
-    applies when the parameter exists on several channels of the device
-    (never on channel 0).
-    """
-    c_postfix = ""
-    if channel_no != 0 and store.is_parameter_in_multiple_channels(address=device.address, parameter=parameter):
-        c_postfix = f" ch{channel_no}"
-    if label_omitted:
-        base = channel_base_name(store=store, device=device, channel_no=channel_no)
-        c_name = base.split(_ADDRESS_SEPARATOR)[0] if has_channel_no_suffix(name=base) else base
-        name = f"{c_name}{c_postfix}".strip()
-        return strip_device_prefix(name=name, device_name=device.name)
-    if translation:
-        # Some daemon builds already append the multi-channel marker —
-        # never double it ("Eingangsspannung ch10" stays as-is).
-        if c_postfix and translation.endswith(c_postfix.strip()):
-            c_postfix = ""
-        return strip_device_prefix(name=f"{translation}{c_postfix}".strip(), device_name=device.name)
-    # No daemon translation: suppress the name instead of fabricating an
-    # English parameter title in a localised deployment.
-    return None
-
-
 def custom_name_parts(
     *,
     store: LoomStore,
@@ -197,7 +156,6 @@ __all__ = [
     "channel_base_name",
     "channel_display_name",
     "custom_name_parts",
-    "generic_translated_name",
     "has_channel_no_suffix",
     "strip_device_prefix",
 ]

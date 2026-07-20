@@ -469,21 +469,6 @@ class LoomStore:
         """Return a device's week-profile data point, or ``None`` if it has none."""
         return self._week_profile_dps.get(address)
 
-    def is_parameter_in_multiple_channels(self, *, address: str, parameter: str) -> bool:
-        """
-        Return whether a parameter exists on more than one channel of a device.
-
-        Mirrors aiohomematic's paramset-description check that drives the
-        `` chN`` display-name postfix for generic data points.
-        """
-        count = 0
-        for dp_address, _channel, dp_parameter in self._data_points:
-            if dp_address == address and dp_parameter == parameter:
-                count += 1
-                if count > 1:
-                    return True
-        return False
-
     # ---- programs ----
 
     @property
