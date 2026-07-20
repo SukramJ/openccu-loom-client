@@ -36,7 +36,6 @@ from openccu_loom_client.compat.aiohomematic.central.refresh import install_refr
 from openccu_loom_client.compat.aiohomematic.model.combined import CombinedDurationDp
 from openccu_loom_client.compat.aiohomematic.model.custom import BaseCustomDpClimate, make_custom_data_point
 from openccu_loom_client.compat.aiohomematic.model.generic import make_generic_data_point
-from openccu_loom_client.compat.aiohomematic.model.naming import custom_name_parts
 from openccu_loom_client.compat.aiohomematic.model.week_profile import ScheduleChannelSwitch, WeekProfileDp
 from openccu_loom_client.events import DataPointValueChangedEvent, EventBus
 from openccu_loom_client.store import LoomStore
@@ -60,6 +59,19 @@ def _dp_summary(**overrides: Any) -> DataPointSummary:
     return DataPointSummary.model_validate(payload)
 
 
+class _WireNamedCDPSummary(CustomDPSummary):
+    """
+    CustomDPSummary plus the naming fields daemon >= 0.45.0 ships.
+
+    openccu-loom-types gains ``translated_name``/``parameter_name`` with
+    the release generated from that daemon; the subclass lets fixtures
+    inject the wire values until the types floor moves.
+    """
+
+    translated_name: str | None = None
+    parameter_name: str | None = None
+
+
 def _cdp_summary(**overrides: Any) -> CustomDPSummary:
     payload: dict[str, Any] = {
         "name": "SET_POINT_TEMPERATURE@1",
@@ -70,7 +82,7 @@ def _cdp_summary(**overrides: Any) -> CustomDPSummary:
     }
     payload.update(overrides)
     payload.setdefault("unique_id", f"loom_test_{str(payload['name']).lower()}")
-    return CustomDPSummary.model_validate(payload)
+    return _WireNamedCDPSummary.model_validate(payload)
 
 
 def _store_with_device(
@@ -799,7 +811,7 @@ class TestGenericTranslatedName:
 
 
 class TestCustomNameParts:
-    """Custom names follow get_custom_data_point_name (ch/vch markers)."""
+    """Custom names come verbatim from the daemon wire (single naming authority)."""
 
     def _psm_store(self) -> LoomStore:
         store = _store_with_device(
@@ -812,45 +824,47 @@ class TestCustomNameParts:
                 _channel(address="VCU1", number=5, name="Weinkühlschrank:5", is_custom_dp_primary=False),
             ],
         )
+        # Daemon >= 0.45.0 composes the CDP names: the single primary
+        # collapses (no wire name), the secondaries carry vch markers.
         store.attach_custom_data_points(
             device_address="VCU1",
             cdps=[
-                _cdp_summary(name=f"STATE@{no}", category="switch", kind="switch", channel_no=no) for no in (3, 4, 5)
+                _cdp_summary(name="STATE@3", category="switch", kind="switch", channel_no=3),
+                _cdp_summary(
+                    name="STATE@4",
+                    category="switch",
+                    kind="switch",
+                    channel_no=4,
+                    translated_name="vch4",
+                    parameter_name="vch4",
+                ),
+                _cdp_summary(
+                    name="STATE@5",
+                    category="switch",
+                    kind="switch",
+                    channel_no=5,
+                    translated_name="vch5",
+                    parameter_name="vch5",
+                ),
             ],
         )
         return store
 
     def test_only_primary_channel_collapses_to_none(self) -> None:
+        # An empty wire name (also the pre-0.45.0 daemon shape) collapses
+        # the entity to the device name alone.
         store = self._psm_store()
         cdp = store.get_custom_data_point(address="VCU1", name="STATE@3")
         assert cdp.translated_name is None
 
-    def test_secondary_channels_get_vch_marker(self) -> None:
+    def test_secondary_channels_render_wire_vch_marker(self) -> None:
         store = self._psm_store()
         assert store.get_custom_data_point(address="VCU1", name="STATE@4").translated_name == "vch4"
         assert store.get_custom_data_point(address="VCU1", name="STATE@5").translated_name == "vch5"
 
-    def test_multi_primary_devices_get_ch_marker(self) -> None:
-        # HmIP-DRSI4 registers switch primaries on 6/10/14/18.
-        store = _store_with_device(
-            address="VCU1",
-            model="HmIP-DRSI4",
-            name="Schalter Dachboden",
-            channels=[
-                _channel(address="VCU1", number=6, name="Schalter Dachboden:6", is_custom_dp_primary=True),
-                _channel(address="VCU1", number=10, name="Schalter Dachboden:10", is_custom_dp_primary=True),
-            ],
-        )
-        store.attach_custom_data_points(
-            device_address="VCU1",
-            cdps=[_cdp_summary(name=f"STATE@{no}", category="switch", kind="switch", channel_no=no) for no in (6, 10)],
-        )
-        assert store.get_custom_data_point(address="VCU1", name="STATE@6").translated_name == "ch6"
-        assert store.get_custom_data_point(address="VCU1", name="STATE@10").translated_name == "ch10"
-
-    def test_renamed_channel_keeps_custom_name_with_marker(self) -> None:
-        # HmIP-BSL: switch primary 4, secondaries 5/6; channel 5 renamed
-        # 'Treppe:5' → 'Treppe vch5' (ccu twin: 'Signalleuchte FL Treppe vch5').
+    def test_renamed_channel_names_pass_through(self) -> None:
+        # HmIP-BSL: primary custom-named "Treppe", secondary named with
+        # the <name>:<no> scheme → daemon ships "Treppe" / "Treppe vch5".
         store = _store_with_device(
             address="VCU1",
             model="HmIP-BSL",
@@ -862,28 +876,20 @@ class TestCustomNameParts:
         )
         store.attach_custom_data_points(
             device_address="VCU1",
-            cdps=[_cdp_summary(name=f"STATE@{no}", category="switch", kind="switch", channel_no=no) for no in (4, 5)],
+            cdps=[
+                _cdp_summary(name="STATE@4", category="switch", kind="switch", channel_no=4, translated_name="Treppe"),
+                _cdp_summary(
+                    name="STATE@5",
+                    category="switch",
+                    kind="switch",
+                    channel_no=5,
+                    translated_name="Treppe vch5",
+                    parameter_name="vch5",
+                ),
+            ],
         )
         assert store.get_custom_data_point(address="VCU1", name="STATE@4").translated_name == "Treppe"
         assert store.get_custom_data_point(address="VCU1", name="STATE@5").translated_name == "Treppe vch5"
-
-    def test_unknown_model_falls_back_to_lowest_channel_primary(self) -> None:
-        store = _store_with_device(
-            address="VCU1",
-            model="Future-Device",
-            name="Gerät",
-            channels=[
-                _channel(address="VCU1", number=1, name="Gerät:1"),
-                _channel(address="VCU1", number=2, name="Gerät:2"),
-            ],
-        )
-        store.attach_custom_data_points(
-            device_address="VCU1",
-            cdps=[_cdp_summary(name=f"STATE@{no}", category="switch", kind="switch", channel_no=no) for no in (1, 2)],
-        )
-        device = store.get_device(address="VCU1")
-        assert custom_name_parts(store=store, device=device, channel_no=1, category_token="switch") == ("ch1", "ch1")
-        assert custom_name_parts(store=store, device=device, channel_no=2, category_token="switch") == ("vch2", "vch2")
 
     def test_button_lock_postfix_renders_parameter_name(self) -> None:
         store = _store_with_device(
@@ -894,7 +900,16 @@ class TestCustomNameParts:
         )
         store.attach_custom_data_points(
             device_address="VCU1",
-            cdps=[_cdp_summary(name="BUTTON_LOCK@0", category="lock", kind="lock", channel_no=0)],
+            cdps=[
+                _cdp_summary(
+                    name="BUTTON_LOCK@0",
+                    category="lock",
+                    kind="lock",
+                    channel_no=0,
+                    translated_name="Button Lock",
+                    parameter_name="Button Lock",
+                )
+            ],
         )
         cdp = store.get_custom_data_point(address="VCU1", name="BUTTON_LOCK@0")
         assert cdp.translated_name == "Button Lock"

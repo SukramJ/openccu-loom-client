@@ -37,7 +37,6 @@ from openccu_loom_types.enums import DataPointCategory
 from openccu_loom_client.canonical import canonical_unique_id
 from openccu_loom_client.compat.aiohomematic._upstream import ClimateMode, ClimateProfile
 from openccu_loom_client.compat.aiohomematic.model._protocol_surface import _CustomProtocolSurface, _NameData
-from openccu_loom_client.compat.aiohomematic.model.naming import custom_name_parts
 from openccu_loom_client.model import CustomDataPoint
 
 if TYPE_CHECKING:
@@ -125,10 +124,6 @@ class _CustomEntitySurface(_CustomProtocolSurface, CustomDataPoint):
 
     _category: ClassVar[DataPointCategory] = DataPointCategory.Switch
 
-    # aiohomematic's lock classes ignore the multi-channel marker for
-    # their display name (button locks render their postfix instead).
-    _ignore_multiple_channels_for_name: ClassVar[bool] = False
-
     @property
     def category(self) -> DataPointCategory:
         """Return the HA data-point category from the daemon string, else the class default."""
@@ -193,21 +188,22 @@ class _CustomEntitySurface(_CustomProtocolSurface, CustomDataPoint):
         return dp.value if dp is not None else None
 
     def _name_parts(self) -> tuple[str | None, str]:
-        """Return the ``(translated_name, parameter_name)`` pair for this CDP."""
-        device = self.device
-        if device is None:
-            return None, ""
-        return custom_name_parts(
-            store=self._store,
-            device=device,
-            channel_no=self._summary.channel_no,
-            # The *resolved* category (class default when the daemon's
-            # string has no twin — e.g. fixed-colour lights shipped as
-            # "number") keys the DeviceProfileRegistry lookup.
-            category_token=self.category.value,
-            postfix=self.data_point_name_postfix,
-            ignore_multiple_channels_for_name=self._ignore_multiple_channels_for_name,
-        )
+        """
+        Return the ``(translated_name, parameter_name)`` pair from the daemon wire.
+
+        The daemon is the single naming authority (>= 0.45.0): the CDP
+        summary ships the composed channel-level display name (custom
+        channel names verbatim, ``ch<no>``/``vch<no>`` group markers,
+        button-lock postfix labels) and the untranslated marker/postfix
+        portion. The fields reach this client with the matching
+        openccu-loom-types release; ``getattr`` keeps older type pins
+        degrading to the device-name collapse instead of crashing (same
+        pattern as the ``config`` block above).
+        """
+        summary = self._summary
+        translated = getattr(summary, "translated_name", None) or None
+        parameter = getattr(summary, "parameter_name", None) or ""
+        return translated, parameter
 
     @property
     def translated_name(self) -> str | None:
@@ -807,9 +803,6 @@ class BaseCustomDpLock(_CustomEntitySurface):
 
     _category: ClassVar[DataPointCategory] = DataPointCategory.Lock
 
-    # aiohomematic's lock classes never carry the ch/vch marker.
-    _ignore_multiple_channels_for_name: ClassVar[bool] = True
-
     @property
     def data_point_name_postfix(self) -> str:
         """
@@ -1095,7 +1088,6 @@ __all__ = [
     "DataPointCategory",
     "LockState",
     "canonical_unique_id",
-    "custom_name_parts",
     "custom_unique_id",
     "make_custom_data_point",
     "resolve_custom_class",
