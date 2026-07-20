@@ -36,7 +36,7 @@ from openccu_loom_client.compat.aiohomematic.central.refresh import install_refr
 from openccu_loom_client.compat.aiohomematic.model.combined import CombinedDurationDp
 from openccu_loom_client.compat.aiohomematic.model.custom import BaseCustomDpClimate, make_custom_data_point
 from openccu_loom_client.compat.aiohomematic.model.generic import make_generic_data_point
-from openccu_loom_client.compat.aiohomematic.model.naming import custom_name_parts, generic_translated_name
+from openccu_loom_client.compat.aiohomematic.model.naming import custom_name_parts
 from openccu_loom_client.compat.aiohomematic.model.week_profile import ScheduleChannelSwitch, WeekProfileDp
 from openccu_loom_client.events import DataPointValueChangedEvent, EventBus
 from openccu_loom_client.store import LoomStore
@@ -701,7 +701,7 @@ class TestCentralIdInference:
 
 
 class TestGenericTranslatedName:
-    """Generic names follow get_data_point_name_data (channel + label + chN)."""
+    """Generic names come verbatim from the daemon wire (single naming authority)."""
 
     def _store(self) -> LoomStore:
         store = _store_with_device(
@@ -714,24 +714,44 @@ class TestGenericTranslatedName:
                 _channel(address="VCU1", number=3, name="Belüftungsanlage:3"),
             ],
         )
-        # STATE on two channels → the ch postfix applies.
-        for channel in (2, 3):
-            store.attach_channel_data_points(
-                device_address="VCU1",
-                channel_number=channel,
-                data_points=[_dp_summary(parameter="STATE", value=True, label_omitted=True)],
-            )
+        # Daemon >= 0.45.0 ships the collapsed channel-level name in
+        # translated_name when label_omitted marks the primary
+        # parameter — the client renders it verbatim.
+        store.attach_channel_data_points(
+            device_address="VCU1",
+            channel_number=2,
+            data_points=[
+                _dp_summary(parameter="STATE", value=True, label_omitted=True, translated_name="Schaltzustand")
+            ],
+        )
+        store.attach_channel_data_points(
+            device_address="VCU1",
+            channel_number=3,
+            data_points=[_dp_summary(parameter="STATE", value=True, label_omitted=True, translated_name="ch3")],
+        )
         return store
 
-    def test_renamed_channel_with_omitted_label_keeps_channel_name(self) -> None:
+    def test_omitted_label_renders_daemon_collapsed_name(self) -> None:
         store = self._store()
         dp = store.get_data_point(address="VCU1", channel=2, parameter="STATE")
-        assert dp.translated_name == "Schaltzustand ch2"
+        assert dp.translated_name == "Schaltzustand"
 
-    def test_default_channel_with_omitted_label_collapses(self) -> None:
+    def test_omitted_label_renders_daemon_ch_marker(self) -> None:
         store = self._store()
         dp = store.get_data_point(address="VCU1", channel=3, parameter="STATE")
         assert dp.translated_name == "ch3"
+
+    def test_omitted_label_with_empty_name_collapses_to_device(self) -> None:
+        # Pre-0.45.0 daemons ship translated_name empty when the label
+        # is omitted — the entity collapses to the device name alone.
+        store = self._store()
+        store.attach_channel_data_points(
+            device_address="VCU1",
+            channel_number=0,
+            data_points=[_dp_summary(parameter="STATE", value=False, label_omitted=True)],
+        )
+        dp = store.get_data_point(address="VCU1", channel=0, parameter="STATE")
+        assert dp.translated_name is None
 
     def test_daemon_translation_passes_through(self) -> None:
         store = self._store()
@@ -741,10 +761,12 @@ class TestGenericTranslatedName:
             data_points=[_dp_summary(parameter="DUTY_CYCLE", value=False, translated_name="Duty Cycle")],
         )
         dp = store.get_data_point(address="VCU1", channel=0, parameter="DUTY_CYCLE")
-        # Channel 0 never carries the chN postfix.
         assert dp.translated_name == "Duty Cycle"
 
-    def test_renamed_channel_without_device_prefix(self) -> None:
+    def test_no_marker_reappended_to_unique_custom_names(self) -> None:
+        # The daemon decides the chN marker (ambiguity-gated since
+        # daemon 0.44.3): a unique custom channel name arrives without
+        # one, and the client must not re-append it.
         store = _store_with_device(
             address="VCU1",
             model="HmIP-MIO16-PCB",
@@ -754,14 +776,16 @@ class TestGenericTranslatedName:
                 _channel(address="VCU1", number=22, name="Lüftung Normal"),
             ],
         )
-        for channel in (18, 22):
+        for channel, wire_name in ((18, "Lüftung Hoch"), (22, "Lüftung Normal")):
             store.attach_channel_data_points(
                 device_address="VCU1",
                 channel_number=channel,
-                data_points=[_dp_summary(parameter="STATE", value=False, label_omitted=True)],
+                data_points=[
+                    _dp_summary(parameter="STATE", value=False, label_omitted=True, translated_name=wire_name)
+                ],
             )
         dp = store.get_data_point(address="VCU1", channel=18, parameter="STATE")
-        assert dp.translated_name == "Lüftung Hoch ch18"
+        assert dp.translated_name == "Lüftung Hoch"
 
     def test_missing_translation_is_suppressed_not_anglicised(self) -> None:
         store = self._store()
@@ -875,30 +899,6 @@ class TestCustomNameParts:
         cdp = store.get_custom_data_point(address="VCU1", name="BUTTON_LOCK@0")
         assert cdp.translated_name == "Button Lock"
         assert cdp.name_data.parameter_name == "Button Lock"
-
-
-class TestGenericNamingHelper:
-    """Direct checks of the shared naming helper edge cases."""
-
-    def test_multi_channel_postfix_requires_second_channel(self) -> None:
-        store = _store_with_device(channels=[_channel(address="VCU1", number=1, name="Thermostat KU:1")])
-        store.attach_channel_data_points(
-            device_address="VCU1",
-            channel_number=1,
-            data_points=[_dp_summary(parameter="HUMIDITY", value=55, translated_name="Luftfeuchtigkeit")],
-        )
-        device = store.get_device(address="VCU1")
-        assert (
-            generic_translated_name(
-                store=store,
-                device=device,
-                channel_no=1,
-                parameter="HUMIDITY",
-                translation="Luftfeuchtigkeit",
-                label_omitted=False,
-            )
-            == "Luftfeuchtigkeit"
-        )
 
 
 class TestEventGroupChannelName:

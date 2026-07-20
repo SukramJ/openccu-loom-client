@@ -1,3 +1,30 @@
+# Version 2026.7.14 (2026-07-20)
+
+The daemon is the single naming authority for generic data points
+(daemon ≥ 0.45.0, API 2.28.0).
+
+## What's Changed
+
+### Changed
+
+- **Generic entity names come verbatim from the daemon wire.** The
+  compat layer no longer composes generic data point names client-side:
+  `translated_name` arrives fully composed from the daemon — including
+  the ambiguity-gated `ch<no>` multi-channel marker (daemon ≥ 0.44.3 /
+  aiohomematic 2026.7.10 semantics) and, since daemon 0.45.0, the
+  channel-level collapsed name for label-omitted primary parameters.
+  Against a pre-0.45.0 daemon, label-omitted data points gracefully
+  collapse to the device name alone.
+- aiohomematic floor raised to 2026.7.10 (the ambiguity-gated postfix
+  release) so both backends of `homematicip_local` produce identical
+  entity names.
+
+### Removed
+
+- `compat.aiohomematic.model.naming.generic_translated_name` and
+  `LoomStore.is_parameter_in_multiple_channels` — obsolete now that the
+  daemon ships composed names.
+
 # Version 2026.7.13 (2026-07-18)
 
 Alarm follow-ups for daemon ≥ 0.43.x (types 0.1.61, API 2.27.0). Both daemon

@@ -31,8 +31,6 @@ from typing import TYPE_CHECKING, Any
 
 from openccu_loom_types.enums import DataPointType, DataPointUsage, ParamsetKey
 
-from openccu_loom_client.compat.aiohomematic.model.naming import generic_translated_name
-
 if TYPE_CHECKING:
     from openccu_loom_types.rest import (
         AlarmPanelEntity,
@@ -311,29 +309,16 @@ class _GenericProtocolSurface(_CommonProtocolSurface):
         """
         Return the aiohomematic-schema display name.
 
-        Combines the (possibly user-renamed) CCU channel name, the
-        daemon's locale-resolved parameter label (``translated_name``,
-        suppressed when ``label_omitted`` marks the channel's primary
-        parameter) and the `` chN`` multi-channel postfix — the exact
-        composition of aiohomematic's ``get_data_point_name_data``.
-        ``None`` collapses the entity to the device name alone.
+        The daemon is the single naming authority (>= 0.45.0 /
+        api >= 2.28.0): ``translated_name`` arrives fully composed —
+        channel name, locale-resolved label, multi-channel ``chN``
+        marker, device-name prefix stripped. When ``label_omitted``
+        marks the channel's primary parameter it carries the
+        channel-level collapsed name instead; an empty value (also the
+        pre-0.45.0 wire shape) collapses the entity to the device name
+        alone (``None``).
         """
-        summary = self.summary
-        device = self.device
-        if device is None:
-            # No device in the store (e.g. partial fixtures): fall back to
-            # the daemon's plain label without channel-name composition.
-            if summary.label_omitted:
-                return None
-            return summary.translated_name or None
-        return generic_translated_name(
-            store=self._store,
-            device=device,
-            channel_no=self.channel_number,
-            parameter=self.parameter,
-            translation=summary.translated_name or None,
-            label_omitted=bool(summary.label_omitted),
-        )
+        return self.summary.translated_name or None
 
     @property
     def translated_full_name(self) -> str | None:
