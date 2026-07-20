@@ -134,6 +134,19 @@ class TestUnobservedValueSemantics:
         assert dp.value == 0.0
 
 
+class _WireNamedCDPSummary(CustomDPSummary):
+    """
+    CustomDPSummary plus the naming fields daemon >= 0.45.0 ships.
+
+    openccu-loom-types gains ``translated_name``/``parameter_name`` with
+    the release generated from that daemon; the subclass lets fixtures
+    inject the wire values until the types floor moves.
+    """
+
+    translated_name: str | None = None
+    parameter_name: str | None = None
+
+
 def _cdp_summary(**overrides: Any) -> CustomDPSummary:
     payload: dict[str, Any] = {
         "name": "SET_POINT_TEMPERATURE",
@@ -144,7 +157,7 @@ def _cdp_summary(**overrides: Any) -> CustomDPSummary:
     }
     payload.update(overrides)
     payload.setdefault("unique_id", f"loom_test_{str(payload['name']).lower()}")
-    return CustomDPSummary.model_validate(payload)
+    return _WireNamedCDPSummary.model_validate(payload)
 
 
 def _make_cdp(summary: CustomDPSummary, *, initial_state: dict[str, Any] | None = None) -> Any:
@@ -394,11 +407,12 @@ class TestCustomTranslatedName:
 
     def test_secondary_channels_named_vch(self) -> None:
         store = self._store_with_channels()
+        # Daemon >= 0.45.0 ships the composed vch markers on the wire.
         store.attach_custom_data_points(
             device_address="VCU1",
             cdps=[
-                _cdp_summary(name="LEVEL@5", category="light", kind="light", channel_no=5),
-                _cdp_summary(name="LEVEL@6", category="light", kind="light", channel_no=6),
+                _cdp_summary(name="LEVEL@5", category="light", kind="light", channel_no=5, translated_name="vch5"),
+                _cdp_summary(name="LEVEL@6", category="light", kind="light", channel_no=6, translated_name="vch6"),
             ],
         )
         assert store.get_custom_data_point(address="VCU1", name="LEVEL@5").translated_name == "vch5"

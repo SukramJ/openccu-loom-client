@@ -1,3 +1,27 @@
+# Version 2026.7.15 (2026-07-20)
+
+Custom data point names come from the daemon wire too — completing the
+daemon-as-single-naming-authority move started in 2026.7.14 (daemon
+0.45.0, API 2.29.0).
+
+## What's Changed
+
+### Changed
+
+- **Custom DP entity names come verbatim from the daemon wire.** The
+  CDP summary's `translated_name`/`parameter_name` (custom channel
+  names, `ch<no>`/`vch<no>` group markers, button-lock postfix labels)
+  are rendered as shipped; the client-side profile-registry heuristics
+  are gone. The fields reach this client with the matching
+  openccu-loom-types release; against older types or a pre-0.45.0
+  daemon, CDP names gracefully collapse to the device name alone.
+
+### Removed
+
+- `compat.aiohomematic.model.naming.custom_name_parts`,
+  `strip_device_prefix`, and the `_ignore_multiple_channels_for_name`
+  class markers — the daemon owns these rules now.
+
 # Version 2026.7.14 (2026-07-20)
 
 The daemon is the single naming authority for generic data points
