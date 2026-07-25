@@ -62,6 +62,7 @@ from openccu_loom_client.operations import (
     DataPointsOperations,
     DevicesOperations,
     DiagnosticsOperations,
+    GroupsOperations,
     HubOperations,
     LinksOperations,
     MatterOperations,
@@ -171,6 +172,7 @@ class LoomClient:
         self.system: Final = SystemOperations(transport=self._http)
         self.schedules: Final = SchedulesOperations(transport=self._http)
         self.links: Final = LinksOperations(transport=self._http)
+        self.groups: Final = GroupsOperations(transport=self._http)
         self.alarm: Final = AlarmOperations(transport=self._http)
         # Admin / ops surface — present for completeness; HA typically
         # touches only auth (token provisioning) and diagnostics.
