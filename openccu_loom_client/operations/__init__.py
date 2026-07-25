@@ -21,6 +21,7 @@ from openccu_loom_client.operations.custom_data_points import CustomDataPointsOp
 from openccu_loom_client.operations.datapoints import DataPointsOperations
 from openccu_loom_client.operations.devices import DevicesOperations
 from openccu_loom_client.operations.diagnostics import DiagnosticsOperations
+from openccu_loom_client.operations.groups import GroupsOperations
 from openccu_loom_client.operations.hub import HubOperations
 from openccu_loom_client.operations.links import LinksOperations
 from openccu_loom_client.operations.matter import MatterOperations
@@ -41,6 +42,7 @@ __all__ = [
     "DataPointsOperations",
     "DevicesOperations",
     "DiagnosticsOperations",
+    "GroupsOperations",
     "HubOperations",
     "LinksOperations",
     "MatterOperations",

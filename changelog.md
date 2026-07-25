@@ -1,3 +1,26 @@
+# Version 2026.7.16 (2026-07-25)
+
+Heating-group administration reaches the client — the daemon's `/groups`
+surface (daemon 0.48.0, API 2.53.0) is now a first-class operations module.
+
+## What's Changed
+
+### Added
+
+- **`client.groups` operations.** A new `GroupsOperations` facade wraps the
+  daemon's heating-group REST surface: `list_groups`, `list_types`,
+  `suitable_members`, `create_group`, `update_group` and `delete_group`. Reads
+  and writes take an optional `central` selector; `suitable_members`
+  additionally requires the `type_id` of the group being built. Requests and
+  responses use the `openccu_loom_types.rest` group models (`GroupCentralEntry`,
+  `GroupEntry`, `GroupTypeEntry`, `SuitableMembersResponse`,
+  `CreateGroupRequest`, `UpdateGroupRequest`). `create_group` is not retried
+  (it has side effects); `update_group` is idempotent and is.
+
+### Changed
+
+- Pin `openccu-loom-types==0.1.68` so the group models resolve.
+
 # Version 2026.7.15 (2026-07-20)
 
 Custom data point names come from the daemon wire too — completing the
