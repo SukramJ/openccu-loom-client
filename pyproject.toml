@@ -564,6 +564,7 @@ fixture-parentheses = false # Don't require parentheses for fixtures without par
     "S311", # non-cryptographic random in tests
     "BLE001", # broad `except Exception` in tests (fixture cleanup)
     "PLR2004", # magic values in assertions
+    "PLR0917", # parametrized tests legitimately take many positional fixture/param args
     "PLC0415", # per-test imports scope import-time errors to the test that triggers them
     "C901", # complex test scenarios
     "PTH", # os.path in tests is not worth refactoring

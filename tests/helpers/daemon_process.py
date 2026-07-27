@@ -70,7 +70,7 @@ def wait_for_health(*, port: int, timeout: float = _BOOT_TIMEOUT_S) -> None:
     while time.monotonic() < deadline:
         with (
             contextlib.suppress(urllib.error.URLError, ConnectionError, OSError),
-            urllib.request.urlopen(url, timeout=1.0) as resp,  # noqa: S310
+            urllib.request.urlopen(url, timeout=1.0) as resp,
         ):
             if resp.status == 200:
                 return
@@ -99,7 +99,7 @@ def wait_for_devices(
     deadline = time.monotonic() + timeout
     last = "<no response>"
     while time.monotonic() < deadline:
-        req = urllib.request.Request(url, headers=headers)  # noqa: S310
+        req = urllib.request.Request(url, headers=headers)
         try:
             with urllib.request.urlopen(req, timeout=2.0) as resp:  # noqa: S310
                 if resp.status == 200:
