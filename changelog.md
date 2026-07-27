@@ -1,3 +1,21 @@
+# Version 2026.7.17 (2026-07-27)
+
+Dependency alignment with daemon 0.48.7 (API 2.56.0) — group members now
+arrive name-enriched on the wire; no client code changes were required.
+
+## What's Changed
+
+### Changed
+
+- Pin `openccu-loom-types==0.1.69` (regenerated from openccu-loom v0.48.7,
+  API 2.56.0). `GroupMemberEntry` gains four optional fields — `device_name`,
+  `device_model`, `channel_name` and `rooms` — which flow through the
+  unchanged `client.groups` read surface (`list_groups` /
+  `suitable_members`) to consumers automatically.
+- With the types now generated against API 2.56.0, the transport's
+  API-version guard requires a daemon reporting API ≥ 2.56 (same major) at
+  `connect()`; deploy openccu-loom v0.48.7+ alongside this release.
+
 # Version 2026.7.16 (2026-07-25)
 
 Heating-group administration reaches the client — the daemon's `/groups`
