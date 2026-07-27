@@ -289,7 +289,7 @@ class _HubCoordinator:
         )
         try:
             interfaces = await self._client.system.list_interfaces()
-        except Exception:  # noqa: BLE001 — interfaces endpoint is optional
+        except Exception:
             _LOGGER.debug("interfaces unavailable while building hub singletons", exc_info=True)
             interfaces = []
         for state in interfaces:
@@ -330,7 +330,7 @@ class _HubCoordinator:
         await self._ensure_singletons()
         try:
             aggregate = await self._client.system.get_hub_data_points()
-        except Exception:  # noqa: BLE001 — endpoint optional, keep last values
+        except Exception:
             _LOGGER.debug("hub data-points aggregate fetch failed", exc_info=True)
             return
         data = next((d for d in aggregate if self._matches_central(central=d.central)), None)
@@ -414,7 +414,7 @@ class _HubCoordinator:
                 return []
             try:
                 messages = await fetch()
-            except Exception:  # noqa: BLE001 — endpoint optional, keep last value
+            except Exception:
                 _LOGGER.debug("message-list refetch failed", exc_info=True)
                 return []
             local = [m for m in messages if self._matches_central(central=getattr(m, "central", None))]
@@ -426,7 +426,7 @@ class _HubCoordinator:
             return []
         try:
             entries = await self._client.system.get_system_update()
-        except Exception:  # noqa: BLE001 — endpoint optional, keep last value
+        except Exception:
             _LOGGER.debug("system-update fetch failed", exc_info=True)
             return []
         entry = next((e for e in entries if self._matches_central(central=e.central)), None)
