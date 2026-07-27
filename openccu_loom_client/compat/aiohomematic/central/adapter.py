@@ -244,7 +244,7 @@ class _QueryFacade:
         """Fetch and cache the un-ignore candidate list (best-effort)."""
         try:
             result = await self._client.visibility.get_unignore_candidates()
-        except Exception:  # noqa: BLE001 — candidates are a UI nicety, never fatal
+        except Exception:
             _LOGGER.debug("un-ignore candidate prefetch failed", exc_info=True)
             return
         self._un_ignore_candidates = list(getattr(result, "candidates", None) or [])
@@ -1210,7 +1210,7 @@ class LoomCentralAdapter:
             await asyncio.sleep(_HUB_RECONCILE_INTERVAL)
             try:
                 await self.hub_coordinator.fetch_hub_singleton_data(scheduled=True)
-            except Exception:  # noqa: BLE001 — keep the reconcile loop alive
+            except Exception:
                 _LOGGER.debug("hub singleton reconcile failed", exc_info=True)
 
     async def _emit_data_points_created(self) -> None:
@@ -1283,7 +1283,7 @@ class LoomCentralAdapter:
         try:
             sysvars = await self._client.hub.list_sysvars()
             programs = await self._client.hub.list_programs()
-        except Exception:  # noqa: BLE001 — hub endpoints are optional
+        except Exception:
             _LOGGER.debug("hub catalogue refresh failed during bootstrap", exc_info=True)
             return
         self._client.store.attach_hub_catalogue(sysvars=sysvars, programs=programs)
@@ -1375,7 +1375,7 @@ class LoomCentralAdapter:
             week_profile = await self._client.schedules.get_channel_week_profile(
                 address=device.address, channel=channel_no
             )
-        except Exception:  # noqa: BLE001 — channel has no attached week profile
+        except Exception:
             _LOGGER.debug("no week profile on %s:%s", device.address, channel_no, exc_info=True)
             return
         # Climate schedules get the ClimateWeekProfileDp (satisfies
@@ -1397,7 +1397,7 @@ class LoomCentralAdapter:
         )
         try:
             schedule = await self._client.schedules.get_channel_schedule(address=device.address, channel=channel_no)
-        except Exception:  # noqa: BLE001 — entry count degrades to unknown
+        except Exception:
             _LOGGER.debug("schedule fetch failed for %s:%s", device.address, channel_no, exc_info=True)
         else:
             wp_dp.update_from(schedule=schedule)
