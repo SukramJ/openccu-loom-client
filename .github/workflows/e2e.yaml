@@ -40,7 +40,7 @@ jobs:
           token: ${{ secrets.LOOM_REPOS_TOKEN || github.token }}
 
       - name: Set up Go
-        uses: actions/setup-go@v6.5.0
+        uses: actions/setup-go@v7.0.0
         with:
           go-version-file: openccu-loom/go.mod
 
@@ -51,7 +51,7 @@ jobs:
           go build -o bin/godevccu-e2e ./cmd/godevccu-e2e
 
       - name: Set up Python
-        uses: actions/setup-python@v6.3.0
+        uses: actions/setup-python@v7.0.0
         with:
           python-version: "3.14"
 
