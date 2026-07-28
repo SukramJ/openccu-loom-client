@@ -6,6 +6,11 @@ client surface. Deliberately breaking, with no alias layer: the daemon
 frees `area` up for the coming room-grouping concept above CCU rooms, and
 a half-renamed client would only invite drift.
 
+That concept has since landed as well: `area` is now a **room grouping**
+above CCU rooms (openccu-loom 0.49.3, API 3.2.0) and reaches the client
+as a new `client.hub` surface — the two meanings never overlap in this
+release.
+
 ## What's Changed
 
 ### Changed (BREAKING)
@@ -41,14 +46,24 @@ a half-renamed client would only invite drift.
   `payload.zone_id` (was `payload.area_id`) — the wire payload field
   renamed with the daemon; the `alarm.panel` topic and every event
   `type_id` are unchanged.
-- Pin `openccu-loom-types==0.2.0` (regenerated from openccu-loom v0.49.2,
-  API 3.1.0). With the types generated against a new major, the
+- Pin `openccu-loom-types==0.2.1` (regenerated from openccu-loom v0.49.3,
+  API 3.2.0). With the types generated against a new major, the
   transport's API-version guard now demands a daemon on API major 3 with
-  minor ≥ 1 at `connect()` — deploy openccu-loom 0.49.2+ alongside this
+  minor ≥ 2 at `connect()` — deploy openccu-loom 0.49.3+ alongside this
   release; an older daemon is refused rather than silently half-working.
 
 ### Added
 
+- **Areas — room groupings above CCU rooms (API 3.2.0, additive).** An
+  area bundles CCU rooms one level up (a floor, a shed, a terrace roof),
+  lives in the daemon's database only and is unrelated to an alarm zone.
+  `client.hub` gained `list_areas`, `create_area`, `update_area`,
+  `delete_area` and `replace_area_rooms` over `GET/POST /areas`,
+  `PUT/DELETE /areas/{id}` and `PUT /areas/{id}/rooms`. Rooms are
+  `(central, room)` pairs with one area per room, so the room PUT is a
+  full-set replace that moves a room away from whichever area held it.
+  Operator-scoped administration — no store mirror and no WS binding,
+  because the daemon broadcasts nothing for areas.
 - **Room/function labels on alarm output candidates (API 3.1.0,
   additive).** `AlarmOutputCandidate` gained the channel's optional
   `rooms` and `functions`, which flow through the unchanged

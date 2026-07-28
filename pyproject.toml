@@ -18,7 +18,7 @@ dependencies = [
     # Floors match the CI-pinned versions in requirements.txt so a fresh
     # `pip install` resolves a tested-compatible set, not an ancient one.
     "aiohttp>=3.12.0",
-    "openccu-loom-types==0.2.0",
+    "openccu-loom-types==0.2.1",
     "pydantic>=2.12.0",
     "python-slugify>=8.0.0",
 ]
