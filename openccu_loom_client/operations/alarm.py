@@ -2,9 +2,9 @@
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
 """
-Alarm-system REST operations (daemon ≥ 0.42.0, api 2.22.0).
+Alarm-system REST operations (daemon ≥ 0.49.2, api 3.0.0).
 
-Thin façade over the daemon's ``/alarm`` namespace: area config +
+Thin façade over the daemon's ``/alarm`` namespace: zone config +
 verbs (arm/disarm/silence/acknowledge), panel entities, readiness,
 journal, walk test, output test fire and PIN-code administration.
 
@@ -15,6 +15,10 @@ callers gate on that token (as :meth:`LoomClient._bootstrap_alarm_panels`
 does) and keep treating a
 :class:`~openccu_loom_client.exceptions.LoomNotFoundError` on the
 first read as "alarm not available" rather than an error.
+
+The armable unit is a **zone** (``/alarm/zones/{id}``, ``zone_id``);
+daemon < 0.49.2 called it an *area* — the API 3.0.0 rename is
+deliberate and has no compatibility shim on either side.
 """
 
 from __future__ import annotations
@@ -23,8 +27,6 @@ from typing import Any
 from urllib.parse import quote
 
 from openccu_loom_types.rest import (
-    AlarmArea,
-    AlarmAreaStatus,
     AlarmArmAccepted,
     AlarmCode,
     AlarmCodeRequest,
@@ -36,31 +38,33 @@ from openccu_loom_types.rest import (
     AlarmRemoteKeyCandidate,
     AlarmSensor,
     AlarmWalkTestStatus,
+    AlarmZone,
+    AlarmZoneStatus,
 )
 
 from openccu_loom_client.operations._base import _OperationsBase
 
 
 class AlarmOperations(_OperationsBase):
-    """Alarm areas, panels, verbs, journal, walk test and codes."""
+    """Alarm zones, panels, verbs, journal, walk test and codes."""
 
     # ---- state / panels ----
 
-    async def get_area_statuses(self) -> list[AlarmAreaStatus]:
+    async def get_zone_statuses(self) -> list[AlarmZoneStatus]:
         """
-        Return the live status of every alarm area.
+        Return the live status of every alarm zone.
 
         Wire: ``GET /alarm/state`` — the response envelope is
-        ``{"areas": [AlarmAreaStatus]}``; this returns the unwrapped
+        ``{"zones": [AlarmZoneStatus]}``; this returns the unwrapped
         list.
         """
         payload = await self._transport.request(method="GET", path="/alarm/state")
-        areas = payload.get("areas") if isinstance(payload, dict) else None
-        return [AlarmAreaStatus.model_validate(item) for item in areas or []]
+        zones = payload.get("zones") if isinstance(payload, dict) else None
+        return [AlarmZoneStatus.model_validate(item) for item in zones or []]
 
     async def list_panels(self) -> list[AlarmPanelEntity]:
         """
-        Return the panel model entities (one per area + the master).
+        Return the panel model entities (one per zone + the master).
 
         Wire: ``GET /alarm/panels``. The daemon computes each panel's
         canonical ``unique_id`` — consumers use it as-is and never
@@ -68,91 +72,91 @@ class AlarmOperations(_OperationsBase):
         """
         return await self._request_list(method="GET", path="/alarm/panels", model=AlarmPanelEntity)
 
-    async def get_area_readiness(self, *, area_id: str) -> dict[str, AlarmModeReadiness]:
+    async def get_zone_readiness(self, *, zone_id: str) -> dict[str, AlarmModeReadiness]:
         """
-        Return one area's per-mode readiness (blockers/warnings).
+        Return one zone's per-mode readiness (blockers/warnings).
 
-        Wire: ``GET /alarm/areas/{id}/readiness`` — a map keyed by
+        Wire: ``GET /alarm/zones/{id}/readiness`` — a map keyed by
         alarm mode.
         """
-        payload = await self._transport.request(method="GET", path=f"/alarm/areas/{quote(area_id, safe='')}/readiness")
+        payload = await self._transport.request(method="GET", path=f"/alarm/zones/{quote(zone_id, safe='')}/readiness")
         items = payload if isinstance(payload, dict) else {}
         return {mode: AlarmModeReadiness.model_validate(entry) for mode, entry in items.items()}
 
-    # ---- area configuration ----
+    # ---- zone configuration ----
 
-    async def list_areas(self) -> list[AlarmArea]:
-        """List the configured alarm areas. Wire: ``GET /alarm/areas``."""
-        return await self._request_list(method="GET", path="/alarm/areas", model=AlarmArea)
+    async def list_zones(self) -> list[AlarmZone]:
+        """List the configured alarm zones. Wire: ``GET /alarm/zones``."""
+        return await self._request_list(method="GET", path="/alarm/zones", model=AlarmZone)
 
-    async def get_area(self, *, area_id: str) -> AlarmArea:
-        """Return one alarm area's config. Wire: ``GET /alarm/areas/{id}``."""
-        payload = await self._transport.request(method="GET", path=f"/alarm/areas/{quote(area_id, safe='')}")
-        return AlarmArea.model_validate(payload)
+    async def get_zone(self, *, zone_id: str) -> AlarmZone:
+        """Return one alarm zone's config. Wire: ``GET /alarm/zones/{id}``."""
+        payload = await self._transport.request(method="GET", path=f"/alarm/zones/{quote(zone_id, safe='')}")
+        return AlarmZone.model_validate(payload)
 
-    async def create_area(self, *, area: AlarmArea) -> AlarmArea:
+    async def create_zone(self, *, zone: AlarmZone) -> AlarmZone:
         """
-        Create an alarm area.
+        Create an alarm zone.
 
-        Wire: ``POST /alarm/areas``. Not retried — creation is not
+        Wire: ``POST /alarm/zones``. Not retried — creation is not
         idempotent (a retry surfaces as a duplicate-id error).
         """
         payload = await self._transport.request(
             method="POST",
-            path="/alarm/areas",
-            json_body=self._to_json_body(area),
+            path="/alarm/zones",
+            json_body=self._to_json_body(zone),
             allow_retry=False,
         )
-        return AlarmArea.model_validate(payload)
+        return AlarmZone.model_validate(payload)
 
-    async def update_area(self, *, area_id: str, area: AlarmArea) -> None:
-        """Replace an area's config. Wire: ``PUT /alarm/areas/{id}``. Idempotent."""
+    async def update_zone(self, *, zone_id: str, zone: AlarmZone) -> None:
+        """Replace a zone's config. Wire: ``PUT /alarm/zones/{id}``. Idempotent."""
         await self._transport.request(
             method="PUT",
-            path=f"/alarm/areas/{quote(area_id, safe='')}",
-            json_body=self._to_json_body(area),
+            path=f"/alarm/zones/{quote(zone_id, safe='')}",
+            json_body=self._to_json_body(zone),
             allow_retry=True,
         )
 
-    async def delete_area(self, *, area_id: str) -> None:
-        """Delete an alarm area. Wire: ``DELETE /alarm/areas/{id}``."""
-        await self._transport.request(method="DELETE", path=f"/alarm/areas/{quote(area_id, safe='')}")
+    async def delete_zone(self, *, zone_id: str) -> None:
+        """Delete an alarm zone. Wire: ``DELETE /alarm/zones/{id}``."""
+        await self._transport.request(method="DELETE", path=f"/alarm/zones/{quote(zone_id, safe='')}")
 
-    async def list_area_sensors(self, *, area_id: str) -> list[AlarmSensor]:
-        """List one area's enrolled sensors. Wire: ``GET /alarm/areas/{id}/sensors``."""
+    async def list_zone_sensors(self, *, zone_id: str) -> list[AlarmSensor]:
+        """List one zone's enrolled sensors. Wire: ``GET /alarm/zones/{id}/sensors``."""
         return await self._request_list(
-            method="GET", path=f"/alarm/areas/{quote(area_id, safe='')}/sensors", model=AlarmSensor
+            method="GET", path=f"/alarm/zones/{quote(zone_id, safe='')}/sensors", model=AlarmSensor
         )
 
-    async def replace_area_sensors(self, *, area_id: str, sensors: list[AlarmSensor]) -> None:
+    async def replace_zone_sensors(self, *, zone_id: str, sensors: list[AlarmSensor]) -> None:
         """
-        Replace one area's sensor enrolment wholesale.
+        Replace one zone's sensor enrolment wholesale.
 
-        Wire: ``PUT /alarm/areas/{id}/sensors``. Idempotent — the PUT
+        Wire: ``PUT /alarm/zones/{id}/sensors``. Idempotent — the PUT
         carries the full desired set.
         """
         await self._transport.request(
             method="PUT",
-            path=f"/alarm/areas/{quote(area_id, safe='')}/sensors",
+            path=f"/alarm/zones/{quote(zone_id, safe='')}/sensors",
             json_body=[self._to_json_body(sensor) for sensor in sensors],
             allow_retry=True,
         )
 
-    async def list_area_outputs(self, *, area_id: str) -> list[AlarmOutput]:
-        """List one area's enrolled outputs. Wire: ``GET /alarm/areas/{id}/outputs``."""
+    async def list_zone_outputs(self, *, zone_id: str) -> list[AlarmOutput]:
+        """List one zone's enrolled outputs. Wire: ``GET /alarm/zones/{id}/outputs``."""
         return await self._request_list(
-            method="GET", path=f"/alarm/areas/{quote(area_id, safe='')}/outputs", model=AlarmOutput
+            method="GET", path=f"/alarm/zones/{quote(zone_id, safe='')}/outputs", model=AlarmOutput
         )
 
-    async def replace_area_outputs(self, *, area_id: str, outputs: list[AlarmOutput]) -> None:
+    async def replace_zone_outputs(self, *, zone_id: str, outputs: list[AlarmOutput]) -> None:
         """
-        Replace one area's output enrolment wholesale.
+        Replace one zone's output enrolment wholesale.
 
-        Wire: ``PUT /alarm/areas/{id}/outputs``. Idempotent.
+        Wire: ``PUT /alarm/zones/{id}/outputs``. Idempotent.
         """
         await self._transport.request(
             method="PUT",
-            path=f"/alarm/areas/{quote(area_id, safe='')}/outputs",
+            path=f"/alarm/zones/{quote(zone_id, safe='')}/outputs",
             json_body=[self._to_json_body(output) for output in outputs],
             allow_retry=True,
         )
@@ -166,7 +170,10 @@ class AlarmOperations(_OperationsBase):
         Wire: ``GET /alarm/output-candidates`` — derived from the live
         domain model (incl. ON_TIME-gated switched-siren eligibility)
         with the device's real ENUM value lists + localised labels
-        (tones, optical patterns, soundfiles).
+        (tones, optical patterns, soundfiles). Since api 3.1.0 each
+        candidate also carries the channel's ``rooms`` and ``functions``
+        (both optional) so a picker can filter and label without a
+        second lookup.
         """
         return await self._request_list(method="GET", path="/alarm/output-candidates", model=AlarmOutputCandidate)
 
@@ -184,10 +191,10 @@ class AlarmOperations(_OperationsBase):
 
     # ---- verbs ----
 
-    async def arm_area(
+    async def arm_zone(
         self,
         *,
-        area_id: str,
+        zone_id: str,
         mode: str,
         force: bool | None = None,
         skip_delay: bool | None = None,
@@ -195,9 +202,9 @@ class AlarmOperations(_OperationsBase):
         code: str | None = None,
     ) -> AlarmArmAccepted:
         """
-        Arm one area in the given mode.
+        Arm one zone in the given mode.
 
-        Wire: ``POST /alarm/areas/{id}/arm``. ``mode`` is an
+        Wire: ``POST /alarm/zones/{id}/arm``. ``mode`` is an
         :class:`~openccu_loom_types.enums.AlarmMode` value other than
         ``disarmed`` (``perimeter``/``full``/``night``/``vacation``/
         ``custom``). ``code`` is passed through to the daemon's code
@@ -216,54 +223,54 @@ class AlarmOperations(_OperationsBase):
             body["code"] = code
         payload = await self._transport.request(
             method="POST",
-            path=f"/alarm/areas/{quote(area_id, safe='')}/arm",
+            path=f"/alarm/zones/{quote(zone_id, safe='')}/arm",
             json_body=body,
             allow_retry=False,
         )
         return AlarmArmAccepted.model_validate(payload)
 
-    async def disarm_area(self, *, area_id: str, code: str | None = None) -> None:
+    async def disarm_zone(self, *, zone_id: str, code: str | None = None) -> None:
         """
-        Disarm one area (also ends an active incident).
+        Disarm one zone (also ends an active incident).
 
-        Wire: ``POST /alarm/areas/{id}/disarm``. Not retried.
+        Wire: ``POST /alarm/zones/{id}/disarm``. Not retried.
         """
         await self._transport.request(
             method="POST",
-            path=f"/alarm/areas/{quote(area_id, safe='')}/disarm",
+            path=f"/alarm/zones/{quote(zone_id, safe='')}/disarm",
             json_body={"code": code} if code is not None else {},
             allow_retry=False,
         )
 
-    async def silence_area(self, *, area_id: str, code: str | None = None) -> None:
+    async def silence_zone(self, *, zone_id: str, code: str | None = None) -> None:
         """
-        Silence one area's sounding outputs (incident stays open).
+        Silence one zone's sounding outputs (incident stays open).
 
-        Wire: ``POST /alarm/areas/{id}/silence``. Not retried.
+        Wire: ``POST /alarm/zones/{id}/silence``. Not retried.
         """
         await self._transport.request(
             method="POST",
-            path=f"/alarm/areas/{quote(area_id, safe='')}/silence",
+            path=f"/alarm/zones/{quote(zone_id, safe='')}/silence",
             json_body={"code": code} if code is not None else {},
             allow_retry=False,
         )
 
-    async def acknowledge_area(self, *, area_id: str, code: str | None = None) -> None:
+    async def acknowledge_zone(self, *, zone_id: str, code: str | None = None) -> None:
         """
-        Acknowledge one area's ended incident (clears the triggered latch).
+        Acknowledge one zone's ended incident (clears the triggered latch).
 
-        Wire: ``POST /alarm/areas/{id}/acknowledge``. Not retried.
+        Wire: ``POST /alarm/zones/{id}/acknowledge``. Not retried.
         """
         await self._transport.request(
             method="POST",
-            path=f"/alarm/areas/{quote(area_id, safe='')}/acknowledge",
+            path=f"/alarm/zones/{quote(zone_id, safe='')}/acknowledge",
             json_body={"code": code} if code is not None else {},
             allow_retry=False,
         )
 
     async def silence_all(self) -> None:
         """
-        Silence every sounding output across all areas (break-glass).
+        Silence every sounding output across all zones (break-glass).
 
         Wire: ``POST /alarm/silence-all``. Not retried.
         """
@@ -274,7 +281,7 @@ class AlarmOperations(_OperationsBase):
     async def list_journal(
         self,
         *,
-        area_id: str | None = None,
+        zone_id: str | None = None,
         journal_class: str | None = None,
         from_: Any | None = None,
         to: Any | None = None,
@@ -283,14 +290,14 @@ class AlarmOperations(_OperationsBase):
         """
         Return alarm-journal entries, newest first.
 
-        Wire: ``GET /alarm/journal``. Filters: ``area_id``, the journal
+        Wire: ``GET /alarm/journal``. Filters: ``zone_id``, the journal
         ``class`` (``arm``/``disarm``/``trigger``/…), an inclusive
         ``from_`` / exclusive ``to`` RFC3339 window and ``limit``
         (daemon default 500, cap 5000).
         """
         params: dict[str, Any] = {}
-        if area_id is not None:
-            params["area"] = area_id
+        if zone_id is not None:
+            params["zone"] = zone_id
         if journal_class is not None:
             params["class"] = journal_class
         if from_ is not None:
@@ -305,35 +312,35 @@ class AlarmOperations(_OperationsBase):
 
     # ---- walk test ----
 
-    async def start_walk_test(self, *, area_id: str) -> None:
+    async def start_walk_test(self, *, zone_id: str) -> None:
         """
-        Start a walk test on one (disarmed) area.
+        Start a walk test on one (disarmed) zone.
 
-        Wire: ``POST /alarm/areas/{id}/walktest/start``. Not retried —
+        Wire: ``POST /alarm/zones/{id}/walktest/start``. Not retried —
         a retry after success answers 409 (already active).
         """
         await self._transport.request(
             method="POST",
-            path=f"/alarm/areas/{quote(area_id, safe='')}/walktest/start",
+            path=f"/alarm/zones/{quote(zone_id, safe='')}/walktest/start",
             allow_retry=False,
         )
 
-    async def stop_walk_test(self, *, area_id: str) -> None:
+    async def stop_walk_test(self, *, zone_id: str) -> None:
         """
         Stop a running walk test.
 
-        Wire: ``POST /alarm/areas/{id}/walktest/stop``. Idempotent —
+        Wire: ``POST /alarm/zones/{id}/walktest/stop``. Idempotent —
         stopping an inactive test is a no-op.
         """
         await self._transport.request(
             method="POST",
-            path=f"/alarm/areas/{quote(area_id, safe='')}/walktest/stop",
+            path=f"/alarm/zones/{quote(zone_id, safe='')}/walktest/stop",
             allow_retry=True,
         )
 
-    async def get_walk_test_status(self, *, area_id: str) -> AlarmWalkTestStatus:
-        """Return the walk-test progress. Wire: ``GET /alarm/areas/{id}/walktest``."""
-        payload = await self._transport.request(method="GET", path=f"/alarm/areas/{quote(area_id, safe='')}/walktest")
+    async def get_walk_test_status(self, *, zone_id: str) -> AlarmWalkTestStatus:
+        """Return the walk-test progress. Wire: ``GET /alarm/zones/{id}/walktest``."""
+        payload = await self._transport.request(method="GET", path=f"/alarm/zones/{quote(zone_id, safe='')}/walktest")
         return AlarmWalkTestStatus.model_validate(payload)
 
     # ---- output test ----

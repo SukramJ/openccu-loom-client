@@ -59,6 +59,7 @@ from openccu_loom_client.compat.aiohomematic.model.custom import (
     CustomDpIpBlind,
     CustomDpIpThermostat,
     CustomDpTextDisplay,
+    custom_unique_id,
     make_custom_data_point,
 )
 from openccu_loom_client.compat.aiohomematic.model.generic import (
@@ -840,6 +841,40 @@ class TestRefreshBridge:
         # ``loom_<serial>_sysvar_<hub_slug(name)>`` (space folds to a dash).
         await looper.block_till_done()
         assert seen == ["loom_vcu1_1", "loom_11a0001234_sysvar_my-var"]
+
+    async def test_custom_wire_unique_id_is_channel_level(self) -> None:
+        # Daemon ≥ 0.48.9 stamps the *channel-level* key on the custom-DP
+        # summary and the state_changed push (it briefly stamped the
+        # parameter-level routing key, e.g. ``…_1_level``). The twin takes
+        # its unique_id from the summary while the bridge falls back to
+        # ``custom_unique_id`` — so the wire form must equal the rebuild,
+        # or an HA entity would never see its own state pings.
+        bus = EventBus()
+        group = bus.create_subscription_group(name="t")
+        store = LoomStore()
+        store.set_serial(serial="3014F711A0001234")
+        looper, ha_bus, seen = self._ha_setup()
+        install_refresh_bridge(group=group, store=store, ha_bus=ha_bus, central_name="home")
+        wire_unique_id = custom_unique_id(serial_suffix=store.serial_suffix, device_address="VCU1", channel_no=1)
+        await bus.publish(
+            event=CustomDataPointStateChangedEvent(
+                seq=2,
+                kind=Kind.change,
+                ts="2026-05-24T08:00:00Z",
+                payload=CustomDataPointStateChangedPayload.model_validate(
+                    {
+                        "central": "home",
+                        "device_address": "VCU1",
+                        "channel": 1,
+                        "name": "cover",
+                        "state": {"current_position": 10},
+                        "unique_id": wire_unique_id,
+                    }
+                ),
+            )
+        )
+        await looper.block_till_done()
+        assert seen == ["loom_vcu1_1"]
 
     async def test_optimistic_rollback_broadcast_becomes_public_event(self) -> None:
         bus = EventBus()

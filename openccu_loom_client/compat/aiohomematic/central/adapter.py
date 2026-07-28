@@ -1006,7 +1006,7 @@ class LoomCentralAdapter:
         self._hub_reconcile_task: asyncio.Task[None] | None = None
         # Alarm-panel unique_ids already announced to HA via
         # DataPointsCreatedEvent — a live ``alarm.panel_changed`` push for a
-        # panel outside this set means a new area appeared at runtime and its
+        # panel outside this set means a new zone appeared at runtime and its
         # entity must be spawned (mirrors the device.created reconcile).
         self._announced_alarm_panel_ids: set[str] = set()
         # HA entities subscribe on aiohomematic's *own* event bus and match
@@ -1154,7 +1154,7 @@ class LoomCentralAdapter:
             # cold-start fetch above seeded the values once; the pushes keep them live.
             self.hub_coordinator.install_push_routing(group=self._refresh_group)
             # Spawn the HA entity for an alarm panel that appears at runtime
-            # (area created / master materialising at the second area). The
+            # (zone created / master materialising at the second zone). The
             # wire bridge seeded the store stub before this handler runs —
             # subscription groups fan out in registration order.
             self._refresh_group.subscribe(event_type=LoomAlarmPanelChangedEvent, handler=self._on_alarm_panel_changed)

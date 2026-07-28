@@ -324,8 +324,8 @@ class LoomClient:
         self._store.attach_alarm_panels(panels=panels)
         if not panels:
             return
-        statuses = await self.alarm.get_area_statuses()
-        self._store.attach_alarm_area_statuses(statuses=statuses)
+        statuses = await self.alarm.get_zone_statuses()
+        self._store.attach_alarm_zone_statuses(statuses=statuses)
 
     async def start_events(
         self,

@@ -1,3 +1,60 @@
+# Version 2026.7.18 (2026-07-28)
+
+The alarm system's armable unit is a **zone** — the daemon's API 3.0.0
+rename (`area` → `zone`, openccu-loom 0.49.2) followed through the whole
+client surface. Deliberately breaking, with no alias layer: the daemon
+frees `area` up for the coming room-grouping concept above CCU rooms, and
+a half-renamed client would only invite drift.
+
+## What's Changed
+
+### Changed (BREAKING)
+
+- **`client.alarm` — every area verb is now a zone verb.**
+  `get_area_statuses` → `get_zone_statuses`, `get_area_readiness` →
+  `get_zone_readiness`, `list_areas`/`get_area`/`create_area`/
+  `update_area`/`delete_area` → `list_zones`/`get_zone`/`create_zone`/
+  `update_zone`/`delete_zone`, `list_area_sensors`/`replace_area_sensors`
+  and `list_area_outputs`/`replace_area_outputs` → their `zone_`
+  counterparts, `arm_area`/`disarm_area`/`silence_area`/
+  `acknowledge_area` → `arm_zone`/`disarm_zone`/`silence_zone`/
+  `acknowledge_zone`, and the walk-test trio takes `zone_id`. The
+  keyword argument `area_id` is `zone_id` throughout; `create_zone` /
+  `update_zone` take `zone=`. Routes moved to `/alarm/zones/{id}/…`, the
+  `GET /alarm/state` envelope key is `zones`, and the journal filter
+  query parameter is `zone`.
+- **`LoomStore` alarm surface.** `get_alarm_panel_by_area` →
+  `get_alarm_panel_by_zone`, `attach_alarm_area_statuses` →
+  `attach_alarm_zone_statuses`, `arm_alarm_area`/`disarm_alarm_area`/
+  `silence_alarm_area`/`acknowledge_alarm_area` →
+  `*_alarm_zone`, `silence_all_alarm_areas` → `silence_all_alarm_zones`.
+- **`AlarmPanel` domain wrapper.** `AlarmPanel.area_id` → `.zone_id`, the
+  exported constant `MASTER_AREA_ID` → `MASTER_ZONE_ID` (value unchanged:
+  `"master"`). The compat panel's extra state attribute `area_id` is now
+  `zone_id`; every other HA-facing identity is untouched — the
+  daemon-computed `unique_id` keeps the `openccu-loom_alarm_<zone-id>`
+  format, so no HA entity is re-created by this release.
+- **Alarm events.** `AlarmStateChangedEvent`, `AlarmCountdownEvent`,
+  `AlarmReadinessChangedEvent`, `AlarmTriggeredEvent`,
+  `AlarmJournalAppendedEvent`, `AlarmWalkTestProgressEvent`,
+  `AlarmReminderEvent` and `AlarmNotificationEvent` key off
+  `payload.zone_id` (was `payload.area_id`) — the wire payload field
+  renamed with the daemon; the `alarm.panel` topic and every event
+  `type_id` are unchanged.
+- Pin `openccu-loom-types==0.2.0` (regenerated from openccu-loom v0.49.2,
+  API 3.1.0). With the types generated against a new major, the
+  transport's API-version guard now demands a daemon on API major 3 with
+  minor ≥ 1 at `connect()` — deploy openccu-loom 0.49.2+ alongside this
+  release; an older daemon is refused rather than silently half-working.
+
+### Added
+
+- **Room/function labels on alarm output candidates (API 3.1.0,
+  additive).** `AlarmOutputCandidate` gained the channel's optional
+  `rooms` and `functions`, which flow through the unchanged
+  `client.alarm.list_output_candidates()` to consumers — a picker can
+  filter and label without a second lookup.
+
 # Version 2026.7.17 (2026-07-27)
 
 Dependency alignment with daemon 0.48.7 (API 2.56.0) — group members now

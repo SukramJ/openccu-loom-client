@@ -170,11 +170,16 @@ Cross-repo (homematicip_local), after the client items:
 
 ## P1 — alarm control panel (loom-only, daemon ≥ 0.42.0 / API 2.22.0)
 
+Terminology: the armable unit is a **zone** since daemon 0.49.2 / API 3.0.0
+(formerly _area_, freed up for the coming room-grouping concept). The client
+followed the rename wholesale in 2026.7.18 — no alias, no shim, matching the
+daemon.
+
 Client-side surface is DONE (2026-07-16, types 0.1.56): `operations/alarm.py`,
 store panel section + `alarm.*` WS bindings, `model/AlarmPanel` (master
 fan-out mirrors the daemon's MQTT `MasterArm`), compat
 `LoomDpAlarmControlPanel` + adapter announce + refresh-bridge keys (the
-daemon-computed `openccu-loom_alarm_<area>` unique_id is consumed verbatim).
+daemon-computed `openccu-loom_alarm_<zone>` unique_id is consumed verbatim).
 Cross-repo remainder:
 
 - [x] **aiohomematic**: DONE — SukramJ/aiohomematic#3296 merged, 2026.7.7
@@ -205,11 +210,11 @@ Cross-repo remainder:
       SukramJ/openccu-loom#358, shipped in daemon 0.43.x (types 0.1.61):
       `code_arm_required`/`code_disarm_required` are REQUIRED fields on
       `AlarmPanelEntity` + `AlarmPanelChangedPayload` (effective policy,
-      master aggregates any-area). Client 2026.7.13 passes them through
+      master aggregates any-zone). Client 2026.7.13 passes them through
       (domain properties + compat twin, placeholder-False removed);
       homematicip_local follow-up: `code_format` prompt UX. `AlarmPanelEntity`
       does not carry `code_arm_required`/`code_disarm_required` (the MQTT
-      discovery embeds them from the area policy). The compat panel
+      discovery embeds them from the zone policy). The compat panel
       conservatively reports `False` (daemon enforces server-side either
       way); flip to real values once the entity exposes the policy.
 - [x] **panel removal → HA entity removal.** DONE (2026-07-16): the refresh

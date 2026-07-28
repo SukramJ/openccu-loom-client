@@ -13,7 +13,7 @@ store object) and adds the hub-entity surface (category, registration,
 ``enabled_default``) the HA generic-hub-entity base expects.
 
 Identity: the ``unique_id`` is the daemon-computed
-``openccu-loom_alarm_<area>`` (``alarmpanel.PanelUniqueID``) — consumed
+``openccu-loom_alarm_<zone>`` (``alarmpanel.PanelUniqueID``) — consumed
 as-is, never re-derived, so the REST/WS/MQTT surfaces and the compat
 layer can never drift. The panel attaches to the central hub device in
 HA (``channel`` is ``None``).
@@ -84,8 +84,8 @@ class LoomDpAlarmControlPanel(_HubEntitySurface, _HubProtocolSurface, AlarmPanel
         return bool(self.state)
 
     # ``code_arm_required`` / ``code_disarm_required`` come from the domain
-    # wrapper: the daemon computes the effective policy (area policy AND an
-    # applicable enabled PIN exists; master aggregates any-area) and ships it
+    # wrapper: the daemon computes the effective policy (zone policy AND an
+    # applicable enabled PIN exists; master aggregates any-zone) and ships it
     # on the panel entity + every ``alarm.panel_changed`` push (≥ 0.43.x).
 
     @property
@@ -97,7 +97,7 @@ class LoomDpAlarmControlPanel(_HubEntitySurface, _HubProtocolSurface, AlarmPanel
     def attributes(self) -> dict[str, Any]:
         """Return the extra state attributes of the panel."""
         attrs: dict[str, Any] = {
-            "area_id": self.area_id,
+            "zone_id": self.zone_id,
             "master": self.is_master,
             "supported_modes": list(self.supported_modes),
         }

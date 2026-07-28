@@ -35,7 +35,7 @@ from openccu_loom_client.store import LoomStore
 
 def _panel_entity(
     *,
-    area_id: str = "eg",
+    zone_id: str = "eg",
     state: str = "disarmed",
     master: bool = False,
     code_arm_required: bool = False,
@@ -43,9 +43,9 @@ def _panel_entity(
 ) -> AlarmPanelEntity:
     return AlarmPanelEntity.model_validate(
         {
-            "unique_id": f"openccu-loom_alarm_{area_id}",
-            "area_id": area_id,
-            "name": area_id.upper(),
+            "unique_id": f"openccu-loom_alarm_{zone_id}",
+            "zone_id": zone_id,
+            "name": zone_id.upper(),
             "category": "alarm_control_panel",
             "state": state,
             "available": True,
@@ -67,7 +67,7 @@ def _store_with_compat_panels(*entities: AlarmPanelEntity) -> LoomStore:
 class TestLoomDpAlarmControlPanel:
     def test_entity_surface(self) -> None:
         store = _store_with_compat_panels(_panel_entity())
-        panel = store.get_alarm_panel_by_area(area_id="eg")
+        panel = store.get_alarm_panel_by_zone(zone_id="eg")
         assert isinstance(panel, LoomDpAlarmControlPanel)
         assert panel.category is DataPointCategory.AlarmControlPanel
         assert panel.default_category() is DataPointCategory.AlarmControlPanel
@@ -87,21 +87,21 @@ class TestLoomDpAlarmControlPanel:
         from aiohomematic.interfaces.model import CallbackDataPointProtocol
 
         store = _store_with_compat_panels(_panel_entity())
-        panel = store.get_alarm_panel_by_area(area_id="eg")
+        panel = store.get_alarm_panel_by_zone(zone_id="eg")
         assert isinstance(panel, CallbackDataPointProtocol)
 
     def test_code_policy_passthrough(self) -> None:
         # The placeholder False properties are gone — the twin serves the
         # daemon-computed effective policy off the summary.
         store = _store_with_compat_panels(_panel_entity(code_arm_required=True, code_disarm_required=True))
-        panel = store.get_alarm_panel_by_area(area_id="eg")
+        panel = store.get_alarm_panel_by_zone(zone_id="eg")
         assert isinstance(panel, LoomDpAlarmControlPanel)
         assert panel.code_arm_required is True
         assert panel.code_disarm_required is True
 
     def test_registration_lifecycle(self) -> None:
         store = _store_with_compat_panels(_panel_entity())
-        panel = store.get_alarm_panel_by_area(area_id="eg")
+        panel = store.get_alarm_panel_by_zone(zone_id="eg")
         assert isinstance(panel, LoomDpAlarmControlPanel)
         assert panel.is_registered is False
         panel.register()
@@ -111,12 +111,12 @@ class TestLoomDpAlarmControlPanel:
 
     def test_attributes_carry_live_detail(self) -> None:
         store = _store_with_compat_panels(_panel_entity())
-        panel = store.get_alarm_panel_by_area(area_id="eg")
+        panel = store.get_alarm_panel_by_zone(zone_id="eg")
         assert isinstance(panel, LoomDpAlarmControlPanel)
         store.apply_alarm_countdown(
             payload=AlarmCountdownPayload.model_validate(
                 {
-                    "area_id": "eg",
+                    "zone_id": "eg",
                     "kind": "exit_delay",
                     "remaining_s": 25,
                     "total_s": 30,
@@ -126,7 +126,7 @@ class TestLoomDpAlarmControlPanel:
             )
         )
         attrs = panel.attributes
-        assert attrs["area_id"] == "eg"
+        assert attrs["zone_id"] == "eg"
         assert attrs["supported_modes"] == ["perimeter", "full"]
         assert attrs["countdown_kind"] == "exit_delay"
         assert attrs["countdown_remaining_s"] == 25
@@ -198,7 +198,7 @@ class TestAdapterAlarmPanels:
             payload=AlarmPanelChangedPayload.model_validate(
                 {
                     "unique_id": "openccu-loom_alarm_eg",
-                    "area_id": "eg",
+                    "zone_id": "eg",
                     "name": "EG",
                     "state": "armed_away",
                     "available": True,
@@ -245,7 +245,7 @@ class TestAdapterAlarmPanels:
         await central._on_alarm_panel_changed(event)
         await central._looper.block_till_done()
         assert len(seen) == 1
-        # ... and a removal discards the id so a re-created area re-announces.
+        # ... and a removal discards the id so a re-created zone re-announces.
         await central._on_alarm_panel_changed(self._panel_changed_event(removed=True))
         assert central._announced_alarm_panel_ids == set()
 
@@ -298,7 +298,7 @@ class TestRefreshBridgeAlarm:
                 payload=AlarmPanelChangedPayload.model_validate(
                     {
                         "unique_id": "openccu-loom_alarm_eg",
-                        "area_id": "eg",
+                        "zone_id": "eg",
                         "name": "EG",
                         "state": "armed_away",
                         "available": True,
@@ -311,7 +311,7 @@ class TestRefreshBridgeAlarm:
         await looper.block_till_done()
         assert seen == ["openccu-loom_alarm_eg"]
 
-    async def test_area_scoped_event_resolves_panel_key(self) -> None:
+    async def test_zone_scoped_event_resolves_panel_key(self) -> None:
         store = _store_with_compat_panels(_panel_entity())
         bus = EventBus()
         group = bus.create_subscription_group(name="t")
@@ -324,7 +324,7 @@ class TestRefreshBridgeAlarm:
                 ts="2026-07-16T08:00:00Z",
                 payload=AlarmCountdownPayload.model_validate(
                     {
-                        "area_id": "eg",
+                        "zone_id": "eg",
                         "kind": "entry_delay",
                         "remaining_s": 10,
                         "total_s": 30,
@@ -360,7 +360,7 @@ class TestRefreshBridgeAlarm:
                 payload=AlarmPanelChangedPayload.model_validate(
                     {
                         "unique_id": "openccu-loom_alarm_eg",
-                        "area_id": "eg",
+                        "zone_id": "eg",
                         "name": "EG",
                         "state": "disarmed",
                         "available": True,
@@ -374,7 +374,7 @@ class TestRefreshBridgeAlarm:
         await looper.block_till_done()
         assert removed == ["openccu-loom_alarm_eg"]
 
-    async def test_area_event_without_panel_is_silent(self) -> None:
+    async def test_zone_event_without_panel_is_silent(self) -> None:
         bus = EventBus()
         group = bus.create_subscription_group(name="t")
         looper, ha_bus, seen = self._ha_setup()
@@ -386,7 +386,7 @@ class TestRefreshBridgeAlarm:
                 ts="2026-07-16T08:00:00Z",
                 payload=AlarmCountdownPayload.model_validate(
                     {
-                        "area_id": "ghost",
+                        "zone_id": "ghost",
                         "kind": "exit_delay",
                         "remaining_s": 1,
                         "total_s": 2,

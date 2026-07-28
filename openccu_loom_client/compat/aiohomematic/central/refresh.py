@@ -260,14 +260,14 @@ def _wire_alarm_events(*, group: SubscriptionGroup, store: LoomStore, ha_bus: Ai
     Bridge the alarm pushes to keyed ``DataPointStateChangedEvent`` pings.
 
     The panel entity subscribes keyed by its daemon-computed
-    ``unique_id`` (``openccu-loom_alarm_<area>``). ``alarm.panel_changed``
-    carries the key directly; the area-scoped detail pushes (state,
-    countdown tick, readiness, trigger) resolve area → panel through the
+    ``unique_id`` (``openccu-loom_alarm_<zone>``). ``alarm.panel_changed``
+    carries the key directly; the zone-scoped detail pushes (state,
+    countdown tick, readiness, trigger) resolve zone → panel through the
     store. State itself travels on ``panel_changed`` — the detail pushes
     only refresh the entity's extra attributes.
 
-    A ``panel_changed`` with ``removed`` (area deleted, or the master
-    dematerialising at < 2 areas) becomes aiohomematic's data-point
+    A ``panel_changed`` with ``removed`` (zone deleted, or the master
+    dematerialising at < 2 zones) becomes aiohomematic's data-point
     flavour of :class:`DeviceRemovedEvent` (only ``unique_id`` set) —
     the generic hub entity base subscribes to exactly that key and
     removes itself from the entity registry.
@@ -276,8 +276,8 @@ def _wire_alarm_events(*, group: SubscriptionGroup, store: LoomStore, ha_bus: Ai
     async def _ping(*, ts: Any, unique_id: str, value: Any = None) -> None:
         await ha_bus.publish(event=DataPointStateChangedEvent(timestamp=ts, unique_id=unique_id, new_value=value))
 
-    async def _ping_area(*, ts: Any, area_id: str) -> None:
-        panel = store.get_alarm_panel_by_area(area_id=area_id)
+    async def _ping_zone(*, ts: Any, zone_id: str) -> None:
+        panel = store.get_alarm_panel_by_zone(zone_id=zone_id)
         if panel is not None:
             await _ping(ts=ts, unique_id=panel.unique_id)
 
@@ -290,16 +290,16 @@ def _wire_alarm_events(*, group: SubscriptionGroup, store: LoomStore, ha_bus: Ai
         await _ping(ts=event.ts, unique_id=event.payload.unique_id, value=event.payload.state)
 
     async def on_alarm_state(event: AlarmStateChangedEvent) -> None:
-        await _ping_area(ts=event.ts, area_id=event.payload.area_id)
+        await _ping_zone(ts=event.ts, zone_id=event.payload.zone_id)
 
     async def on_countdown(event: AlarmCountdownEvent) -> None:
-        await _ping_area(ts=event.ts, area_id=event.payload.area_id)
+        await _ping_zone(ts=event.ts, zone_id=event.payload.zone_id)
 
     async def on_readiness(event: AlarmReadinessChangedEvent) -> None:
-        await _ping_area(ts=event.ts, area_id=event.payload.area_id)
+        await _ping_zone(ts=event.ts, zone_id=event.payload.zone_id)
 
     async def on_triggered(event: AlarmTriggeredEvent) -> None:
-        await _ping_area(ts=event.ts, area_id=event.payload.area_id)
+        await _ping_zone(ts=event.ts, zone_id=event.payload.zone_id)
 
     group.subscribe(event_type=AlarmPanelChangedEvent, handler=on_panel_changed)
     group.subscribe(event_type=AlarmStateChangedEvent, handler=on_alarm_state)

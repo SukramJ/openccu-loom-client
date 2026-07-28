@@ -1,20 +1,20 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""Alarm-panel domain model — wraps AlarmPanelEntity (+ live area detail)."""
+"""Alarm-panel domain model — wraps AlarmPanelEntity (+ live zone detail)."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from openccu_loom_types.rest import AlarmAreaStatus, AlarmModeReadiness, AlarmPanelEntity
+    from openccu_loom_types.rest import AlarmModeReadiness, AlarmPanelEntity, AlarmZoneStatus
 
     from openccu_loom_client.store import LoomStore
 
-# The daemon's pseudo-area id of the aggregate master panel
-# (``alarmpanel.MasterAreaID``, wire-stable).
-MASTER_AREA_ID = "master"
+# The daemon's pseudo-zone id of the aggregate master panel
+# (``alarmpanel.MasterZoneID``, wire-stable).
+MASTER_ZONE_ID = "master"
 
 
 def _token(*, value: Any) -> str | None:
@@ -29,18 +29,18 @@ class AlarmPanel:
     Store-aware wrapper around one alarm-control-panel entity.
 
     The daemon models the panel as a first-class entity (one per alarm
-    area, plus — with ≥ 2 areas — an aggregate master panel). The
+    zone, plus — with ≥ 2 zones — an aggregate master panel). The
     summary carries the daemon-computed ``unique_id`` and the *HA state
     token* (``disarmed``/``arming``/``pending``/``triggered``/
     ``armed_home``/…), so consumers never re-derive either.
 
-    Real-area panels additionally hold live area detail — mode,
+    Real-zone panels additionally hold live zone detail — mode,
     countdown, readiness, incident — seeded from ``GET /alarm/state``
     at bootstrap and updated by the ``alarm.*`` pushes. The auto-named
     payload enums differ per wire schema (``Mode`` vs ``Mode2``, …), so
     the live fields are kept as plain Python values instead of inside
     the wire status model. The master panel aggregates and carries no
-    area detail.
+    zone detail.
     """
 
     __slots__ = (
@@ -80,17 +80,17 @@ class AlarmPanel:
 
     @property
     def unique_id(self) -> str:
-        """The daemon-computed stable entity id (``openccu-loom_alarm_<area>``)."""
+        """The daemon-computed stable entity id (``openccu-loom_alarm_<zone>``)."""
         return self._summary.unique_id
 
     @property
-    def area_id(self) -> str:
-        """The alarm area id, or ``"master"`` for the aggregate panel."""
-        return self._summary.area_id
+    def zone_id(self) -> str:
+        """The alarm zone id, or ``"master"`` for the aggregate panel."""
+        return self._summary.zone_id
 
     @property
     def name(self) -> str:
-        """The display name (the area name; master name is daemon-localised)."""
+        """The display name (the zone name; master name is daemon-localised)."""
         return self._summary.name
 
     @property
@@ -124,9 +124,9 @@ class AlarmPanel:
         """
         Effective code requirement for arming, daemon-computed.
 
-        True exactly when the daemon will demand a code: the area's
+        True exactly when the daemon will demand a code: the zone's
         code policy AND an applicable enabled PIN code exists (master
-        aggregates any-area). Live policy edits arrive via
+        aggregates any-zone). Live policy edits arrive via
         ``alarm.panel_changed``.
         """
         return bool(self._summary.code_arm_required)
@@ -136,7 +136,7 @@ class AlarmPanel:
         """Effective code requirement for disarming (same derivation)."""
         return bool(self._summary.code_disarm_required)
 
-    # ---- live area detail (real areas only) ----
+    # ---- live zone detail (real zones only) ----
 
     @property
     def mode(self) -> str | None:
@@ -170,7 +170,7 @@ class AlarmPanel:
 
     @property
     def walktest_active(self) -> bool:
-        """Whether a walk test is running on this area."""
+        """Whether a walk test is running on this zone."""
         return self._walktest_active
 
     @property
@@ -200,51 +200,51 @@ class AlarmPanel:
         bypass: list[str] | None = None,
     ) -> None:
         """
-        Arm this panel's area (master: every area configuring the mode).
+        Arm this panel's zone (master: every zone configuring the mode).
 
         The master fan-out mirrors the daemon's MQTT ``MasterArm``
-        semantics: areas whose config does not offer ``mode`` are
+        semantics: zones whose config does not offer ``mode`` are
         skipped silently, the rest are armed best-effort.
         """
         if not self.is_master:
-            await self._store.arm_alarm_area(
-                area_id=self.area_id, mode=mode, code=code, force=force, skip_delay=skip_delay, bypass=bypass
+            await self._store.arm_alarm_zone(
+                zone_id=self.zone_id, mode=mode, code=code, force=force, skip_delay=skip_delay, bypass=bypass
             )
             return
         for panel in list(self._store.alarm_panels):
             if panel.is_master or mode not in panel.supported_modes:
                 continue
-            await self._store.arm_alarm_area(
-                area_id=panel.area_id, mode=mode, code=code, force=force, skip_delay=skip_delay, bypass=bypass
+            await self._store.arm_alarm_zone(
+                zone_id=panel.zone_id, mode=mode, code=code, force=force, skip_delay=skip_delay, bypass=bypass
             )
 
     async def disarm(self, *, code: str | None = None) -> None:
-        """Disarm this panel's area (master: every area, best-effort)."""
+        """Disarm this panel's zone (master: every zone, best-effort)."""
         if not self.is_master:
-            await self._store.disarm_alarm_area(area_id=self.area_id, code=code)
+            await self._store.disarm_alarm_zone(zone_id=self.zone_id, code=code)
             return
         for panel in list(self._store.alarm_panels):
             if not panel.is_master:
-                await self._store.disarm_alarm_area(area_id=panel.area_id, code=code)
+                await self._store.disarm_alarm_zone(zone_id=panel.zone_id, code=code)
 
     async def silence(self, *, code: str | None = None) -> None:
         """Silence sounding outputs (master: daemon-side silence-all)."""
         if self.is_master:
-            await self._store.silence_all_alarm_areas()
+            await self._store.silence_all_alarm_zones()
             return
-        await self._store.silence_alarm_area(area_id=self.area_id, code=code)
+        await self._store.silence_alarm_zone(zone_id=self.zone_id, code=code)
 
     async def acknowledge(self, *, code: str | None = None) -> None:
-        """Acknowledge this area's ended incident (clears the latch)."""
-        await self._store.acknowledge_alarm_area(area_id=self.area_id, code=code)
+        """Acknowledge this zone's ended incident (clears the latch)."""
+        await self._store.acknowledge_alarm_zone(zone_id=self.zone_id, code=code)
 
     # ---- store-facing mutation (never rebuild) ----
 
     def _replace_summary(self, *, summary: AlarmPanelEntity) -> None:
         self._summary = summary
 
-    def _replace_status(self, *, status: AlarmAreaStatus) -> None:
-        """Seed the live detail from a full ``AlarmAreaStatus`` snapshot."""
+    def _replace_status(self, *, status: AlarmZoneStatus) -> None:
+        """Seed the live detail from a full ``AlarmZoneStatus`` snapshot."""
         self._mode = _token(value=status.mode)
         self._bypassed = tuple(status.bypassed or ())
         countdown = status.countdown
