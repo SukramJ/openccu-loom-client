@@ -105,6 +105,12 @@ still reviewed by a human maintainer and has to pass the project's tests
 before it lands — the AI accelerates the work, it does not replace the
 review gate.
 
+## Contributing
+
+AI-assisted contributions are welcome, but you must review, understand
+and stand behind everything you submit — see
+[`AI_POLICY.md`](./AI_POLICY.md) for the rules.
+
 ## License
 
 MIT. See [LICENSE](./LICENSE).
