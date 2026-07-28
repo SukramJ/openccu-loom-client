@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
-"""Hub-side REST operations: programs, sysvars, messages."""
+"""Hub-side REST operations: programs, sysvars, messages, rooms/areas."""
 
 from __future__ import annotations
 
@@ -10,6 +10,8 @@ from urllib.parse import quote
 
 from openccu_loom_types.rest import (
     AlarmMessage,
+    Area,
+    AreaRoomRef,
     Function,
     InstallModeInterfaceEntry,
     InstallModeInterfaceRequest,
@@ -229,6 +231,76 @@ class HubOperations(_OperationsBase):
         Wire: ``GET /functions``.
         """
         return await self._request_list(method="GET", path="/functions", model=Function)
+
+    # ---- areas (room groupings; daemon ≥ 0.49.3, api 3.2.0) ----
+
+    async def list_areas(self) -> list[Area]:
+        """
+        Return the operator-defined areas with their assigned rooms.
+
+        An area groups CCU rooms one level up — a floor, a shed, a
+        terrace roof. It lives in the daemon's database only (the CCU
+        knows nothing of areas) and is unrelated to an *alarm zone*.
+        Rooms are ``(central, room)`` pairs, one area per room.
+
+        Wire: ``GET /areas`` — ordered by ``position``, ties by name.
+        """
+        return await self._request_list(method="GET", path="/areas", model=Area)
+
+    async def create_area(self, *, area: Area) -> Area:
+        """
+        Create an area (operator scope).
+
+        Wire: ``POST /areas``. The daemon generates the id — whatever
+        ``area.id`` carries is ignored — and returns the created area.
+        Not retried: creation is not idempotent.
+        """
+        payload = await self._transport.request(
+            method="POST",
+            path="/areas",
+            json_body=self._to_json_body(area),
+            allow_retry=False,
+        )
+        return Area.model_validate(payload)
+
+    async def update_area(self, *, area_id: str, area: Area) -> None:
+        """
+        Rename or reorder an area (operator scope).
+
+        Wire: ``PUT /areas/{id}``. Idempotent — the body carries the
+        full desired state. Room assignments are not touched here; use
+        :meth:`replace_area_rooms`.
+        """
+        await self._transport.request(
+            method="PUT",
+            path=f"/areas/{quote(area_id, safe='')}",
+            json_body=self._to_json_body(area),
+            allow_retry=True,
+        )
+
+    async def delete_area(self, *, area_id: str) -> None:
+        """
+        Delete an area and clear its room assignments (operator scope).
+
+        Wire: ``DELETE /areas/{id}``. The rooms themselves survive — they
+        simply end up unassigned.
+        """
+        await self._transport.request(method="DELETE", path=f"/areas/{quote(area_id, safe='')}")
+
+    async def replace_area_rooms(self, *, area_id: str, rooms: list[AreaRoomRef]) -> None:
+        """
+        Replace one area's room set wholesale (operator scope).
+
+        Wire: ``PUT /areas/{id}/rooms``. Idempotent full-set replace:
+        rooms omitted from the body are unassigned, and a room currently
+        held by another area moves here (one area per room).
+        """
+        await self._transport.request(
+            method="PUT",
+            path=f"/areas/{quote(area_id, safe='')}/rooms",
+            json_body=[self._to_json_body(room) for room in rooms],
+            allow_retry=True,
+        )
 
     async def list_inbox(self) -> list[dict[str, Any]]:
         """

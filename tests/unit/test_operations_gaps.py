@@ -14,7 +14,7 @@ contract.
 from __future__ import annotations
 
 from openccu_loom_types import DAEMON_API_VERSION
-from openccu_loom_types.rest import Schedule, ScheduleChannelRef
+from openccu_loom_types.rest import Area, AreaRoomRef, Schedule, ScheduleChannelRef
 from openccu_loom_types.ws import WsEnvelope
 import pytest
 
@@ -219,6 +219,66 @@ class TestHubOperationsGaps:
         )
         functions = await HubOperations(transport=t).list_functions()
         assert functions[0].name == "Light"
+
+    async def test_list_areas(self, http) -> None:
+        t, mock = http
+        mock.get(
+            "/api/v1/areas",
+            payload=[
+                {
+                    "id": "a1",
+                    "name": "Erdgeschoss",
+                    "position": 1,
+                    "rooms": [{"central": "home", "room": "Kitchen"}],
+                }
+            ],
+        )
+        areas = await HubOperations(transport=t).list_areas()
+        assert areas[0].name == "Erdgeschoss"
+        assert areas[0].rooms is not None
+        assert areas[0].rooms[0].central == "home"
+        assert areas[0].rooms[0].room == "Kitchen"
+
+    async def test_create_area_returns_server_generated_id(self, http) -> None:
+        t, mock = http
+        mock.post(
+            "/api/v1/areas",
+            status=201,
+            payload={"id": "srv-1", "name": "Schuppen"},
+        )
+        created = await HubOperations(transport=t).create_area(area=Area.model_validate({"id": "", "name": "Schuppen"}))
+        assert created.id == "srv-1"
+        assert _find_call(mock, "POST").json() == {"id": "", "name": "Schuppen"}
+
+    async def test_update_area(self, http) -> None:
+        t, mock = http
+        mock.put("/api/v1/areas/a1", status=204)
+        await HubOperations(transport=t).update_area(
+            area_id="a1", area=Area.model_validate({"id": "a1", "name": "Obergeschoss", "position": 2})
+        )
+        assert _find_call(mock, "PUT").json() == {"id": "a1", "name": "Obergeschoss", "position": 2}
+
+    async def test_delete_area(self, http) -> None:
+        t, mock = http
+        # The id is path-quoted on the way out (``a%201``); the server
+        # decodes it back, so an id with a space stays one path segment.
+        mock.delete("/api/v1/areas/a 1", status=204)
+        await HubOperations(transport=t).delete_area(area_id="a 1")
+
+    async def test_replace_area_rooms_sends_full_set(self, http) -> None:
+        t, mock = http
+        mock.put("/api/v1/areas/a1/rooms", status=204)
+        await HubOperations(transport=t).replace_area_rooms(
+            area_id="a1",
+            rooms=[
+                AreaRoomRef.model_validate({"central": "home", "room": "Kitchen"}),
+                AreaRoomRef.model_validate({"central": "home", "room": "Bath"}),
+            ],
+        )
+        assert _find_call(mock, "PUT").json() == [
+            {"central": "home", "room": "Kitchen"},
+            {"central": "home", "room": "Bath"},
+        ]
 
     async def test_set_program_enabled(self, http) -> None:
         t, mock = http

@@ -18,7 +18,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from openccu_loom_types import DAEMON_API_VERSION
-from openccu_loom_types.rest import AlarmAreaStatus, AlarmPanelEntity, Kind1 as Kind
+from openccu_loom_types.rest import AlarmPanelEntity, AlarmZoneStatus, Kind1 as Kind
 from openccu_loom_types.ws import (
     AlarmCountdownPayload,
     AlarmHealthChangedPayload,
@@ -47,7 +47,7 @@ from tests.helpers import MockDaemon
 
 def _panel_entity(
     *,
-    area_id: str = "erdgeschoss",
+    zone_id: str = "erdgeschoss",
     name: str = "Erdgeschoss",
     state: str = "disarmed",
     available: bool = True,
@@ -58,8 +58,8 @@ def _panel_entity(
 ) -> AlarmPanelEntity:
     return AlarmPanelEntity.model_validate(
         {
-            "unique_id": f"openccu-loom_alarm_{area_id}",
-            "area_id": area_id,
+            "unique_id": f"openccu-loom_alarm_{zone_id}",
+            "zone_id": zone_id,
             "name": name,
             "category": "alarm_control_panel",
             "state": state,
@@ -72,9 +72,9 @@ def _panel_entity(
     )
 
 
-def _area_status(*, area_id: str = "erdgeschoss", **overrides: Any) -> AlarmAreaStatus:
+def _zone_status(*, zone_id: str = "erdgeschoss", **overrides: Any) -> AlarmZoneStatus:
     payload: dict[str, Any] = {
-        "id": area_id,
+        "id": zone_id,
         "name": "Erdgeschoss",
         "state": "armed",
         "mode": "full",
@@ -84,7 +84,7 @@ def _area_status(*, area_id: str = "erdgeschoss", **overrides: Any) -> AlarmArea
         "walktest_active": False,
     }
     payload.update(overrides)
-    return AlarmAreaStatus.model_validate(payload)
+    return AlarmZoneStatus.model_validate(payload)
 
 
 class _FakeTransport:
@@ -117,18 +117,18 @@ def _store_with_panels(*panels: AlarmPanelEntity, transport: Any = None) -> Loom
 
 
 class TestAttachAlarmPanels:
-    def test_panels_land_keyed_by_unique_id_and_area(self) -> None:
-        store = _store_with_panels(_panel_entity(), _panel_entity(area_id="og", name="OG"))
+    def test_panels_land_keyed_by_unique_id_and_zone(self) -> None:
+        store = _store_with_panels(_panel_entity(), _panel_entity(zone_id="og", name="OG"))
         assert {p.unique_id for p in store.alarm_panels} == {
             "openccu-loom_alarm_erdgeschoss",
             "openccu-loom_alarm_og",
         }
-        panel = store.get_alarm_panel_by_area(area_id="og")
+        panel = store.get_alarm_panel_by_zone(zone_id="og")
         assert panel is not None
         assert panel.name == "OG"
 
     def test_reattach_updates_in_place_and_drops_stale(self) -> None:
-        store = _store_with_panels(_panel_entity(), _panel_entity(area_id="og"))
+        store = _store_with_panels(_panel_entity(), _panel_entity(zone_id="og"))
         live = store.get_alarm_panel(unique_id="openccu-loom_alarm_erdgeschoss")
         store.attach_alarm_panels(panels=[_panel_entity(name="Renamed", state="armed_away")])
         assert store.get_alarm_panel(unique_id="openccu-loom_alarm_og") is None
@@ -146,12 +146,12 @@ class TestAttachAlarmPanels:
         store = LoomStore()
         store.set_alarm_panel_factory(factory=CategorisedPanel)
         store.attach_alarm_panels(panels=[_panel_entity()])
-        assert isinstance(store.get_alarm_panel_by_area(area_id="erdgeschoss"), CategorisedPanel)
+        assert isinstance(store.get_alarm_panel_by_zone(zone_id="erdgeschoss"), CategorisedPanel)
 
-    def test_area_statuses_seed_live_detail(self) -> None:
+    def test_zone_statuses_seed_live_detail(self) -> None:
         store = _store_with_panels(_panel_entity())
-        store.attach_alarm_area_statuses(statuses=[_area_status()])
-        panel = store.get_alarm_panel_by_area(area_id="erdgeschoss")
+        store.attach_alarm_zone_statuses(statuses=[_zone_status()])
+        panel = store.get_alarm_panel_by_zone(zone_id="erdgeschoss")
         assert panel is not None
         assert panel.mode == "full"
         assert panel.bypassed == ("s1",)
@@ -160,10 +160,10 @@ class TestAttachAlarmPanels:
         assert panel.readiness["full"].ready is False
         assert panel.walktest_active is False
 
-    def test_unknown_area_status_is_ignored(self) -> None:
+    def test_unknown_zone_status_is_ignored(self) -> None:
         store = _store_with_panels(_panel_entity())
-        store.attach_alarm_area_statuses(statuses=[_area_status(area_id="unknown")])
-        panel = store.get_alarm_panel_by_area(area_id="erdgeschoss")
+        store.attach_alarm_zone_statuses(statuses=[_zone_status(zone_id="unknown")])
+        panel = store.get_alarm_panel_by_zone(zone_id="erdgeschoss")
         assert panel is not None
         assert panel.mode is None
 
@@ -174,12 +174,12 @@ class TestAttachAlarmPanels:
 class TestAlarmApply:
     def test_panel_changed_updates_live_instance(self) -> None:
         store = _store_with_panels(_panel_entity())
-        panel = store.get_alarm_panel_by_area(area_id="erdgeschoss")
+        panel = store.get_alarm_panel_by_zone(zone_id="erdgeschoss")
         store.apply_alarm_panel_changed(
             payload=AlarmPanelChangedPayload.model_validate(
                 {
                     "unique_id": "openccu-loom_alarm_erdgeschoss",
-                    "area_id": "erdgeschoss",
+                    "zone_id": "erdgeschoss",
                     "name": "Erdgeschoss",
                     "state": "armed_home",
                     "available": False,
@@ -196,14 +196,14 @@ class TestAlarmApply:
         # Live policy edits (code created/deleted, policy switch) ride the
         # push — the panel must reflect them without a catalogue reconcile.
         store = _store_with_panels(_panel_entity())
-        panel = store.get_alarm_panel_by_area(area_id="erdgeschoss")
+        panel = store.get_alarm_panel_by_zone(zone_id="erdgeschoss")
         assert panel is not None
         assert panel.code_arm_required is False
         store.apply_alarm_panel_changed(
             payload=AlarmPanelChangedPayload.model_validate(
                 {
                     "unique_id": "openccu-loom_alarm_erdgeschoss",
-                    "area_id": "erdgeschoss",
+                    "zone_id": "erdgeschoss",
                     "name": "Erdgeschoss",
                     "state": "disarmed",
                     "available": True,
@@ -221,7 +221,7 @@ class TestAlarmApply:
             payload=AlarmPanelChangedPayload.model_validate(
                 {
                     "unique_id": "openccu-loom_alarm_erdgeschoss",
-                    "area_id": "erdgeschoss",
+                    "zone_id": "erdgeschoss",
                     "name": "Erdgeschoss",
                     "state": "disarmed",
                     "available": True,
@@ -232,7 +232,7 @@ class TestAlarmApply:
             )
         )
         assert store.get_alarm_panel(unique_id="openccu-loom_alarm_erdgeschoss") is None
-        assert store.get_alarm_panel_by_area(area_id="erdgeschoss") is None
+        assert store.get_alarm_panel_by_zone(zone_id="erdgeschoss") is None
 
     def test_panel_changed_unknown_seeds_stub(self) -> None:
         store = LoomStore()
@@ -240,7 +240,7 @@ class TestAlarmApply:
             payload=AlarmPanelChangedPayload.model_validate(
                 {
                     "unique_id": "openccu-loom_alarm_master",
-                    "area_id": "master",
+                    "zone_id": "master",
                     "name": "Alarmanlage",
                     "state": "disarmed",
                     "available": True,
@@ -256,15 +256,15 @@ class TestAlarmApply:
 
     def test_state_changed_updates_mode_and_ends_countdown(self) -> None:
         store = _store_with_panels(_panel_entity())
-        store.attach_alarm_area_statuses(statuses=[_area_status(state="arming")])
-        panel = store.get_alarm_panel_by_area(area_id="erdgeschoss")
+        store.attach_alarm_zone_statuses(statuses=[_zone_status(state="arming")])
+        panel = store.get_alarm_panel_by_zone(zone_id="erdgeschoss")
         assert panel is not None
         assert panel.countdown_remaining_s == 20
         store.apply_alarm_state_changed(
             payload=AlarmStateChangedPayload.model_validate(
                 {
-                    "area_id": "erdgeschoss",
-                    "area_name": "Erdgeschoss",
+                    "zone_id": "erdgeschoss",
+                    "zone_name": "Erdgeschoss",
                     "old_state": "arming",
                     "new_state": "armed",
                     "mode": "full",
@@ -280,7 +280,7 @@ class TestAlarmApply:
         store.apply_alarm_countdown(
             payload=AlarmCountdownPayload.model_validate(
                 {
-                    "area_id": "erdgeschoss",
+                    "zone_id": "erdgeschoss",
                     "kind": "entry_delay",
                     "remaining_s": 12,
                     "total_s": 30,
@@ -289,7 +289,7 @@ class TestAlarmApply:
                 }
             )
         )
-        panel = store.get_alarm_panel_by_area(area_id="erdgeschoss")
+        panel = store.get_alarm_panel_by_zone(zone_id="erdgeschoss")
         assert panel is not None
         assert panel.countdown_kind == "entry_delay"
         assert panel.countdown_remaining_s == 12
@@ -300,12 +300,12 @@ class TestAlarmApply:
         store.apply_alarm_readiness_changed(
             payload=AlarmReadinessChangedPayload.model_validate(
                 {
-                    "area_id": "erdgeschoss",
+                    "zone_id": "erdgeschoss",
                     "readiness": {"perimeter": {"ready": True}},
                 }
             )
         )
-        panel = store.get_alarm_panel_by_area(area_id="erdgeschoss")
+        panel = store.get_alarm_panel_by_zone(zone_id="erdgeschoss")
         assert panel is not None
         assert panel.readiness["perimeter"].ready is True
 
@@ -314,8 +314,8 @@ class TestAlarmApply:
         store.apply_alarm_triggered(
             payload=AlarmTriggeredPayload.model_validate(
                 {
-                    "area_id": "erdgeschoss",
-                    "area_name": "Erdgeschoss",
+                    "zone_id": "erdgeschoss",
+                    "zone_name": "Erdgeschoss",
                     "incident_id": 7,
                     "sensor_id": "s1",
                     "sensor_name": "Fenster Küche",
@@ -324,7 +324,7 @@ class TestAlarmApply:
                 }
             )
         )
-        panel = store.get_alarm_panel_by_area(area_id="erdgeschoss")
+        panel = store.get_alarm_panel_by_zone(zone_id="erdgeschoss")
         assert panel is not None
         assert panel.last_incident_id == 7
         assert panel.last_incident_cause == "sensor_open"
@@ -338,12 +338,12 @@ class TestAlarmApply:
         )
         assert store.alarm_healthy is False
 
-    def test_events_for_unknown_area_are_ignored(self) -> None:
+    def test_events_for_unknown_zone_are_ignored(self) -> None:
         store = LoomStore()
         store.apply_alarm_countdown(
             payload=AlarmCountdownPayload.model_validate(
                 {
-                    "area_id": "ghost",
+                    "zone_id": "ghost",
                     "kind": "exit_delay",
                     "remaining_s": 1,
                     "total_s": 2,
@@ -363,13 +363,13 @@ class TestAlarmWriteBack:
     async def test_arm_posts_body(self) -> None:
         transport = _FakeTransport()
         store = _store_with_panels(_panel_entity(), transport=transport)
-        panel = store.get_alarm_panel_by_area(area_id="erdgeschoss")
+        panel = store.get_alarm_panel_by_zone(zone_id="erdgeschoss")
         assert panel is not None
         await panel.arm(mode="full", code="1234", skip_delay=True)
         assert transport.calls == [
             (
                 "POST",
-                "/alarm/areas/erdgeschoss/arm",
+                "/alarm/zones/erdgeschoss/arm",
                 {"mode": "full", "skip_delay": True, "code": "1234"},
             )
         ]
@@ -377,58 +377,58 @@ class TestAlarmWriteBack:
     async def test_disarm_without_code_posts_empty_body(self) -> None:
         transport = _FakeTransport()
         store = _store_with_panels(_panel_entity(), transport=transport)
-        panel = store.get_alarm_panel_by_area(area_id="erdgeschoss")
+        panel = store.get_alarm_panel_by_zone(zone_id="erdgeschoss")
         assert panel is not None
         await panel.disarm()
-        assert transport.calls == [("POST", "/alarm/areas/erdgeschoss/disarm", {})]
+        assert transport.calls == [("POST", "/alarm/zones/erdgeschoss/disarm", {})]
 
-    async def test_area_id_is_percent_encoded(self) -> None:
+    async def test_zone_id_is_percent_encoded(self) -> None:
         transport = _FakeTransport()
         store = LoomStore(transport=transport)
-        await store.silence_alarm_area(area_id="a|b:c")
-        assert transport.calls == [("POST", "/alarm/areas/a%7Cb%3Ac/silence", {})]
+        await store.silence_alarm_zone(zone_id="a|b:c")
+        assert transport.calls == [("POST", "/alarm/zones/a%7Cb%3Ac/silence", {})]
 
-    async def test_master_arm_fans_out_to_mode_capable_areas(self) -> None:
+    async def test_master_arm_fans_out_to_mode_capable_zones(self) -> None:
         transport = _FakeTransport()
         store = _store_with_panels(
-            _panel_entity(area_id="eg", supported_modes=["perimeter", "full"]),
-            _panel_entity(area_id="og", supported_modes=["full"]),
-            _panel_entity(area_id="keller", supported_modes=["perimeter"]),
-            _panel_entity(area_id="master", master=True, supported_modes=[]),
+            _panel_entity(zone_id="eg", supported_modes=["perimeter", "full"]),
+            _panel_entity(zone_id="og", supported_modes=["full"]),
+            _panel_entity(zone_id="keller", supported_modes=["perimeter"]),
+            _panel_entity(zone_id="master", master=True, supported_modes=[]),
             transport=transport,
         )
-        master = store.get_alarm_panel_by_area(area_id="master")
+        master = store.get_alarm_panel_by_zone(zone_id="master")
         assert master is not None
         await master.arm(mode="full")
         assert [c[1] for c in transport.calls] == [
-            "/alarm/areas/eg/arm",
-            "/alarm/areas/og/arm",
+            "/alarm/zones/eg/arm",
+            "/alarm/zones/og/arm",
         ]
 
-    async def test_master_disarm_fans_out_to_all_areas(self) -> None:
+    async def test_master_disarm_fans_out_to_all_zones(self) -> None:
         transport = _FakeTransport()
         store = _store_with_panels(
-            _panel_entity(area_id="eg"),
-            _panel_entity(area_id="og"),
-            _panel_entity(area_id="master", master=True, supported_modes=[]),
+            _panel_entity(zone_id="eg"),
+            _panel_entity(zone_id="og"),
+            _panel_entity(zone_id="master", master=True, supported_modes=[]),
             transport=transport,
         )
-        master = store.get_alarm_panel_by_area(area_id="master")
+        master = store.get_alarm_panel_by_zone(zone_id="master")
         assert master is not None
         await master.disarm(code="1234")
         assert [c[1] for c in transport.calls] == [
-            "/alarm/areas/eg/disarm",
-            "/alarm/areas/og/disarm",
+            "/alarm/zones/eg/disarm",
+            "/alarm/zones/og/disarm",
         ]
 
     async def test_master_silence_uses_silence_all(self) -> None:
         transport = _FakeTransport()
         store = _store_with_panels(
-            _panel_entity(area_id="eg"),
-            _panel_entity(area_id="master", master=True, supported_modes=[]),
+            _panel_entity(zone_id="eg"),
+            _panel_entity(zone_id="master", master=True, supported_modes=[]),
             transport=transport,
         )
-        master = store.get_alarm_panel_by_area(area_id="master")
+        master = store.get_alarm_panel_by_zone(zone_id="master")
         assert master is not None
         await master.silence()
         assert transport.calls == [("POST", "/alarm/silence-all", None)]
@@ -451,13 +451,13 @@ def _envelope(*, type_: str, payload: dict) -> WsEnvelope:
 
 
 class TestAlarmEventDispatch:
-    def test_state_changed_keyed_by_area(self) -> None:
+    def test_state_changed_keyed_by_zone(self) -> None:
         event = event_from_envelope(
             envelope=_envelope(
                 type_="alarm.state_changed",
                 payload={
-                    "area_id": "eg",
-                    "area_name": "EG",
+                    "zone_id": "eg",
+                    "zone_name": "EG",
                     "old_state": "disarmed",
                     "new_state": "arming",
                     "mode": "full",
@@ -474,7 +474,7 @@ class TestAlarmEventDispatch:
                 type_="alarm.panel_changed",
                 payload={
                     "unique_id": "openccu-loom_alarm_eg",
-                    "area_id": "eg",
+                    "zone_id": "eg",
                     "name": "EG",
                     "state": "armed_away",
                     "available": True,
@@ -486,15 +486,15 @@ class TestAlarmEventDispatch:
         assert isinstance(event, AlarmPanelChangedEvent)
         assert event.event_key == "openccu-loom_alarm_eg"
 
-    def test_notification_keyed_by_area(self) -> None:
+    def test_notification_keyed_by_zone(self) -> None:
         from openccu_loom_client.events.types import AlarmNotificationEvent
 
         event = event_from_envelope(
             envelope=_envelope(
                 type_="alarm.notification",
                 payload={
-                    "area_id": "eg",
-                    "area_name": "EG",
+                    "zone_id": "eg",
+                    "zone_name": "EG",
                     "output_id": "out|1",
                     "output_name": "Push",
                     "incident_id": 9,
@@ -515,7 +515,7 @@ class TestAlarmEventDispatch:
         )
         assert isinstance(event, AlarmJournalAppendedEvent)
         assert event.payload.class_.value == "arm"
-        # Engine-global entry (no area) → unkeyed.
+        # Engine-global entry (no zone) → unkeyed.
         assert event.event_key is None
 
 
@@ -553,27 +553,27 @@ class TestAlarmOperations:
         assert len(panels) == 1
         assert panels[0].unique_id == "openccu-loom_alarm_erdgeschoss"
 
-    async def test_get_area_statuses_unwraps_envelope(self, mock_daemon: MockDaemon, http: HttpTransport) -> None:
-        mock_daemon.get("/api/v1/alarm/state", payload={"areas": [_area_status().model_dump(mode="json")]})
-        statuses = await AlarmOperations(transport=http).get_area_statuses()
+    async def test_get_zone_statuses_unwraps_envelope(self, mock_daemon: MockDaemon, http: HttpTransport) -> None:
+        mock_daemon.get("/api/v1/alarm/state", payload={"zones": [_zone_status().model_dump(mode="json")]})
+        statuses = await AlarmOperations(transport=http).get_zone_statuses()
         assert len(statuses) == 1
         assert statuses[0].id == "erdgeschoss"
 
-    async def test_arm_area_posts_and_parses_accepted(self, mock_daemon: MockDaemon, http: HttpTransport) -> None:
+    async def test_arm_zone_posts_and_parses_accepted(self, mock_daemon: MockDaemon, http: HttpTransport) -> None:
         mock_daemon.post(
-            "/api/v1/alarm/areas/eg/arm",
+            "/api/v1/alarm/zones/eg/arm",
             payload={"state": "arming", "bypassed": ["s1"], "exit_delay_s": 30},
         )
-        accepted = await AlarmOperations(transport=http).arm_area(area_id="eg", mode="full", force=True)
+        accepted = await AlarmOperations(transport=http).arm_zone(zone_id="eg", mode="full", force=True)
         assert accepted.exit_delay_s == 30
         sent = mock_daemon.requests[-1].json()
         assert sent == {"mode": "full", "force": True}
 
     async def test_journal_query_params(self, mock_daemon: MockDaemon, http: HttpTransport) -> None:
         mock_daemon.get("/api/v1/alarm/journal", payload=[])
-        await AlarmOperations(transport=http).list_journal(area_id="eg", journal_class="trigger", limit=10)
+        await AlarmOperations(transport=http).list_journal(zone_id="eg", journal_class="trigger", limit=10)
         query = mock_daemon.requests[-1].query
-        assert query == {"area": "eg", "class": "trigger", "limit": "10"}
+        assert query == {"zone": "eg", "class": "trigger", "limit": "10"}
 
     async def test_output_test_id_is_percent_encoded(self, mock_daemon: MockDaemon, http: HttpTransport) -> None:
         mock_daemon.post("/api/v1/alarm/outputs/home|OUT:3/test", status=204)
@@ -582,10 +582,10 @@ class TestAlarmOperations:
 
     async def test_readiness_map(self, mock_daemon: MockDaemon, http: HttpTransport) -> None:
         mock_daemon.get(
-            "/api/v1/alarm/areas/eg/readiness",
+            "/api/v1/alarm/zones/eg/readiness",
             payload={"full": {"ready": False, "blockers": ["sensor.window"]}},
         )
-        readiness = await AlarmOperations(transport=http).get_area_readiness(area_id="eg")
+        readiness = await AlarmOperations(transport=http).get_zone_readiness(zone_id="eg")
         assert readiness["full"].ready is False
         assert readiness["full"].blockers == ["sensor.window"]
 
@@ -612,12 +612,12 @@ class TestBootstrapAlarm:
         mock_daemon.get("/api/v1/info", payload=_INFO)
         mock_daemon.get("/api/v1/snapshot", payload=_EMPTY_SNAPSHOT)
         mock_daemon.get("/api/v1/alarm/panels", payload=[_panel_entity().model_dump(mode="json")])
-        mock_daemon.get("/api/v1/alarm/state", payload={"areas": [_area_status().model_dump(mode="json")]})
+        mock_daemon.get("/api/v1/alarm/state", payload={"zones": [_zone_status().model_dump(mode="json")]})
         client = LoomClient(config=mock_daemon.config)
         try:
             await client.connect()
             await client.bootstrap()
-            panel = client.store.get_alarm_panel_by_area(area_id="erdgeschoss")
+            panel = client.store.get_alarm_panel_by_zone(zone_id="erdgeschoss")
             assert panel is not None
             assert panel.mode == "full"
         finally:

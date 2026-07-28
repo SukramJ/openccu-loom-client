@@ -48,7 +48,7 @@ from openccu_loom_types.rest import (
 
 from openccu_loom_client.canonical import serial_suffix as canonical_serial_suffix
 from openccu_loom_client.model import (
-    MASTER_AREA_ID,
+    MASTER_ZONE_ID,
     AlarmPanel,
     Channel,
     CustomDataPoint,
@@ -61,7 +61,7 @@ from openccu_loom_client.model import (
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from openccu_loom_types.rest import AlarmAreaStatus
+    from openccu_loom_types.rest import AlarmZoneStatus
     from openccu_loom_types.ws import (
         AlarmCountdownPayload,
         AlarmHealthChangedPayload,
@@ -141,13 +141,13 @@ class LoomStore:
         self._programs: dict[str, Program] = {}
         self._sysvars: dict[str, Sysvar] = {}
         # Alarm panels keyed by the daemon-computed ``unique_id`` (one per
-        # alarm area + the aggregate master; daemon ≥ 0.42.0). Empty when the
+        # alarm zone + the aggregate master; daemon ≥ 0.42.0). Empty when the
         # daemon's alarm subsystem is disabled — the /alarm routes are then
         # unmounted and bootstrap skips the section.
         self._alarm_panels: dict[str, AlarmPanel] = {}
-        # Secondary index area_id → panel (the ``alarm.*`` pushes are
-        # area-scoped; only ``alarm.panel_changed`` carries the unique_id).
-        self._alarm_panel_by_area: dict[str, AlarmPanel] = {}
+        # Secondary index zone_id → panel (the ``alarm.*`` pushes are
+        # zone-scoped; only ``alarm.panel_changed`` carries the unique_id).
+        self._alarm_panel_by_zone: dict[str, AlarmPanel] = {}
         # Engine-global health verdict from ``alarm.health_changed``.
         self._alarm_healthy: bool = True
         # Factory hook (compat layer) that builds categorised AlarmPanel
@@ -507,9 +507,9 @@ class LoomStore:
         """Return the panel for the daemon-computed unique id, or ``None``."""
         return self._alarm_panels.get(unique_id)
 
-    def get_alarm_panel_by_area(self, *, area_id: str) -> AlarmPanel | None:
-        """Return the panel of one alarm area (or the master), or ``None``."""
-        return self._alarm_panel_by_area.get(area_id)
+    def get_alarm_panel_by_zone(self, *, zone_id: str) -> AlarmPanel | None:
+        """Return the panel of one alarm zone (or the master), or ``None``."""
+        return self._alarm_panel_by_zone.get(zone_id)
 
     def set_alarm_panel_factory(self, *, factory: Callable[..., AlarmPanel] | None) -> None:
         """
@@ -529,12 +529,12 @@ class LoomStore:
 
     def _register_alarm_panel(self, *, panel: AlarmPanel) -> None:
         self._alarm_panels[panel.unique_id] = panel
-        self._alarm_panel_by_area[panel.area_id] = panel
+        self._alarm_panel_by_zone[panel.zone_id] = panel
 
     def _drop_alarm_panel(self, *, unique_id: str) -> None:
         panel = self._alarm_panels.pop(unique_id, None)
         if panel is not None:
-            self._alarm_panel_by_area.pop(panel.area_id, None)
+            self._alarm_panel_by_zone.pop(panel.zone_id, None)
 
     def attach_alarm_panels(self, *, panels: list[AlarmPanelEntity]) -> None:
         """
@@ -553,21 +553,21 @@ class LoomStore:
             existing = self._alarm_panels.get(entity.unique_id)
             if existing is not None:
                 existing._replace_summary(summary=entity)
-                # Keep the area index in lock-step (the area id of an
+                # Keep the zone index in lock-step (the zone id of an
                 # existing unique_id cannot really change, but cheap).
-                self._alarm_panel_by_area[entity.area_id] = existing
+                self._alarm_panel_by_zone[entity.zone_id] = existing
                 continue
             self._register_alarm_panel(panel=self._build_alarm_panel(summary=entity))
 
-    def attach_alarm_area_statuses(self, *, statuses: list[AlarmAreaStatus]) -> None:
+    def attach_alarm_zone_statuses(self, *, statuses: list[AlarmZoneStatus]) -> None:
         """
-        Seed the live area detail (``GET /alarm/state``) onto the panels.
+        Seed the live zone detail (``GET /alarm/state``) onto the panels.
 
-        Unknown areas are ignored — :meth:`attach_alarm_panels` owns
+        Unknown zones are ignored — :meth:`attach_alarm_panels` owns
         catalogue parity.
         """
         for status in statuses:
-            panel = self._alarm_panel_by_area.get(status.id)
+            panel = self._alarm_panel_by_zone.get(status.id)
             if panel is not None:
                 panel._replace_status(status=status)
 
@@ -591,12 +591,12 @@ class LoomStore:
             stub = AlarmPanelEntity.model_validate(
                 {
                     "unique_id": payload.unique_id,
-                    "area_id": payload.area_id,
+                    "zone_id": payload.zone_id,
                     "name": payload.name,
                     "category": "alarm_control_panel",
                     "state": payload.state,
                     "available": payload.available,
-                    "master": payload.area_id == MASTER_AREA_ID,
+                    "master": payload.zone_id == MASTER_ZONE_ID,
                     "code_arm_required": payload.code_arm_required,
                     "code_disarm_required": payload.code_disarm_required,
                 }
@@ -617,14 +617,14 @@ class LoomStore:
 
     def apply_alarm_state_changed(self, *, payload: AlarmStateChangedPayload) -> None:
         """
-        Fold an ``alarm.state_changed`` push into the area's live detail.
+        Fold an ``alarm.state_changed`` push into the zone's live detail.
 
-        Only the area-level detail (mode, countdown lifetime) updates
+        Only the zone-level detail (mode, countdown lifetime) updates
         here — the HA state token travels on the parallel
         ``alarm.panel_changed`` push, so it is never re-derived
         client-side.
         """
-        panel = self._alarm_panel_by_area.get(payload.area_id)
+        panel = self._alarm_panel_by_zone.get(payload.zone_id)
         if panel is None:
             return
         panel._set_mode(mode=payload.mode.value if payload.mode is not None else None)
@@ -635,8 +635,8 @@ class LoomStore:
             panel._clear_countdown()
 
     def apply_alarm_countdown(self, *, payload: AlarmCountdownPayload) -> None:
-        """Fold an ``alarm.countdown`` tick into the area's live detail."""
-        panel = self._alarm_panel_by_area.get(payload.area_id)
+        """Fold an ``alarm.countdown`` tick into the zone's live detail."""
+        panel = self._alarm_panel_by_zone.get(payload.zone_id)
         if panel is None:
             return
         panel._set_countdown(
@@ -646,15 +646,15 @@ class LoomStore:
         )
 
     def apply_alarm_readiness_changed(self, *, payload: AlarmReadinessChangedPayload) -> None:
-        """Replace the area's per-mode readiness from an ``alarm.readiness_changed`` push."""
-        panel = self._alarm_panel_by_area.get(payload.area_id)
+        """Replace the zone's per-mode readiness from an ``alarm.readiness_changed`` push."""
+        panel = self._alarm_panel_by_zone.get(payload.zone_id)
         if panel is None:
             return
         panel._set_readiness(readiness=payload.readiness)
 
     def apply_alarm_triggered(self, *, payload: AlarmTriggeredPayload) -> None:
         """Record the trigger detail (incident id, cause, sensor) on the panel."""
-        panel = self._alarm_panel_by_area.get(payload.area_id)
+        panel = self._alarm_panel_by_zone.get(payload.zone_id)
         if panel is None:
             return
         panel._record_incident(
@@ -667,10 +667,10 @@ class LoomStore:
         """Latch the engine-global health flag (panel availability rides ``panel_changed``)."""
         self._alarm_healthy = payload.healthy
 
-    async def arm_alarm_area(
+    async def arm_alarm_zone(
         self,
         *,
-        area_id: str,
+        zone_id: str,
         mode: str,
         code: str | None = None,
         force: bool | None = None,
@@ -678,9 +678,9 @@ class LoomStore:
         bypass: list[str] | None = None,
     ) -> None:
         """
-        Arm one alarm area.
+        Arm one alarm zone.
 
-        Wire: ``POST /alarm/areas/{id}/arm``. Not retried — arming has
+        Wire: ``POST /alarm/zones/{id}/arm``. Not retried — arming has
         side effects (exit delay, chirps) and readiness may change
         between attempts. The resulting state travels back via the
         ``alarm.panel_changed`` push.
@@ -697,42 +697,42 @@ class LoomStore:
             body["code"] = code
         await transport.request(
             method="POST",
-            path=f"/alarm/areas/{quote(area_id, safe='')}/arm",
+            path=f"/alarm/zones/{quote(zone_id, safe='')}/arm",
             json_body=body,
             allow_retry=False,
         )
 
-    async def disarm_alarm_area(self, *, area_id: str, code: str | None = None) -> None:
-        """Disarm one alarm area. Wire: ``POST /alarm/areas/{id}/disarm``. Not retried."""
+    async def disarm_alarm_zone(self, *, zone_id: str, code: str | None = None) -> None:
+        """Disarm one alarm zone. Wire: ``POST /alarm/zones/{id}/disarm``. Not retried."""
         transport = self._require_transport()
         await transport.request(
             method="POST",
-            path=f"/alarm/areas/{quote(area_id, safe='')}/disarm",
+            path=f"/alarm/zones/{quote(zone_id, safe='')}/disarm",
             json_body={"code": code} if code is not None else {},
             allow_retry=False,
         )
 
-    async def silence_alarm_area(self, *, area_id: str, code: str | None = None) -> None:
-        """Silence one area's sounding outputs. Wire: ``POST /alarm/areas/{id}/silence``."""
+    async def silence_alarm_zone(self, *, zone_id: str, code: str | None = None) -> None:
+        """Silence one zone's sounding outputs. Wire: ``POST /alarm/zones/{id}/silence``."""
         transport = self._require_transport()
         await transport.request(
             method="POST",
-            path=f"/alarm/areas/{quote(area_id, safe='')}/silence",
+            path=f"/alarm/zones/{quote(zone_id, safe='')}/silence",
             json_body={"code": code} if code is not None else {},
             allow_retry=False,
         )
 
-    async def acknowledge_alarm_area(self, *, area_id: str, code: str | None = None) -> None:
-        """Acknowledge an ended incident. Wire: ``POST /alarm/areas/{id}/acknowledge``."""
+    async def acknowledge_alarm_zone(self, *, zone_id: str, code: str | None = None) -> None:
+        """Acknowledge an ended incident. Wire: ``POST /alarm/zones/{id}/acknowledge``."""
         transport = self._require_transport()
         await transport.request(
             method="POST",
-            path=f"/alarm/areas/{quote(area_id, safe='')}/acknowledge",
+            path=f"/alarm/zones/{quote(zone_id, safe='')}/acknowledge",
             json_body={"code": code} if code is not None else {},
             allow_retry=False,
         )
 
-    async def silence_all_alarm_areas(self) -> None:
+    async def silence_all_alarm_zones(self) -> None:
         """Silence every sounding output (break-glass). Wire: ``POST /alarm/silence-all``."""
         transport = self._require_transport()
         await transport.request(method="POST", path="/alarm/silence-all", allow_retry=False)
