@@ -7,9 +7,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from openccu_loom_types.rest import AlarmMessage, ServiceMessage, SystemUpdateEntry
+from openccu_loom_types.rest import AddonUpdateStatus, AlarmMessage, ServiceMessage, SystemUpdateEntry
 
 from openccu_loom_client.compat.aiohomematic.model.hub.singletons import (
+    AddonUpdateDp,
     AlarmMessagesSensor,
     ConnectionLatencySensor,
     InboxSensor,
@@ -59,9 +60,26 @@ def _service(*, name: str, device_name: str | None = None) -> ServiceMessage:
 class _FakeSystemOps:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
+        self.addon_install_calls = 0
 
     async def install_system_update(self, *, central: str | None = None) -> None:
         self.calls.append({"central": central})
+
+    async def install_addon_update(self) -> None:
+        self.addon_install_calls += 1
+
+
+def _addon_status(**overrides: Any) -> AddonUpdateStatus:
+    payload: dict[str, Any] = {
+        "supported": True,
+        "current_version": "0.50.0",
+        "latest_version": "0.50.1",
+        "update_available": True,
+        "release_url": "https://github.com/SukramJ/openccu-loom/releases/tag/v0.50.1",
+        "state": "idle",
+    }
+    payload.update(overrides)
+    return AddonUpdateStatus.model_validate(payload)
 
 
 class _FakeHubOps:
@@ -234,6 +252,59 @@ class TestSystemUpdate:
         dp = SystemUpdateDp(store=_store(), system_ops=ops)  # type: ignore[arg-type]
         assert await dp.install() is True
         assert ops.calls == [{"central": "home"}]
+        assert dp.in_progress is True
+
+
+class TestAddonUpdate:
+    def test_unique_id_and_category_match_the_hub_update_path(self) -> None:
+        dp = AddonUpdateDp(store=_store(), system_ops=_FakeSystemOps())  # type: ignore[arg-type]
+        assert dp.unique_id == "loom_abc1234567_hub_addon-update"
+        # Same category as SystemUpdateDp — the HA update platform spawns
+        # both through the identical hub-update path.
+        assert dp.category == SystemUpdateDp(store=_store(), system_ops=_FakeSystemOps()).category  # type: ignore[arg-type]
+
+    def test_update_status_tracks_versions_and_progress(self) -> None:
+        dp = AddonUpdateDp(store=_store(), system_ops=_FakeSystemOps())  # type: ignore[arg-type]
+        assert dp.update_available is False
+        assert dp.in_progress is False
+        status = _addon_status()
+        assert dp.update_status(status=status) is True
+        assert dp.current_firmware == "0.50.0"
+        assert dp.firmware == "0.50.0"
+        assert dp.available_firmware == "0.50.1"
+        assert dp.latest_firmware == "0.50.1"
+        assert dp.update_available is True
+        assert dp.release_url == "https://github.com/SukramJ/openccu-loom/releases/tag/v0.50.1"
+        assert dp.in_progress is False
+        # Same payload again: refresh only.
+        assert dp.update_status(status=status) is False
+        # downloading and installing both render as install-in-progress.
+        assert dp.update_status(status=_addon_status(state="downloading")) is True
+        assert dp.in_progress is True
+        assert dp.update_status(status=_addon_status(state="installing")) is True
+        assert dp.in_progress is True
+        # checking is not an install.
+        assert dp.update_status(status=_addon_status(state="checking")) is True
+        assert dp.in_progress is False
+
+    def test_failed_state_carries_error(self) -> None:
+        dp = AddonUpdateDp(store=_store(), system_ops=_FakeSystemOps())  # type: ignore[arg-type]
+        dp.update_status(status=_addon_status(state="failed", error="checksum mismatch"))
+        assert dp.state == "failed"
+        assert dp.error == "checksum mismatch"
+        assert dp.in_progress is False
+
+    def test_latest_firmware_falls_back_to_installed(self) -> None:
+        dp = AddonUpdateDp(store=_store(), system_ops=_FakeSystemOps())  # type: ignore[arg-type]
+        dp.update_status(status=_addon_status(latest_version=None, update_available=False))
+        assert dp.latest_firmware == "0.50.0"
+
+    async def test_install_triggers_daemon_and_flips_in_progress(self) -> None:
+        ops = _FakeSystemOps()
+        dp = AddonUpdateDp(store=_store(), system_ops=ops)  # type: ignore[arg-type]
+        assert await dp.install() is True
+        assert ops.addon_install_calls == 1
+        assert dp.state == "installing"
         assert dp.in_progress is True
 
 

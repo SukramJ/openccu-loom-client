@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 from openccu_loom_types.rest import (
+    AddonUpdateStatus,
     Health,
     HubDataPoints,
     HubMetricsEntry,
@@ -113,6 +114,40 @@ class SystemOperations(_OperationsBase):
             params={"central": central} if central else None,
             allow_retry=False,
         )
+
+    # ---- add-on self-update ----
+
+    async def get_addon_update_status(self) -> AddonUpdateStatus:
+        """
+        Self-update status of the daemon's own CCU add-on package.
+
+        Wire: ``GET /system/addon-update``. Only meaningful on platforms
+        with the firmware-side installer (OpenCCU / RaspberryMatic);
+        elsewhere ``supported`` is ``False`` and the check/install verbs
+        answer 404. Daemons older than api 3.3.0 answer 404 here too.
+        """
+        payload = await self._transport.request(method="GET", path="/system/addon-update")
+        return AddonUpdateStatus.model_validate(payload)
+
+    async def check_addon_update(self) -> None:
+        """
+        Trigger an immediate add-on update check against the release feed.
+
+        Wire: ``POST /system/addon-update/check`` (202). Observe the
+        result via :meth:`get_addon_update_status` or the
+        ``addon_update.state_changed`` broadcast. Not retried.
+        """
+        await self._transport.request(method="POST", path="/system/addon-update/check", allow_retry=False)
+
+    async def install_addon_update(self) -> None:
+        """
+        Download, verify and install the latest add-on package (admin).
+
+        Wire: ``POST /system/addon-update/install`` (202). The daemon
+        restarts as part of the install. Not retried — while an install
+        is already running the daemon answers 409.
+        """
+        await self._transport.request(method="POST", path="/system/addon-update/install", allow_retry=False)
 
     async def get_hub_metrics(self) -> list[HubMetricsEntry]:
         """

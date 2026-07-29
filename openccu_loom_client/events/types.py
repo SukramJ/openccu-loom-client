@@ -25,6 +25,7 @@ from typing import Any, ClassVar, Final
 
 from openccu_loom_types.rest import Kind1 as Kind
 from openccu_loom_types.ws import (
+    AddonUpdateStatus,
     AlarmCountdownPayload,
     AlarmHealthChangedPayload,
     AlarmJournalAppendedPayload,
@@ -331,6 +332,23 @@ class HubSystemUpdateChangedEvent(LoomEvent):
         """Default the routing key to the payload's central name."""
         if self.event_key is None:
             self.event_key = self.payload.central
+
+
+@dataclass(slots=True, kw_only=True)
+class AddonUpdateStateChangedEvent(LoomEvent):
+    """
+    The daemon's add-on self-updater changed state (daemon api ≥ 3.3.0).
+
+    Rides the ``system.addon_update`` topic: an update check finished, a
+    download/install is progressing, or the updater failed. The add-on is
+    the daemon's own package — daemon-global rather than per-central — so
+    no routing key is set. Only emitted on platforms with the firmware-side
+    installer (OpenCCU / RaspberryMatic); the REST surface
+    (``GET /system/addon-update``) shares the same payload model.
+    """
+
+    payload: AddonUpdateStatus
+    type_id: ClassVar[str] = "addon_update.state_changed"
 
 
 @dataclass(slots=True, kw_only=True)
@@ -643,6 +661,7 @@ _EVENT_REGISTRY: Final[dict[str, tuple[Callable[..., LoomEvent], type[BaseModel]
     HubMetricsChangedEvent.type_id: (HubMetricsChangedEvent, HubMetricChangedPayload),
     HubConnectivityChangedEvent.type_id: (HubConnectivityChangedEvent, HubConnectivityChangedPayload),
     HubSystemUpdateChangedEvent.type_id: (HubSystemUpdateChangedEvent, HubSystemUpdateChangedPayload),
+    AddonUpdateStateChangedEvent.type_id: (AddonUpdateStateChangedEvent, AddonUpdateStatus),
     DeviceCreatedEvent.type_id: (DeviceCreatedEvent, DeviceCreatedPayload),
     DeviceRemovedEvent.type_id: (DeviceRemovedEvent, DeviceRemovedPayload),
     DeviceTriggerEvent.type_id: (DeviceTriggerEvent, DeviceTriggerPayload),
