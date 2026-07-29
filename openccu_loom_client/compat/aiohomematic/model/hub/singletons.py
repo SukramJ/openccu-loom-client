@@ -31,7 +31,7 @@ from openccu_loom_client.compat.aiohomematic.model.hub._surface import _HubEntit
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from openccu_loom_types.rest import SystemUpdateEntry
+    from openccu_loom_types.rest import AddonUpdateStatus, SystemUpdateEntry
     from openccu_loom_types.ws import HubSystemUpdateChangedPayload
 
     from openccu_loom_client.operations.hub import HubOperations
@@ -447,6 +447,132 @@ class SystemUpdateDp(HubSingletonDp):
         return True
 
 
+class AddonUpdateDp(HubSingletonDp):
+    """
+    Daemon add-on self-update data point (second ``HmUpdate`` twin).
+
+    Mirrors :class:`SystemUpdateDp` for the daemon's own CCU add-on
+    package instead of the CCU firmware: same ``HubUpdate`` category, so
+    the HA update platform spawns it through the identical hub-update
+    path (install button, progress, backup toggle). The coordinator only
+    builds it when the daemon reports the platform installer as present
+    (``supported`` on ``GET /system/addon-update``); REST poll and the
+    ``addon_update.state_changed`` push share one payload model, applied
+    via :meth:`update_status`. The status is daemon-global — on a daemon
+    serving several centrals each adapter renders its own twin (distinct
+    unique_ids via the serial suffix).
+    """
+
+    _category: ClassVar[DataPointCategory] = DataPointCategory.HubUpdate
+
+    # Updater lifecycle states that HA renders as "install in progress".
+    _IN_PROGRESS_STATES: ClassVar[frozenset[str]] = frozenset({"downloading", "installing"})
+
+    def __init__(self, *, store: LoomStore, system_ops: SystemOperations) -> None:
+        """Bind the add-on-update singleton to the store and system operations."""
+        super().__init__(
+            store=store,
+            name="Add-on Update",
+            parameter_slug="addon-update",
+            translation_key="addon_update",
+        )
+        self._system_ops: Final = system_ops
+        self._current_firmware: str = ""
+        self._available_firmware: str = ""
+        self._update_available: bool = False
+        self._state: str = "idle"
+        self._release_url: str | None = None
+        self._error: str | None = None
+
+    @property
+    def current_firmware(self) -> str:
+        """Return the installed add-on version."""
+        return self._current_firmware
+
+    @property
+    def firmware(self) -> str:
+        """Return the installed add-on version (alias)."""
+        return self._current_firmware
+
+    @property
+    def available_firmware(self) -> str:
+        """Return the add-on version available for install."""
+        return self._available_firmware
+
+    @property
+    def latest_firmware(self) -> str:
+        """Return the latest installable version, falling back to the installed one."""
+        return self._available_firmware or self._current_firmware
+
+    @property
+    def update_available(self) -> bool:
+        """Return whether an add-on update is available."""
+        return self._update_available
+
+    @property
+    def in_progress(self) -> bool:
+        """Return whether an add-on update is currently downloading/installing."""
+        return self._state in self._IN_PROGRESS_STATES
+
+    @property
+    def state(self) -> str:
+        """Return the raw updater lifecycle state (``idle`` … ``failed``)."""
+        return self._state
+
+    @property
+    def release_url(self) -> str | None:
+        """Return the release-notes page of the latest version (if known)."""
+        return self._release_url
+
+    @property
+    def error(self) -> str | None:
+        """Return the failure detail while the updater state is ``failed``."""
+        return self._error
+
+    def update_status(self, *, status: AddonUpdateStatus) -> bool:
+        """Apply a REST/WS ``AddonUpdateStatus``; return whether anything changed."""
+        new = (
+            status.current_version or "",
+            status.latest_version or "",
+            bool(status.update_available),
+            status.state.value,
+            status.release_url,
+            status.error,
+        )
+        old = (
+            self._current_firmware,
+            self._available_firmware,
+            self._update_available,
+            self._state,
+            self._release_url,
+            self._error,
+        )
+        now = datetime.now(tz=UTC)
+        if new != old:
+            (
+                self._current_firmware,
+                self._available_firmware,
+                self._update_available,
+                self._state,
+                self._release_url,
+                self._error,
+            ) = new
+            self._modified = now
+            self._refreshed = now
+            return True
+        self._refreshed = now
+        return False
+
+    async def install(self) -> bool:
+        """Trigger the add-on self-update install via the daemon."""
+        await self._system_ops.install_addon_update()
+        # Optimistic: `installing` is terminal from the caller's view —
+        # the daemon restarts on success and the post-reconnect fetch
+        # shows the new version. Flip immediately so HA shows progress.
+        self._state = "installing"
+        return True
+
+
 # ---- install mode ----
 
 
@@ -564,6 +690,7 @@ class ConnectivityDpType(NamedTuple):
 
 __all__ = [
     "INSTALL_MODE_TOKEN_BY_INTERFACE",
+    "AddonUpdateDp",
     "AlarmMessagesSensor",
     "ConnectionLatencySensor",
     "ConnectivityDpType",

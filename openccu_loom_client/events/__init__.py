@@ -24,6 +24,7 @@ from openccu_loom_client.events.synthetic import (
     new_optimistic_rollback_event,
 )
 from openccu_loom_client.events.types import (
+    AddonUpdateStateChangedEvent,
     AlarmCountdownEvent,
     AlarmHealthChangedEvent,
     AlarmJournalAppendedEvent,
@@ -63,6 +64,7 @@ from openccu_loom_client.events.types import (
 
 __all__ = [
     # General
+    "AddonUpdateStateChangedEvent",
     "AlarmCountdownEvent",
     "AlarmHealthChangedEvent",
     "AlarmJournalAppendedEvent",

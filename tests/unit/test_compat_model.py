@@ -27,6 +27,7 @@ from aiohomematic.const import (
 )
 from openccu_loom_types.enums import DataPointType
 from openccu_loom_types.rest import (
+    AddonUpdateStatus,
     CustomDPSummary,
     DataPointSummary,
     DeviceDetail,
@@ -69,6 +70,7 @@ from openccu_loom_client.compat.aiohomematic.model.generic import (
     make_generic_data_point,
 )
 from openccu_loom_client.events import (
+    AddonUpdateStateChangedEvent,
     CentralStateChangedEvent as LoomCentralStateChangedEvent,
     CustomDataPointStateChangedEvent,
     DataPointValueChangedEvent,
@@ -498,10 +500,12 @@ class _FakeSystemOps:
         interfaces: list[Any] | None = None,
         aggregate: list[Any] | None = None,
         update: list[Any] | None = None,
+        addon: AddonUpdateStatus | None = None,
     ) -> None:
         self._interfaces = list(interfaces or ())
         self._aggregate = list(aggregate or ())
         self._update = list(update or ())
+        self._addon = addon
         self.aggregate_calls = 0
 
     async def list_interfaces(self) -> list[Any]:
@@ -513,6 +517,13 @@ class _FakeSystemOps:
 
     async def get_system_update(self) -> list[Any]:
         return list(self._update)
+
+    async def get_addon_update_status(self) -> AddonUpdateStatus:
+        if self._addon is None:
+            # Mirrors a pre-3.3.0 daemon: the endpoint answers 404.
+            msg = "404 not found"
+            raise RuntimeError(msg)
+        return self._addon
 
 
 class _FakeHubClient:
@@ -526,6 +537,18 @@ def _iface(*, ident: str = "HmIP-RF", central_id: str = "home", connected: bool 
     return SimpleNamespace(id=ident, interface=ident, central_id=central_id, connected=connected)
 
 
+def _addon_status(**overrides: Any) -> AddonUpdateStatus:
+    payload: dict[str, Any] = {
+        "supported": True,
+        "current_version": "0.50.0",
+        "latest_version": "0.50.1",
+        "update_available": True,
+        "state": "idle",
+    }
+    payload.update(overrides)
+    return AddonUpdateStatus.model_validate(payload)
+
+
 class TestHubPushRouting:
     """G6: hub push broadcasts route onto the singletons and emit HA state-changed."""
 
@@ -536,6 +559,7 @@ class TestHubPushRouting:
         interfaces: list[Any] | None = None,
         aggregate: list[Any] | None = None,
         update: list[Any] | None = None,
+        addon: AddonUpdateStatus | None = None,
     ) -> tuple[_HubCoordinator, EventBus, Any, Looper, list[str]]:
         store = LoomStore()
         store.set_serial(serial="ABC1234567")
@@ -552,7 +576,7 @@ class TestHubPushRouting:
             client=_FakeHubClient(
                 store=store,
                 hub=hub or _FakeHubOps(),
-                system=_FakeSystemOps(interfaces=interfaces, aggregate=aggregate, update=update),
+                system=_FakeSystemOps(interfaces=interfaces, aggregate=aggregate, update=update, addon=addon),
             ),
             ha_bus=ha_bus,
         )
@@ -635,6 +659,47 @@ class TestHubPushRouting:
         assert coord._update_dp.current_firmware == "1.2"
         assert coord._update_dp.available_firmware == "1.3"
         assert seen == [coord._update_dp.unique_id]
+
+    async def test_addon_update_push_updates_singleton_and_emits(self) -> None:
+        coord, loom_bus, group, looper, seen = self._coordinator(addon=_addon_status())
+        await coord._ensure_singletons()
+        coord.install_push_routing(group=group)
+        await loom_bus.publish(
+            event=AddonUpdateStateChangedEvent(
+                seq=1,
+                kind=Kind.change,
+                ts="2026-06-21T08:00:00Z",
+                payload=_addon_status(state="downloading"),
+            )
+        )
+        await looper.block_till_done()
+        dp = coord.addon_update_dp
+        assert dp is not None
+        assert dp.in_progress is True
+        assert seen == [dp.unique_id]
+
+    async def test_addon_update_dp_gated_on_supported(self) -> None:
+        # Pre-3.3.0 daemon: GET /system/addon-update answers 404 → no singleton.
+        coord, _loom_bus, _group, _looper, _seen = self._coordinator()
+        await coord._ensure_singletons()
+        assert coord.addon_update_dp is None
+        # Platform without the firmware installer: supported=False → no singleton.
+        coord2, _loom_bus2, _group2, _looper2, _seen2 = self._coordinator(addon=_addon_status(supported=False))
+        await coord2._ensure_singletons()
+        assert coord2.addon_update_dp is None
+
+    async def test_addon_update_dp_spawns_through_hub_update_category(self) -> None:
+        # The HA update platform asks for HmUpdate.default_category() —
+        # aiohomematic's HUB_UPDATE member. Both update twins must answer.
+        coord, _loom_bus, _group, _looper, _seen = self._coordinator(addon=_addon_status())
+        await coord._ensure_singletons()
+        dps = coord.get_hub_data_points(category=AioDataPointCategory.HUB_UPDATE, registered=False)
+        assert coord.update_dp is not None
+        assert coord.addon_update_dp is not None
+        assert {dp.unique_id for dp in dps} == {coord.update_dp.unique_id, coord.addon_update_dp.unique_id}
+        # The initial status is applied at build time.
+        assert coord.addon_update_dp.current_firmware == "0.50.0"
+        assert coord.addon_update_dp.update_available is True
 
     async def test_alarm_count_push_refetches_then_skips_when_unchanged(self) -> None:
         hub = _FakeHubOps(alarms=[SimpleNamespace(central="home", name="Low battery", device_name="Sensor")])

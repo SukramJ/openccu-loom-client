@@ -30,6 +30,7 @@ from openccu_loom_types.ws import WsEnvelope
 import pytest
 
 from openccu_loom_client.events import (
+    AddonUpdateStateChangedEvent,
     CentralStateChangedEvent,
     CustomDataPointStateChangedEvent,
     DataPointValueChangedEvent,
@@ -195,6 +196,26 @@ class TestDispatch:
         assert ev.payload.interface_id == "HmIP-RF"
         assert ev.payload.reachable is True
         assert ev.event_key == "home"
+
+    def test_addon_update_state_changed_lands_typed(self) -> None:
+        ev = event_from_envelope(
+            envelope=self._envelope(
+                type_="addon_update.state_changed",
+                payload={
+                    "supported": True,
+                    "current_version": "0.50.0",
+                    "latest_version": "0.50.1",
+                    "update_available": True,
+                    "release_url": "https://github.com/SukramJ/openccu-loom/releases/tag/v0.50.1",
+                    "state": "idle",
+                },
+            )
+        )
+        assert isinstance(ev, AddonUpdateStateChangedEvent)
+        assert ev.payload.update_available is True
+        assert ev.payload.state.value == "idle"
+        # Daemon-global broadcast: no central tag, so no routing key.
+        assert ev.event_key is None
 
     def test_sysvar_changed_lands_typed(self) -> None:
         env = self._envelope(

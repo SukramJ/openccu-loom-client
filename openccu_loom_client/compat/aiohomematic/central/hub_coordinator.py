@@ -6,8 +6,9 @@
 
 Extracted from ``adapter.py`` (it was ~450 lines / 30% of that file): builds
 the categorised sysvar/program data points and the per-central hub singletons
-(alarm/service messages, inbox, metrics, connectivity, system-update, install
-mode), seeds them from the aggregate ``GET /hub/data-points`` call, and routes
+(alarm/service messages, inbox, metrics, connectivity, system-update, add-on
+update, install mode), seeds them from the aggregate ``GET /hub/data-points``
+call (add-on update from ``GET /system/addon-update``), and routes
 the daemon's ``hub.*`` push broadcasts straight onto them
 (:meth:`_HubCoordinator.install_push_routing`). ``LoomCentralAdapter`` composes
 it as ``central.hub_coordinator``.
@@ -28,6 +29,7 @@ from openccu_loom_client.compat.aiohomematic.central.state_paths import parse_sy
 from openccu_loom_client.compat.aiohomematic.model.hub import make_program_data_points, make_sysvar_data_point
 from openccu_loom_client.compat.aiohomematic.model.hub.singletons import (
     INSTALL_MODE_TOKEN_BY_INTERFACE,
+    AddonUpdateDp,
     AlarmMessagesSensor,
     ConnectionLatencySensor,
     ConnectivityDpType,
@@ -43,6 +45,7 @@ from openccu_loom_client.compat.aiohomematic.model.hub.singletons import (
     SystemUpdateDp,
 )
 from openccu_loom_client.events import (
+    AddonUpdateStateChangedEvent,
     HubAlarmMessageCountChangedEvent,
     HubConnectivityChangedEvent,
     HubInboxChangedEvent,
@@ -85,6 +88,7 @@ class _HubCoordinator:
         self._service_messages_dp: ServiceMessagesSensor | None = None
         self._inbox_dp: InboxSensor | None = None
         self._update_dp: SystemUpdateDp | None = None
+        self._addon_update_dp: AddonUpdateDp | None = None
         self._metrics_dps: MetricsDpType | None = None
         self._connectivity_dps: dict[str, ConnectivityDpType] = {}
         self._install_mode_dps: dict[str, InstallModeDpType] = {}
@@ -238,6 +242,11 @@ class _HubCoordinator:
         return self._update_dp
 
     @property
+    def addon_update_dp(self) -> AddonUpdateDp | None:
+        """Return the add-on-update singleton (``None`` before bootstrap or when unsupported)."""
+        return self._addon_update_dp
+
+    @property
     def metrics_dps(self) -> MetricsDpType | None:
         """Return the metrics singleton triple (``None`` before bootstrap)."""
         return self._metrics_dps
@@ -263,6 +272,7 @@ class _HubCoordinator:
                 self._service_messages_dp,
                 self._inbox_dp,
                 self._update_dp,
+                self._addon_update_dp,
             )
             if dp is not None
         ]
@@ -282,6 +292,17 @@ class _HubCoordinator:
         self._service_messages_dp = ServiceMessagesSensor(store=store)
         self._inbox_dp = InboxSensor(store=store)
         self._update_dp = SystemUpdateDp(store=store, system_ops=self._client.system)
+        # The add-on self-updater is capability-gated daemon-side: only
+        # platforms with the firmware installer report supported=True, and
+        # daemons older than api 3.3.0 answer 404 — both mean "no entity".
+        try:
+            addon_status = await self._client.system.get_addon_update_status()
+        except Exception:
+            _LOGGER.debug("addon-update status unavailable while building hub singletons", exc_info=True)
+            addon_status = None
+        if addon_status is not None and addon_status.supported:
+            self._addon_update_dp = AddonUpdateDp(store=store, system_ops=self._client.system)
+            self._addon_update_dp.update_status(status=addon_status)
         self._metrics_dps = MetricsDpType(
             system_health=SystemHealthSensor(store=store),
             connection_latency=ConnectionLatencySensor(store=store),
@@ -350,6 +371,7 @@ class _HubCoordinator:
             fetch=self._client.hub.list_service_messages,
         )
         changed += await self._fetch_system_update()
+        changed += await self._fetch_addon_update()
         await self._publish_each(dps=changed)
 
     async def _publish_each(self, *, dps: list[Any]) -> None:
@@ -434,6 +456,17 @@ class _HubCoordinator:
             return []
         return [update_dp] if update_dp.update_data(entry=entry) else []
 
+    async def _fetch_addon_update(self) -> list[Any]:
+        """Refresh the add-on-update singleton (reconcile backstop for missed pushes)."""
+        if (addon_dp := self._addon_update_dp) is None:
+            return []
+        try:
+            status = await self._client.system.get_addon_update_status()
+        except Exception:
+            _LOGGER.debug("addon-update fetch failed", exc_info=True)
+            return []
+        return [addon_dp] if addon_dp.update_status(status=status) else []
+
     # ---- live push routing (G6) ----
 
     def install_push_routing(self, *, group: SubscriptionGroup) -> None:
@@ -457,6 +490,7 @@ class _HubCoordinator:
         group.subscribe(event_type=HubAlarmMessageCountChangedEvent, handler=self._on_alarm_push)
         group.subscribe(event_type=HubServiceMessageCountChangedEvent, handler=self._on_service_push)
         group.subscribe(event_type=HubSystemUpdateChangedEvent, handler=self._on_system_update_push)
+        group.subscribe(event_type=AddonUpdateStateChangedEvent, handler=self._on_addon_update_push)
         group.subscribe(event_type=InstallModeChangedEvent, handler=self._on_install_mode_push)
 
     async def _publish_changed(self, *, dp: Any) -> None:
@@ -499,6 +533,11 @@ class _HubCoordinator:
             return
         if (update_dp := self._update_dp) is not None and update_dp.update_from_push(payload=event.payload):
             await self._publish_changed(dp=update_dp)
+
+    async def _on_addon_update_push(self, event: AddonUpdateStateChangedEvent, /) -> None:
+        """Apply an ``addon_update.state_changed`` push (daemon-global, no central tag)."""
+        if (addon_dp := self._addon_update_dp) is not None and addon_dp.update_status(status=event.payload):
+            await self._publish_changed(dp=addon_dp)
 
     async def _on_alarm_push(self, event: HubAlarmMessageCountChangedEvent, /) -> None:
         """Apply an ``hub.alarm_message`` count push (refetch the list on a count delta)."""

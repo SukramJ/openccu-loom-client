@@ -177,3 +177,34 @@ class TestSystemOperations:
         )
         ifaces = await SystemOperations(transport=http).list_interfaces()
         assert ifaces[0].connected is True
+
+    async def test_get_addon_update_status(self, mock_daemon: MockDaemon, http: HttpTransport) -> None:
+        mock_daemon.get(
+            "/api/v1/system/addon-update",
+            payload={
+                "supported": True,
+                "current_version": "0.50.0",
+                "latest_version": "0.50.1",
+                "update_available": True,
+                "release_url": "https://github.com/SukramJ/openccu-loom/releases/tag/v0.50.1",
+                "state": "idle",
+            },
+        )
+        status = await SystemOperations(transport=http).get_addon_update_status()
+        assert status.supported is True
+        assert status.current_version == "0.50.0"
+        assert status.latest_version == "0.50.1"
+        assert status.update_available is True
+        assert status.state.value == "idle"
+
+    async def test_check_addon_update_posts(self, mock_daemon: MockDaemon, http: HttpTransport) -> None:
+        mock_daemon.post("/api/v1/system/addon-update/check", status=202)
+        await SystemOperations(transport=http).check_addon_update()
+        call = next(r for r in mock_daemon.requests if r.path.endswith("/addon-update/check"))
+        assert call.method == "POST"
+
+    async def test_install_addon_update_posts(self, mock_daemon: MockDaemon, http: HttpTransport) -> None:
+        mock_daemon.post("/api/v1/system/addon-update/install", status=202)
+        await SystemOperations(transport=http).install_addon_update()
+        call = next(r for r in mock_daemon.requests if r.path.endswith("/addon-update/install"))
+        assert call.method == "POST"

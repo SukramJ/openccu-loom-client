@@ -1,3 +1,46 @@
+# Version 2026.7.19 (2026-07-29)
+
+The daemon's add-on self-updater (openccu-loom 0.50.0, API 3.3.0) reaches
+HA over this backend too: on platforms with the firmware-side installer
+(OpenCCU / RaspberryMatic) the compat layer now renders a second hub
+update entity for the daemon's own CCU add-on package, next to the CCU
+firmware update — same install button, progress and backup toggle,
+without any `homematicip_local` change.
+
+## What's Changed
+
+### Added
+
+- **`client.system` add-on self-update verbs.** `get_addon_update_status()`
+  (`GET /system/addon-update`), `check_addon_update()`
+  (`POST /system/addon-update/check`) and `install_addon_update()`
+  (`POST /system/addon-update/install`). The install restarts the daemon
+  and — like the check — is deliberately not retried; while an install is
+  already running the daemon answers 409.
+- **`AddonUpdateStateChangedEvent`.** The daemon's
+  `addon_update.state_changed` broadcast (topic `system.addon_update`) is
+  bound to a typed event carrying the shared `AddonUpdateStatus` payload
+  (REST and WS use one model). Daemon-global — no routing key.
+- **`AddonUpdateDp` hub singleton (compat).** A second `HmUpdate` twin in
+  the `HubUpdate` category, so the HA update platform spawns the add-on
+  entity through the identical hub-update path as the CCU firmware
+  update. Capability-gated: the coordinator builds it only when
+  `GET /system/addon-update` reports `supported` (a pre-3.3.0 daemon
+  answers 404 → no entity, no dead install button). Seeded at build time,
+  refreshed by the 30 s reconcile as a missed-push backstop, kept live by
+  the `addon_update.state_changed` push routing. `install()` flips the
+  state optimistically to `installing` — terminal from the caller's view:
+  the daemon restarts on success and the post-reconnect fetch shows the
+  new version. `state`, `release_url` and `error` are exposed for
+  diagnostics.
+
+### Changed
+
+- Pin `openccu-loom-types==0.2.2` (regenerated from openccu-loom v0.50.0,
+  API 3.3.0). With the types generated against API 3.3.0, the transport's
+  API-version guard requires a daemon on API major 3 with minor ≥ 3 at
+  `connect()` — deploy openccu-loom 0.50.0+ alongside this release.
+
 # Version 2026.7.18 (2026-07-28)
 
 The alarm system's armable unit is a **zone** — the daemon's API 3.0.0
