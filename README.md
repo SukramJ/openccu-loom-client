@@ -68,9 +68,11 @@ The full daemon REST surface is wrapped — typed end-to-end against
   users (`client.users`), centrals (`client.centrals`), config
   management (`client.config_admin`), diagnostics / log-levels /
   capture / RPC-recording / metrics / values-cache / MQTT-reload /
-  audit (`client.diagnostics`), backups (`client.backup`), edit-lock
-  sessions (`client.sessions`), the Matter bridge (`client.matter`),
-  and parameter visibility (`client.visibility`).
+  audit (`client.diagnostics`), backups incl. importing an externally
+  produced `.sbk` (`client.backup`), CCU maintenance — reboot / power
+  off / safe mode / recovery mode / astro position (`client.system`),
+  edit-lock sessions (`client.sessions`), the Matter bridge
+  (`client.matter`), and parameter visibility (`client.visibility`).
 
 The schedule, link and calculated-data-point schemas live in the
 daemon's `openapi.yaml` (`components.schemas`) and are regenerated into

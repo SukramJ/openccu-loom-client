@@ -393,3 +393,71 @@ class TestTransportSecurityHardening:
         raw = await transport.request_bytes(method="GET", path="/backup", max_bytes=1_000_000)
         assert raw == b"x" * 4096
         await transport.close()
+
+    async def test_request_upload_does_not_follow_redirect(
+        self, mock_daemon: MockDaemon, transport: HttpTransport
+    ) -> None:
+        # Same reasoning as the two above, and with more at stake: a
+        # followed 3xx would carry the auth header *and* the archive to
+        # whatever host the daemon named.
+        mock_daemon.get("/api/v1/info", payload=_INFO_RESPONSE)
+        mock_daemon.post("/api/v1/backups/upload", status=302, headers={"Location": "/api/v1/leaked"})
+        mock_daemon.post("/api/v1/leaked", payload={"stolen": True})
+        await transport.connect()
+        with pytest.raises(LoomHttpError) as ei:
+            await transport.request_upload(
+                method="POST",
+                path="/backups/upload",
+                field_name="file",
+                filename="ccu.sbk",
+                content=b"SBK",
+            )
+        assert ei.value.status == 302
+        await transport.close()
+        assert not any(r.path == "/api/v1/leaked" for r in mock_daemon.requests)
+
+
+class TestRequestUpload:
+    """``request_upload`` — the multipart counterpart to ``request_bytes``."""
+
+    async def test_upload_is_never_retried(self, mock_daemon: MockDaemon, transport: HttpTransport) -> None:
+        # A retried upload re-sends the whole archive and, on a route that
+        # is not idempotent, can leave a second stored backup behind. The
+        # 503 must surface on the first attempt.
+        mock_daemon.get("/api/v1/info", payload=_INFO_RESPONSE)
+        mock_daemon.post(
+            "/api/v1/backups/upload",
+            status=503,
+            payload={
+                "type": "https://openccu-loom.dev/errors/service_unready",
+                "title": "Backup storage unavailable",
+                "status": 503,
+            },
+        )
+        await transport.connect()
+        with pytest.raises(LoomHttpError):
+            await transport.request_upload(
+                method="POST",
+                path="/backups/upload",
+                field_name="file",
+                filename="ccu.sbk",
+                content=b"SBK",
+            )
+        await transport.close()
+        assert sum(1 for r in mock_daemon.requests if r.path == "/api/v1/backups/upload") == 1
+
+    async def test_upload_204_returns_none(self, mock_daemon: MockDaemon, transport: HttpTransport) -> None:
+        mock_daemon.get("/api/v1/info", payload=_INFO_RESPONSE)
+        mock_daemon.post("/api/v1/backups/upload", status=204)
+        await transport.connect()
+        assert (
+            await transport.request_upload(
+                method="POST",
+                path="/backups/upload",
+                field_name="file",
+                filename="ccu.sbk",
+                content=b"SBK",
+            )
+            is None
+        )
+        await transport.close()

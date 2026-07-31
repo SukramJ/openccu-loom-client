@@ -80,6 +80,11 @@ _DEFAULT_BACKOFF_SEQUENCE: Final = (0.5, 2.0)
 # the blast radius; callers may override per request via ``max_bytes``.
 _DEFAULT_MAX_DOWNLOAD_BYTES: Final = 512 * 1024 * 1024
 
+# Content type the daemon expects for an uploaded CCU backup archive. The
+# ``.sbk`` is a tar, but the daemon inspects the bytes rather than trusting
+# the label, so the generic octet-stream is the honest one to send.
+_UPLOAD_CONTENT_TYPE: Final = "application/octet-stream"
+
 
 class HttpTransport:
     """
@@ -408,6 +413,83 @@ class HttpTransport:
             raise LoomTransportError(msg) from exc
         except TimeoutError as exc:
             msg = f"request to {url} timed out after {self._config.request_timeout_seconds}s"
+            raise LoomTransportError(msg) from exc
+
+    async def request_upload(
+        self,
+        *,
+        method: str,
+        path: str,
+        field_name: str,
+        filename: str,
+        content: bytes,
+        content_type: str = _UPLOAD_CONTENT_TYPE,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        total_timeout_seconds: float | None = None,
+    ) -> Any:
+        """
+        Send one ``multipart/form-data`` upload and decode the JSON answer.
+
+        The mirror image of :meth:`request_bytes`: the daemon's upload
+        routes carry a file part rather than a JSON body, and the response
+        is ordinary JSON (or ``problem+json`` on error, which raises the
+        same typed exceptions as :meth:`request`).
+
+        Like a download, an upload is far larger and slower than a JSON
+        call — a real CCU backup is tens of megabytes — so this does *not*
+        inherit the session-wide total timeout that would guarantee failure
+        on a slow link. A per-chunk *write*/read timeout still fails a
+        genuinely stalled transfer fast; pass ``total_timeout_seconds`` to
+        impose an explicit ceiling.
+
+        Never retried: re-sending the body wastes the whole transfer, and
+        the daemon's upload routes are not idempotent (each accepted
+        archive becomes a separate stored backup).
+        """
+        if self._session is None or self._session.closed:
+            msg = "HttpTransport not connected — call connect() first"
+            raise LoomTransportError(msg)
+        url = self._config.http_base_url + path
+        merged = self._build_headers(extra=headers)
+        form = aiohttp.FormData()
+        form.add_field(field_name, content, filename=filename, content_type=content_type)
+        timeout = aiohttp.ClientTimeout(
+            total=total_timeout_seconds,
+            sock_connect=self._config.request_timeout_seconds,
+            sock_read=self._config.request_timeout_seconds,
+        )
+        try:
+            async with self._session.request(
+                method,
+                url,
+                params=params,
+                data=form,
+                headers=merged,
+                timeout=timeout,
+                # Same reasoning as ``_do_once``: a 3xx would carry the
+                # Authorization header — and the archive — to another host.
+                allow_redirects=False,
+            ) as resp:
+                if resp.status == HTTPStatus.NO_CONTENT:
+                    return None
+                raw = await resp.read()
+                if HTTPStatus.OK <= resp.status < HTTPStatus.MULTIPLE_CHOICES:
+                    return self._decode_json(raw) if raw else None
+                payload = self._decode_json(raw) if raw else None
+                problem = parse_problem(payload=payload) if payload is not None else None
+                raise http_error_from_problem(
+                    status=resp.status,
+                    problem=problem,
+                    raw_body=raw if problem is None else None,
+                    method=method,
+                    url=url,
+                )
+        except aiohttp.ClientError as exc:
+            msg = f"transport error talking to {url}: {exc}"
+            raise LoomTransportError(msg) from exc
+        except TimeoutError as exc:
+            msg = f"upload to {url} timed out"
             raise LoomTransportError(msg) from exc
 
     # ---- internals ----
