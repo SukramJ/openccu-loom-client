@@ -1,3 +1,107 @@
+# Version 2026.7.20 (2026-07-31)
+
+Catches the client up with the daemon's API 3.4.0 → 3.11.0 run
+(openccu-loom 0.51.0 – 0.52.1). The substance is the **CCU maintenance
+surface**: a CCU can now be powered off, restarted into safe mode or into
+its recovery system, its astro reference position can be corrected, an
+externally produced `.sbk` archive can be imported, and a firmware update
+can be preceded by a full backup. Everything is admin-gated ops surface on
+`client.system` / `client.backup`; no HA entity changes.
+
+One behaviour change reaches HA: the CCU's own security posture
+(`auth_enabled` / `https_redirect_enabled`) is now read from the daemon
+instead of being asserted by this client — see below.
+
+## What's Changed
+
+### Added
+
+- **`client.system` CCU maintenance verbs.** `reboot_ccu()` (which
+  existed on the daemon but never here), `poweroff_ccu()`,
+  `restart_ccu_safe_mode()` and `restart_ccu_recovery_mode()` on
+  `POST /system/ccu/{central}/{reboot,poweroff,safe-mode,recovery-mode}`.
+  All take `central=` (path-encoded — a central name is operator-chosen
+  free text), answer 202 the moment the CCU accepted, and none are
+  retried: each has a side effect on real hardware that the daemon does
+  not deduplicate. A central whose backend cannot host the action (CUxD,
+  Homegear, stock CCU3 for recovery) answers 422 →
+  `LoomValidationError`. Check `SystemCCUEntry.recovery_mode_supported`
+  before offering recovery rather than letting the operator find out.
+  Requires daemon api ≥ 3.9.0.
+- **`client.system.set_ccu_position()`.** `PUT /system/ccu/{central}/position`
+  writes the CCU's astro reference latitude/longitude. Every
+  sunrise/sunset time the CCU computes — for its own programs and for the
+  weekly profiles this client edits — derives from it, so a wrong value
+  skews astro schedules silently rather than failing. The daemon reads
+  the values back and compares, so a successful call means the CCU holds
+  exactly what was sent; that read-back is also why this one _is_
+  retried. The time zone is read-only (`SystemCCUEntry.timezone`).
+  Requires daemon api ≥ 3.8.0.
+- **`client.backup.upload_backup()`.** `POST /backups/upload` imports an
+  externally produced `.sbk` so it restores through the ordinary
+  `restore_backup()` path. The daemon inspects the archive first — a
+  structural check (readable tar carrying `usr_local.tar.gz` and its
+  signature), so picking the wrong file fails here rather than at restore
+  time when the CCU is already being wiped. The signature itself is _not_
+  verified (that needs the CCU's key material) and the daemon does not
+  claim otherwise. Returns the stored entry plus the `firmware_version` /
+  `product` read out of the archive, to compare against the target CCU.
+  Requires daemon api ≥ 3.10.0.
+- **`HttpTransport.request_upload()`.** The mirror image of
+  `request_bytes`: one `multipart/form-data` part, JSON (or
+  `problem+json`) back. Like a download it does not inherit the
+  session-wide total timeout — a real archive is tens of megabytes and
+  that timeout would guarantee failure on a slow link — but a stalled
+  transfer still fails fast on the per-chunk timeout. Never retried:
+  re-sending the body wastes the whole transfer and the daemon's upload
+  route is not idempotent.
+- **`install_system_update(backup_first=True)`.** The daemon takes a full
+  CCU backup and starts the update only once it is durably stored; a
+  failed backup aborts and the update does not run. The call then
+  **blocks for as long as the backup takes** — minutes on a large
+  configuration — because its response is what tells the caller whether
+  the safety net exists. Raise `LoomConfig.request_timeout_seconds`
+  accordingly. Off by default, and the body is omitted entirely unless
+  asked for, so a pre-3.11.0 daemon sees the request shape it validated
+  before.
+
+### Changed
+
+- **CCU security flags come from the daemon (compat).** The compat
+  adapter's `SystemInformation` took `auth_enabled=True` unconditionally
+  (reasoning: this client cannot connect without an auth method) and left
+  `https_redirect_enabled` unset because the daemon did not report one.
+  Both now come off the `/system/ccu` entry (api 3.5.0), which is the
+  flag's actual meaning: whether the **CCU** requires auth / redirects
+  HTTP on its own interfaces. They stay `None` on an older daemon or
+  before the first successful CCU connect — the CCU dashboard renders
+  that as unknown, which is honest, where the old `True` was a claim
+  about the wrong subject.
+- **Pin `openccu-loom-types==0.2.4`** (regenerated from openccu-loom
+  0.52.0, API 3.11.0). The transport's API-version guard derives from the
+  types' `DAEMON_API_VERSION`, so `connect()` now requires a daemon on
+  API major 3 with minor ≥ 11 — deploy openccu-loom 0.52.0+ alongside
+  this release. The new `SystemCCUEntry` fields (`auth_enabled`,
+  `https_redirect_enabled`, `longitude`, `latitude`, `timezone`,
+  `recovery_mode_supported`, `ccu_interfaces` — the CCU-side counterpart
+  to `configured_interfaces`, where a _difference_ between the two lists
+  is the interesting signal) ride along on `list_system_ccus()`.
+
+### Not carried over
+
+- **WS `addon_update.check` / `addon_update.install` (api 3.4.0).** The
+  daemon added WebSocket twins of two verbs this client already drives
+  over REST (`check_addon_update()` / `install_addon_update()`), and its
+  WS transport is deliberately receive-only apart from
+  subscribe/unsubscribe. Both routes report through the same
+  `addon_update.state_changed` broadcast that is already bound, so
+  nothing is missing.
+- **`GET /history` tier fallback + energy tariff (api 3.x, SV04/SY18).**
+  The `X-History-Tier` response header and the `price_per_kwh` /
+  `currency` fields land on daemon endpoints this client does not expose
+  — history and energy are CCU-WebUI surfaces, not HA ones. The types
+  carry them for whoever needs them.
+
 # Version 2026.7.19 (2026-07-29)
 
 The daemon's add-on self-updater (openccu-loom 0.50.0, API 3.3.0) reaches

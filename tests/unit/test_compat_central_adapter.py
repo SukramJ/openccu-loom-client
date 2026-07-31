@@ -149,6 +149,30 @@ class TestSystemInformation:
         assert info.available_interfaces == ("home:HmIP-RF",)
         assert central.version == "1.2.3"
 
+    async def test_ccu_security_flags_come_from_the_daemon(self, connected) -> None:
+        # api 3.5.0: the flags describe the *CCU's* posture, not this
+        # client's auth — the dashboard would otherwise claim the CCU is
+        # authenticated purely because the client connected with a token.
+        central, mock = connected
+        mock.get(
+            f"{_BASE}/system/ccu",
+            payload=[{**_CCU_ENTRY, "auth_enabled": False, "https_redirect_enabled": True}],
+        )
+        mock.get(f"{_BASE}/interfaces", payload=[])
+        info = await central.validate_config_and_get_system_information()
+        assert info.auth_enabled is False
+        assert info.https_redirect_enabled is True
+
+    async def test_ccu_security_flags_stay_unknown_before_the_first_connect(self, connected) -> None:
+        # The CCU-sourced set is empty until the daemon has reached the CCU
+        # once. "Unknown" must not collapse into a claim either way.
+        central, mock = connected
+        mock.get(f"{_BASE}/system/ccu", payload=[_CCU_ENTRY])
+        mock.get(f"{_BASE}/interfaces", payload=[])
+        info = await central.validate_config_and_get_system_information()
+        assert info.auth_enabled is None
+        assert info.https_redirect_enabled is None
+
 
 _CCU_ENTRY = {
     "name": "home",

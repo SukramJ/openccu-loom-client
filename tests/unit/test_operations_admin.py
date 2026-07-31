@@ -19,6 +19,7 @@ from openccu_loom_types import DAEMON_API_VERSION
 from openccu_loom_types.rest import TokenCreate, UserCreate
 import pytest
 
+from openccu_loom_client.exceptions import LoomValidationError
 from openccu_loom_client.operations import (
     AuthOperations,
     BackupOperations,
@@ -45,6 +46,28 @@ _INFO = {
     "uptime": "PT60S",
     "capabilities": ["rest.v1"],
     "schema_digest": "sha256:test",
+}
+
+# The minimal ``SystemCCUEntry`` the daemon always fills in — everything a
+# CCU only reports after a successful connect is added per test.
+_CCU_ENTRY = {
+    "name": "ccu-e2e",
+    "host": "127.0.0.1",
+    "available": True,
+    "model": "CCU3",
+    "version": "3.0",
+    "hostname": "ccu",
+    "serial": "ABC1234567",
+    "url": "http://127.0.0.1",
+    "is_ha_app": False,
+    "configured_interfaces": [],
+    # Required since types 0.1.55 / daemon api 2.19.0.
+    "readiness": {
+        "phase": "ready",
+        "ready": True,
+        "interfaces_loaded": 1,
+        "interfaces_total": 1,
+    },
 }
 
 
@@ -214,6 +237,51 @@ class TestBackupOperations:
         mock.post("/api/v1/backups/b1/restore", status=202)
         await BackupOperations(transport=t).restore_backup(backup_id="b1")
 
+    async def test_upload_backup_sends_multipart_and_returns_archive_facts(self, http) -> None:
+        # api 3.10.0: an externally produced .sbk is imported through a
+        # multipart file part, and the daemon answers with the stored
+        # BackupEntry plus what it read out of the archive.
+        t, mock = http
+        mock.post(
+            "/api/v1/backups/upload",
+            status=201,
+            payload={
+                "id": "imported-1",
+                "central": "home",
+                "bytes": 11,
+                "created_at": "2026-07-30T10:00:00Z",
+                "firmware_version": "3.89.8",
+                "product": "OpenCCU",
+            },
+        )
+        entry = await BackupOperations(transport=t).upload_backup(content=b"SBK-ARCHIVE", filename="ccu.sbk")
+        assert entry["id"] == "imported-1"
+        assert entry["firmware_version"] == "3.89.8"
+        sent = mock.requests[-1]
+        assert sent.headers["Content-Type"].startswith("multipart/form-data")
+        # The part carries the caller's filename under the daemon's "file" field.
+        assert b'name="file"' in sent.body
+        assert b'filename="ccu.sbk"' in sent.body
+        assert b"SBK-ARCHIVE" in sent.body
+
+    async def test_upload_backup_maps_a_rejected_archive_to_a_typed_error(self, http) -> None:
+        # 422 = not a CCU system backup. The daemon problem+json path must
+        # work on the upload route too — otherwise "wrong file picked"
+        # surfaces as an untyped transport failure.
+        t, mock = http
+        mock.post(
+            "/api/v1/backups/upload",
+            status=422,
+            payload={
+                "type": "https://openccu-loom.dev/errors/validation",
+                "title": "Not a CCU system backup",
+                "status": 422,
+            },
+        )
+        with pytest.raises(LoomValidationError) as err:
+            await BackupOperations(transport=t).upload_backup(content=b"nonsense")
+        assert err.value.status == 422
+
 
 class TestSessionsOperations:
     async def test_acquire_sends_key(self, http) -> None:
@@ -260,26 +328,7 @@ class TestSystemAdminExtensions:
     async def test_list_system_ccus_unwraps_entries_envelope(self, http) -> None:
         # The daemon returns {"entries": [...]}, not a bare list.
         t, mock = http
-        entry = {
-            "name": "ccu-e2e",
-            "host": "127.0.0.1",
-            "available": True,
-            "model": "CCU3",
-            "version": "3.0",
-            "hostname": "ccu",
-            "serial": "ABC1234567",
-            "url": "http://127.0.0.1",
-            "is_ha_app": False,
-            "configured_interfaces": [],
-            # Required since types 0.1.55 / daemon api 2.19.0.
-            "readiness": {
-                "phase": "ready",
-                "ready": True,
-                "interfaces_loaded": 1,
-                "interfaces_total": 1,
-            },
-        }
-        mock.get("/api/v1/system/ccu", payload={"entries": [entry]})
+        mock.get("/api/v1/system/ccu", payload={"entries": [_CCU_ENTRY]})
         ccus = await SystemOperations(transport=t).list_system_ccus()
         assert [c.name for c in ccus] == ["ccu-e2e"]
 
@@ -288,6 +337,117 @@ class TestSystemAdminExtensions:
         t, mock = http
         mock.get("/api/v1/system/ccu", payload=[])
         assert await SystemOperations(transport=t).list_system_ccus() == []
+
+    async def test_list_system_ccus_carries_the_ccu_reported_facts(self, http) -> None:
+        # api 3.5.0 / 3.8.0: security posture, astro position, time zone,
+        # recovery availability and the CCU's own interface list ride along
+        # on the same entry — the repair flow reads them from there.
+        t, mock = http
+        mock.get(
+            "/api/v1/system/ccu",
+            payload={
+                "entries": [
+                    {
+                        **_CCU_ENTRY,
+                        "auth_enabled": True,
+                        "https_redirect_enabled": False,
+                        "longitude": 8.6821,
+                        "latitude": 50.1109,
+                        "timezone": "Europe/Berlin",
+                        "recovery_mode_supported": True,
+                        "ccu_interfaces": [
+                            {
+                                "type": "HmIP-RF",
+                                "address": "hmip",
+                                "port": 2010,
+                                "url": "http://127.0.0.1:2010",
+                            }
+                        ],
+                    }
+                ]
+            },
+        )
+        (ccu,) = await SystemOperations(transport=t).list_system_ccus()
+        assert ccu.auth_enabled is True
+        assert ccu.https_redirect_enabled is False
+        assert (ccu.longitude, ccu.latitude) == (8.6821, 50.1109)
+        assert ccu.timezone == "Europe/Berlin"
+        assert ccu.recovery_mode_supported is True
+        assert ccu.ccu_interfaces is not None
+        assert ccu.ccu_interfaces[0].port == 2010
+
+    async def test_install_system_update_omits_the_body_by_default(self, http) -> None:
+        # A pre-3.11.0 daemon must keep seeing the exact request shape it
+        # validated before — the backup option is opt-in, never implied.
+        t, mock = http
+        mock.post("/api/v1/system/update/install", status=202)
+        await SystemOperations(transport=t).install_system_update(central="home")
+        sent = mock.requests[-1]
+        assert sent.query == {"central": "home"}
+        assert sent.body == b""
+
+    async def test_install_system_update_can_request_a_backup_first(self, http) -> None:
+        t, mock = http
+        mock.post("/api/v1/system/update/install", status=202)
+        await SystemOperations(transport=t).install_system_update(central="home", backup_first=True)
+        assert mock.requests[-1].json() == {"backup_first": True}
+
+
+class TestSystemCCUMaintenance:
+    """The CCU-hardware verbs (api 3.8.0 / 3.9.0) — not the daemon's own restart."""
+
+    @pytest.mark.parametrize(
+        ("verb", "path"),
+        [
+            ("reboot_ccu", "reboot"),
+            ("poweroff_ccu", "poweroff"),
+            ("restart_ccu_safe_mode", "safe-mode"),
+            ("restart_ccu_recovery_mode", "recovery-mode"),
+        ],
+    )
+    async def test_maintenance_verb_hits_its_route(self, http, verb: str, path: str) -> None:
+        t, mock = http
+        mock.post(f"/api/v1/system/ccu/home/{path}", status=202)
+        await getattr(SystemOperations(transport=t), verb)(central="home")
+        sent = mock.requests[-1]
+        assert (sent.method, sent.path) == ("POST", f"/api/v1/system/ccu/home/{path}")
+
+    async def test_central_name_is_path_encoded(self, http) -> None:
+        # A central name is operator-chosen free text. Unencoded, the ``?``
+        # would cut the path short and turn the rest into a query string —
+        # the request would hit a different route entirely. The server
+        # decodes it back, so the stub is registered on the decoded path.
+        t, mock = http
+        mock.post("/api/v1/system/ccu/haus?nord/reboot", status=202)
+        await SystemOperations(transport=t).reboot_ccu(central="haus?nord")
+        sent = mock.requests[-1]
+        assert sent.path == "/api/v1/system/ccu/haus?nord/reboot"
+        assert sent.query == {}
+
+    async def test_set_ccu_position_sends_both_coordinates(self, http) -> None:
+        t, mock = http
+        mock.put("/api/v1/system/ccu/home/position", status=204)
+        await SystemOperations(transport=t).set_ccu_position(central="home", longitude=8.6821, latitude=50.1109)
+        sent = mock.requests[-1]
+        assert sent.method == "PUT"
+        assert sent.json() == {"longitude": 8.6821, "latitude": 50.1109}
+
+    async def test_recovery_mode_on_an_unsupported_backend_raises(self, http) -> None:
+        # 422 is the daemon saying the central's backend cannot host the
+        # action (stock CCU3, CUxD, Homegear) — a caller must be able to
+        # tell that apart from a transport failure.
+        t, mock = http
+        mock.post(
+            "/api/v1/system/ccu/home/recovery-mode",
+            status=422,
+            payload={
+                "type": "https://openccu-loom.dev/errors/validation",
+                "title": "The central's backend cannot host this action",
+                "status": 422,
+            },
+        )
+        with pytest.raises(LoomValidationError):
+            await SystemOperations(transport=t).restart_ccu_recovery_mode(central="home")
 
 
 class TestDevicesAdminExtensions:

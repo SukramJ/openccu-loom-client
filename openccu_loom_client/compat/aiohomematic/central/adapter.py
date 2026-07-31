@@ -1527,10 +1527,15 @@ class LoomCentralAdapter:
             version=info.version,
             available_interfaces=interfaces,
             # The CCU dashboard renders these; the daemon reports them on the
-            # /system/ccu entry. Auth is always on (the client cannot connect
-            # without an auth method); the daemon does not surface an
-            # https-redirect flag, so it stays unknown.
+            # /system/ccu entry. The two security flags describe the *CCU's
+            # own* posture (api ≥ 3.5.0) — not this client's auth, which is
+            # always on. They stay ``None`` on an older daemon or before the
+            # first successful CCU connect, which the dashboard renders as
+            # "unknown" rather than as a claim either way.
             hostname=getattr(ccu_entry, "hostname", None) if ccu_entry is not None else None,
             is_ha_app=bool(getattr(ccu_entry, "is_ha_app", False)) if ccu_entry is not None else False,
-            auth_enabled=True,
+            auth_enabled=getattr(ccu_entry, "auth_enabled", None) if ccu_entry is not None else None,
+            https_redirect_enabled=(
+                getattr(ccu_entry, "https_redirect_enabled", None) if ccu_entry is not None else None
+            ),
         )
