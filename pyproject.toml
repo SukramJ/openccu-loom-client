@@ -14,7 +14,7 @@ dependencies = [
     # Upper bound: the compat shim couples to aiohomematic internals (not a
     # stable public API), so cap the calendar-versioned minor until a new
     # series is validated against the drift-guard test. See todo.md P1.
-    "aiohomematic>=2026.7.11",
+    "aiohomematic>=2026.8.0",
     # Floors match the CI-pinned versions in requirements.txt so a fresh
     # `pip install` resolves a tested-compatible set, not an ancient one.
     "aiohttp>=3.12.0",
