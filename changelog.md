@@ -1,3 +1,34 @@
+# Version 2026.8.0 (2026-08-01)
+
+Dependency release: `aiohomematic` moves to the **2026.8.0** series. No
+client code changes — this is the reference-stack refresh the compat shim
+rides on.
+
+## What's Changed
+
+### Changed
+
+- **Pin `aiohomematic==2026.8.0`** (was `2026.7.11`), and raise the
+  `pyproject.toml` floor to match — the CI pin is the tested set, and an
+  ancient floor is exactly where the compat shim's coupling to
+  aiohomematic internals would bite a fresh `pip install`.
+
+  Nothing in the 2026.8.0 series reaches this client. Its one signature
+  change (`_GenericProperty.__init__` takes `cached` / `log_context`
+  keyword-only) affects code that constructs `_GenericProperty`, which
+  this package never does. Its raised `openccu-data` floor (≥ 2026.7.2,
+  pulled in transitively) ships CCU translation and easymode artifacts
+  that only the direct-XML-RPC path reads; here the model→icon mapping is
+  resolved daemon-side and arrives on `DeviceSummary.model_icon`. The
+  remaining entries are an `AI_POLICY.md` addition and a logging-call
+  detail.
+
+  Verified rather than assumed: the drift-guard suite (`tests/compat`) —
+  which snapshots aiohomematic's `@runtime_checkable` model protocols and
+  the per-twin member surface so a silent upstream rename fails CI
+  instead of HA — passes against the new series, as does the full unit
+  suite (780 tests).
+
 # Version 2026.7.20 (2026-07-31)
 
 Catches the client up with the daemon's API 3.4.0 → 3.11.0 run
