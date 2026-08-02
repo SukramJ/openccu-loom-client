@@ -15,11 +15,10 @@
   daemon derives "closed" from exactly that, so the two agree.
 - **The colour fallback for pre-0.8.0 daemons is gone.** `hs_color` read the
   nested `color: {h, s}` object and, failing that, flat `hue`/`saturation`
-  keys — which it passed through *unscaled*, so a payload carrying both
+  keys — which it passed through _unscaled_, so a payload carrying both
   shapes answered on a different saturation scale depending on which branch
   ran. Those daemons are dozens of releases old; the nested object is the
   only source now.
-
 
 # Version 2026.8.0 (2026-08-01)
 
