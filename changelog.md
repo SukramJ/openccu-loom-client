@@ -1,7 +1,4 @@
-# Version 2026.8.0 (2026-08-01)
-
-Dependency release: `aiohomematic` moves to the **2026.8.0** series, plus
-one behaviour fix in the compat shim.
+# Version 2026.8.1 (unreleased)
 
 ## What's Changed
 
@@ -15,6 +12,14 @@ one behaviour fix in the compat shim.
   (`model/hub/button.py`), which reads `_is_active` for the same reason.
   Previously the hub surface's always-True availability won. The switch
   itself stays reachable either way — it is what turns the program back on.
+
+# Version 2026.8.0 (2026-08-01)
+
+Dependency release: `aiohomematic` moves to the **2026.8.0** series. No
+client code changes — this is the reference-stack refresh the compat shim
+rides on.
+
+## What's Changed
 
 ### Changed
 
