@@ -35,9 +35,45 @@ class _CalculatedKeyMixin:
         # ``DpSensor`` / ``DpBinarySensor`` → ``DataPoint``).
         summary: DataPointSummary
         parameter: str
+        value: Any
         device_address: str
         channel_number: int
         _store: LoomStore
+
+    # Daemon verdict on the derived value, carried by the calc-dps record
+    # (``available``, daemon API 3.13.0). Defaults to True so a record from an
+    # older daemon — where the field is absent — keeps the previous behaviour
+    # instead of silencing every calculated entity.
+    _calculated_available: bool = True
+
+    def apply_calculated_availability(self, *, available: bool) -> None:
+        """
+        Record the daemon's verdict on the derived value.
+
+        Called wherever the client reads a calc-dps record: the bootstrap
+        attach and the explicit re-read behind ``load_data_point_value``.
+        """
+        self._calculated_available = available
+
+    @property
+    def is_valid(self) -> bool:
+        """
+        Return whether the derived value is a confirmed reading.
+
+        The generic rule — "a value is present" — cannot answer this for a
+        calculated data point. It is computed from a channel's ordinary
+        readings, and those can be read-but-unusable: the CCU flags a
+        measurement fault through the paired ``…_STATUS`` parameter, or the
+        reading falls outside the bounds the device declares. The derived
+        number keeps updating right through such a fault, so only the daemon's
+        ``available`` flag distinguishes a dew point from a dew point computed
+        off a thermometer stuck at OVERFLOW.
+
+        Home Assistant restores an entity's previous state exactly when this
+        reads False, and stops rendering the live value — which is the point:
+        a wrong number is worse than the last known good one.
+        """
+        return self._calculated_available and self.value is not None
 
     @property
     def name(self) -> str:
@@ -112,13 +148,20 @@ def make_calculated_data_point(
     store: LoomStore,
 ) -> DataPoint:
     """Build the categorised calculated data point for one wire record."""
-    cls: type[DataPoint] = CalculatedDpBinarySensor if calc_is_binary(summary=summary) else CalculatedDpSensor
-    return cls(
+    cls: type[CalculatedDpSensor | CalculatedDpBinarySensor] = (
+        CalculatedDpBinarySensor if calc_is_binary(summary=summary) else CalculatedDpSensor
+    )
+    dp = cls(
         summary=synthesize_summary(calc=summary),
         device_address=device_address,
         channel_number=channel_number,
         store=store,
     )
+    # `available` has no slot on the generic summary shape — generic DPs do not
+    # carry a per-value verdict — so it rides on the instance instead of
+    # through `synthesize_summary`.
+    dp.apply_calculated_availability(available=summary.available)
+    return dp
 
 
 def calc_is_binary(*, summary: CalculatedDPSummary) -> bool:
