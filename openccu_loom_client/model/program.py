@@ -56,6 +56,26 @@ class Program:
         """Return whether the program is enabled, or ``None`` if unknown."""
         return self._summary.active
 
+    @property
+    def execute_available(self) -> bool:
+        """
+        Return whether running this program would do anything.
+
+        A CCU program is two controls: an activity flag deciding whether
+        it reacts at all, and an execution that runs it once. The CCU
+        refuses the execution while the flag is off — so a consumer
+        offering "run now" should render that control unavailable rather
+        than firing a call the CCU will reject.
+
+        The daemon answers this (``execute_available``, api 3.12.0)
+        instead of leaving every consumer to re-derive it from
+        :attr:`active`: it is CCU semantics, not presentation. Fails
+        **open** — an older daemon omits the field and a CCU that has not
+        reported the flag yet leaves it unset, and in both cases a
+        control must not be greyed out on missing information.
+        """
+        return self._summary.execute_available is not False
+
     # ---- device attachment ----
 
     @property

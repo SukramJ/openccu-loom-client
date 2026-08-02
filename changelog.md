@@ -1,6 +1,56 @@
-# Version 2026.8.1 (unreleased)
+# Version 2026.8.1 (2026-08-02)
+
+Follows the daemon to **API 3.12.0** (openccu-loom 0.52.7): a CCU program
+is two controls, and the daemon now says outright whether the second one
+would do anything.
 
 ## What's Changed
+
+### Added
+
+- **`Program.execute_available` + a gated execute button.** A CCU program
+  is an activity flag deciding whether it reacts at all, plus an execution
+  that runs it once — and the CCU refuses the execution while the flag is
+  off. The daemon answers that as `execute_available` on the REST and WS
+  program payloads (api 3.12.0) instead of leaving every consumer to
+  re-derive it from `active`: it is CCU semantics, not presentation.
+
+  The compat layer already spawned two entities per program, so this lands
+  where it belongs: `ProgramDpButton.available` now follows the daemon's
+  answer, and pressing a button that could only fail is no longer offered.
+  `ProgramDpSwitch` stays available on purpose — gating it exactly when
+  the program is off would strip out the only control that turns it back
+  on.
+
+  **Fails open.** A pre-3.12.0 daemon omits the field and a CCU that has
+  not reported the flag leaves it unset; both read as available, because a
+  control must never be greyed out on missing information. The flag rides
+  the periodic program refresh (`fetch_program_data` →
+  `_upsert_program`), which replaces the summary in place, so it tracks
+  the activity flag without a new push binding.
+
+### Changed
+
+- **Pin `openccu-loom-types==0.2.5`** (regenerated from openccu-loom
+  0.52.7, API 3.12.0). The transport's API guard derives from
+  `DAEMON_API_VERSION`, so `connect()` now requires a daemon on API major
+  3 with minor ≥ 12 — deploy openccu-loom 0.52.7+ alongside this release.
+
+### Note — a daemon-side unique_id fix changes entity identity
+
+No client change, but it lands with the daemon this release requires.
+openccu-loom 0.52.4 fixed the external `unique_id` of a parameter forced
+to a read-only sensor — `LEVEL` on HmIP-eTRV and HmIP-HEATING — to keep
+its disambiguating `_sensor` suffix, which the external key builder had
+been dropping.
+
+This client takes the `unique_id` from the daemon on both ends (the twin
+reads `summary.unique_id`, the refresh bridge prefers
+`payload.unique_id`), so the two stay in lock-step by construction and
+nothing here had to move. But the value itself changes across the daemon
+upgrade, so **HA orphans the old entity for those data points and creates
+a new one beside it**. Affected setups will want to remove the stale
+entity from the registry.
 
 ### Fixed
 

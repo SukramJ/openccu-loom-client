@@ -33,6 +33,7 @@ from openccu_loom_types.rest import (
     DeviceDetail,
     HubDataPoints,
     Kind1 as Kind,
+    ProgramSummary,
     Snapshot,
 )
 from openccu_loom_types.ws import (
@@ -69,6 +70,7 @@ from openccu_loom_client.compat.aiohomematic.model.generic import (
     DpSwitch,
     make_generic_data_point,
 )
+from openccu_loom_client.compat.aiohomematic.model.hub import make_program_data_points
 from openccu_loom_client.events import (
     AddonUpdateStateChangedEvent,
     CentralStateChangedEvent as LoomCentralStateChangedEvent,
@@ -1311,3 +1313,44 @@ class TestGenericDataPointFactory:
         by_param = {dp.parameter: dp for dp in central._client.store.data_points}
         assert by_param["LOW_BAT"].translated_name == "Batterie"
         assert by_param["STATE"].translated_name is None
+
+
+class TestProgramControlAvailability:
+    """api 3.12.0: only the execute button is gated on the daemon's answer."""
+
+    @staticmethod
+    def _summary(**extra: Any) -> Any:
+        return ProgramSummary.model_validate(
+            {
+                "id": "p1",
+                "name": "All off",
+                "description": "",
+                "active": True,
+                "unique_id": "loom_test_p1",
+                **extra,
+            }
+        )
+
+    def _twins(self, **extra: Any) -> tuple[Any, Any]:
+        store = LoomStore()
+        return make_program_data_points(summary=self._summary(**extra), store=store)
+
+    def test_button_goes_unavailable_when_the_ccu_would_refuse(self) -> None:
+        button, _switch = self._twins(active=False, execute_available=False)
+        assert button.available is False
+
+    def test_switch_stays_available_on_a_deactivated_program(self) -> None:
+        # Gating the switch too would strip out the only control that can
+        # turn the program back on — the CCU never refuses this write.
+        _button, switch = self._twins(active=False, execute_available=False)
+        assert switch.available is True
+
+    def test_both_available_while_the_program_is_active(self) -> None:
+        button, switch = self._twins(execute_available=True)
+        assert (button.available, switch.available) == (True, True)
+
+    def test_button_stays_pressable_when_the_daemon_omits_the_field(self) -> None:
+        # Fail-open: a pre-3.12.0 daemon, or a CCU whose flag has not been
+        # observed yet, must not present a dead button.
+        button, _switch = self._twins()
+        assert button.available is True
