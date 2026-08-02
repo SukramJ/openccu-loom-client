@@ -916,6 +916,7 @@ class TestRefreshBridge:
                         "value": True,
                         "modified_at": "2026-05-24T08:00:00Z",
                         "unique_id": "",
+                        "available": True,
                     }
                 ),
             )
@@ -945,6 +946,7 @@ class TestRefreshBridge:
                         "value": True,
                         "modified_at": "2026-05-24T08:00:00Z",
                         "unique_id": "loom_vcu1_1_state",
+                        "available": True,
                     }
                 ),
             )

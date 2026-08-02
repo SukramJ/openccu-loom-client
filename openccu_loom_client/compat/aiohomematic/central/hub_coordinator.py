@@ -26,7 +26,6 @@ from openccu_loom_client.compat.aiohomematic._upstream import (
     EventBus as AioEventBus,
 )
 from openccu_loom_client.compat.aiohomematic.central.state_paths import parse_sysvar_state_path
-from openccu_loom_client.compat.aiohomematic.model.hub import make_program_data_points, make_sysvar_data_point
 from openccu_loom_client.compat.aiohomematic.model.hub.singletons import (
     INSTALL_MODE_TOKEN_BY_INTERFACE,
     AddonUpdateDp,
@@ -65,6 +64,11 @@ if TYPE_CHECKING:
 
 _LOGGER: Final = logging.getLogger(__name__)
 
+# Sentinel for "the store did not hold this entry before the fetch". Distinct
+# from ``None``, which is a legitimate sysvar value and a legitimate
+# not-yet-reported activity flag — both would otherwise read as unchanged.
+_UNSET: Final = object()
+
 
 class _HubCoordinator:
     """``central.hub_coordinator`` surface (sysvars, programs, messages, singletons)."""
@@ -77,9 +81,6 @@ class _HubCoordinator:
     ) -> None:
         self._client = client
         self._ha_bus = ha_bus
-        # Cache hub data points by unique_id so register()/unregister()
-        # bookkeeping survives repeated get_hub_data_points() scans.
-        self._cache: dict[str, Any] = {}
         # Per-central hub singletons, built once on the first
         # fetch_hub_singleton_data() (the interface list is needed for
         # the connectivity / install-mode pairs).
@@ -108,12 +109,46 @@ class _HubCoordinator:
         return sysvar.value if sysvar is not None else None
 
     async def fetch_sysvar_data(self, *, scheduled: bool = False) -> None:
+        """
+        Re-read the sysvar catalogue and re-render what changed.
+
+        Backs Home Assistant's ``fetch_system_variables`` service. Live
+        changes arrive as ``hub.sysvar_changed`` pushes, so this is the
+        manual path — and it has to announce its results, or the one action
+        an operator takes when a value looks stale appears to do nothing.
+        """
+        store = self._client.store
+        changed: list[Any] = []
         for summary in await self._client.hub.list_sysvars():
-            self._client.store._upsert_sysvar(summary=summary)
+            before = store.get_sysvar(name=summary.name)
+            previous = before.value if before is not None else _UNSET
+            store._upsert_sysvar(summary=summary)
+            if (dp := store.get_sysvar(name=summary.name)) is not None and dp.value != previous:
+                changed.append(dp)
+        await self._publish_each(dps=changed)
 
     async def fetch_program_data(self, *, scheduled: bool = False) -> None:
+        """
+        Re-read the program catalogue and re-render what changed.
+
+        One event per program, not per twin: the execute button and the
+        activity switch share the canonical key, and the button carries no
+        ``value`` of its own — the activity flag is what moved, and both
+        entities re-read their own view off the refreshed summary.
+        """
+        store = self._client.store
+        now = datetime.now(tz=UTC)
         for summary in await self._client.hub.list_programs():
-            self._client.store._upsert_program(summary=summary)
+            before = store.get_program(program_id=summary.id)
+            previous = before.summary.active if before is not None else _UNSET
+            store._upsert_program(summary=summary)
+            if summary.active == previous or not summary.unique_id:
+                continue
+            await self._ha_bus.publish(
+                event=AioDataPointStateChangedEvent(
+                    timestamp=now, unique_id=summary.unique_id, new_value=summary.active
+                )
+            )
 
     # ---- entity-spawn surface ----
 
@@ -157,8 +192,18 @@ class _HubCoordinator:
         return summary.vid in (40, 41)
 
     def _all_hub_data_points(self) -> list[Any]:
-        """Build (and cache) categorised hub data points from the store."""
-        live: dict[str, Any] = {}
+        """
+        Return the categorised hub data points for this central.
+
+        The store owns the instances (it builds them through the factories
+        installed at start-up), so this only decides which of them become HA
+        entities. It used to build and cache them here instead — which meant
+        the object Home Assistant held kept its bootstrap summary forever,
+        while the store's copy was the one every refresh and push updated.
+        Reading through is what keeps a program's availability and a sysvar's
+        value alive.
+        """
+        out: list[Any] = []
         for sysvar in self._client.store.sysvars:
             if not self._is_local(summary=sysvar.summary):
                 continue
@@ -166,35 +211,18 @@ class _HubCoordinator:
                 continue
             # The daemon already applied the marker + internal inclusion
             # filter and resolved enabled-by-default (api ≥ 1.9.0); render
-            # every sysvar it sent and read the flag from the wire (absent →
-            # disabled by default on older daemons).
-            sv_dp: Any = make_sysvar_data_point(
-                summary=sysvar.summary,
-                store=self._client.store,
-                enabled_default=bool(sysvar.summary.enabled_default),
-            )
-            live[sv_dp.unique_id] = sv_dp
+            # every sysvar it sent.
+            out.append(sysvar)
         for program in self._client.store.programs:
             if not self._is_local(summary=program.summary):
                 continue
-            for pr_dp in make_program_data_points(
-                summary=program.summary,
-                store=self._client.store,
-                enabled_default=bool(program.summary.enabled_default),
-            ):
-                # Button and switch share the canonical key; HA scopes
-                # unique_ids per platform, the cache needs both.
-                live[f"{pr_dp.category}:{pr_dp.unique_id}"] = pr_dp
-        # Reuse cached instances (preserving their registered flag) and
-        # drop entries whose sysvar/program disappeared.
-        for uid, dp in live.items():
-            if uid not in self._cache:
-                self._cache[uid] = dp
-        for uid in list(self._cache):
-            if uid not in live:
-                del self._cache[uid]
+            # Two entities per program: the execute button and the activity
+            # switch. They share the canonical key — HA scopes unique_ids per
+            # platform — and both read the one summary the store keeps fresh.
+            out.extend(self._client.store.program_data_points(program_id=program.id))
         # The hub singletons are stable instances; they simply ride along.
-        return [*self._cache.values(), *self._hub_singletons()]
+        out.extend(self._hub_singletons())
+        return out
 
     def get_hub_data_points(
         self, *, category: Any = None, registered: bool | None = None, **_kwargs: Any
@@ -214,10 +242,9 @@ class _HubCoordinator:
         name = parse_sysvar_state_path(state_path=state_path)
         if name is None:
             return None
-        sysvar = self._client.store.get_sysvar(name=name)
-        if sysvar is None:
-            return None
-        return make_sysvar_data_point(summary=sysvar.summary, store=self._client.store)
+        # The store holds the categorised instance; building a fresh one here
+        # would hand out a twin that no refresh or push ever reaches.
+        return self._client.store.get_sysvar(name=name)
 
     # ---- hub singletons ----
 

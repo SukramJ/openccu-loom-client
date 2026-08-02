@@ -123,6 +123,7 @@ class TestDispatch:
                 "parameter": "LEVEL",
                 "paramset_key": "VALUES",
                 "value": 0.5,
+                "available": True,
                 "modified_at": "2026-05-24T08:42:13Z",
                 "unique_id": "loom_test_level",
             },

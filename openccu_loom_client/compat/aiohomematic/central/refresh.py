@@ -62,6 +62,7 @@ from openccu_loom_client.events import (
     DataPointValueChangedEvent,
     DeviceCreatedEvent as LoomDeviceCreatedEvent,
     DeviceRemovedEvent as LoomDeviceRemovedEvent,
+    ProgramChangedEvent,
     SysvarChangedEvent,
 )
 from openccu_loom_client.events.types import (
@@ -178,9 +179,23 @@ def _wire_value_events(*, group: SubscriptionGroup, store: LoomStore, ha_bus: Ai
             value=event.payload.value,
         )
 
+    async def on_program_changed(event: ProgramChangedEvent) -> None:
+        """
+        Re-render a program's two entities after its activity flag flipped.
+
+        Both the switch and the button hang off the one canonical key — HA
+        scopes unique_ids per platform — so a single emit reaches both. It
+        carries the flag as the value because that is the switch's state; the
+        button re-reads its own availability off the same summary.
+        """
+        if not event.payload.unique_id:
+            return
+        await _emit(ts=event.ts, event_key=event.payload.unique_id, value=event.payload.active)
+
     group.subscribe(event_type=DataPointValueChangedEvent, handler=on_value)
     group.subscribe(event_type=CustomDataPointStateChangedEvent, handler=on_custom)
     group.subscribe(event_type=SysvarChangedEvent, handler=on_sysvar)
+    group.subscribe(event_type=ProgramChangedEvent, handler=on_program_changed)
 
 
 def _wire_trigger_and_rollback(

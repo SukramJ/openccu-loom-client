@@ -1,3 +1,61 @@
+# Version 2026.8.3 (2026-08-02)
+
+Follows the daemon to **API 3.14.0** (openccu-loom 0.52.10) and fixes the
+program switch, which never worked — plus the reason no hub entity could
+follow the CCU at all.
+
+## What's Changed
+
+### Fixed
+
+- **The program switch now switches.** `ProgramDpSwitch` carried neither a
+  state nor a write path: Home Assistant reads a program switch's state from
+  `value` and toggles it through `turn_on` / `turn_off`, and none of the
+  three existed on the loom twin. The switch reports the CCU's activity flag
+  and writes it back through `PATCH /programs/{id}`, then re-reads the
+  program so a consumer looking straight after the call sees the settled
+  state.
+
+- **Hub entities were frozen at their bootstrap value.** The categorised
+  sysvar and program twins were built next to the store's own objects and
+  cached in the hub coordinator, so every refresh and every push updated a
+  copy while Home Assistant kept reading the original. A sysvar sensor never
+  moved after start-up, and a program's execute button never learned that
+  the program had been deactivated.
+
+  The store now owns the twins — the same rule the generic, custom and
+  calculated data points already follow — so there is exactly one live object
+  per entity and an update reaches the one a consumer holds. The coordinator
+  reads through instead of caching.
+
+- **A deactivated program greys out its "run now" button.** With the two
+  above fixed, the rule the daemon has reported since API 3.12.0 finally
+  arrives: toggling the switch — in Home Assistant or in the CCU WebUI —
+  updates both of the program's entities.
+
+### Added
+
+- **`hub.program_changed` binding.** The daemon's new broadcast carries a
+  program's `active` and `execute_available` together, so an activity change
+  made anywhere reaches Home Assistant within a message instead of at the
+  next catalogue poll. Both program entities re-render off it; they share
+  the canonical key, and HA scopes unique_ids per platform.
+
+- **The "fetch system variables" service re-renders what it changed.** The
+  manual poll merged the fresh catalogue into the model and told Home
+  Assistant nothing, so the one action an operator takes when a value looks
+  stale appeared to do nothing. It now emits a state change per system
+  variable whose value moved, and one per program whose activity flag
+  moved — keyed on the program's canonical id, since its two entities share
+  it and the execute button carries no value of its own.
+
+### Changed
+
+- **Pin `openccu-loom-types==0.2.7`** (regenerated from openccu-loom
+  0.52.10, API 3.14.0). The transport's API guard derives from
+  `DAEMON_API_VERSION`, so `connect()` now requires a daemon on API major 3
+  with minor ≥ 14 — deploy openccu-loom 0.52.10+ alongside this release.
+
 # Version 2026.8.2 (2026-08-02)
 
 Follows the daemon to **API 3.13.0** (openccu-loom 0.52.9): a calculated

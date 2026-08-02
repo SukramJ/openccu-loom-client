@@ -28,7 +28,7 @@ component (the future ``LoomClient``) wires WS events → store
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 import logging
 from typing import TYPE_CHECKING, Any, Final, Protocol, runtime_checkable
 from urllib.parse import quote
@@ -73,6 +73,7 @@ if TYPE_CHECKING:
         DataPointValueChangedPayload,
         DeviceCreatedPayload,
         DeviceRemovedPayload,
+        ProgramChangedPayload,
         ProgramExecutedPayload,
         SysvarChangedPayload,
     )
@@ -156,6 +157,19 @@ class LoomStore:
         self._cdp_by_channel: dict[tuple[str, int], CustomDataPoint] = {}
         self._programs: dict[str, Program] = {}
         self._sysvars: dict[str, Sysvar] = {}
+        # Categorised hub twins, built by factories the compat layer installs.
+        # A sysvar has exactly one twin, so it simply *is* the entry in
+        # ``_sysvars``; a program has two (execute button + activity switch),
+        # which do not fit one slot and live here keyed by program id.
+        #
+        # The store owning them is what keeps them fresh: an ``_upsert_*`` has
+        # to reach the object a consumer already holds. Building the twins
+        # elsewhere and caching them there froze every hub entity at its
+        # bootstrap value — the summary was replaced on the store's copy while
+        # Home Assistant kept reading the cached one.
+        self._program_factory: Callable[..., Sequence[Program]] | None = None
+        self._sysvar_factory: Callable[..., Sysvar] | None = None
+        self._program_dps: dict[str, tuple[Program, ...]] = {}
         # Alarm panels keyed by the daemon-computed ``unique_id`` (one per
         # alarm zone + the aggregate master; daemon ≥ 0.42.0). Empty when the
         # daemon's alarm subsystem is disabled — the /alarm routes are then
@@ -1067,11 +1081,42 @@ class LoomStore:
             return
         summary = program.summary
         if payload.channel != summary.channel or payload.device_address != summary.device_address:
-            program._replace_summary(
+            self._upsert_program(
                 summary=summary.model_copy(
                     update={"channel": payload.channel, "device_address": payload.device_address}
                 )
             )
+
+    def apply_program_changed(self, *, payload: ProgramChangedPayload) -> None:
+        """
+        Apply a program's activity flip from a ``hub.program_changed`` push.
+
+        A CCU program is two controls: the activity flag decides whether it
+        reacts at all, and the execution runs it once. The CCU refuses the
+        execution while the flag is off, so the two travel together on this
+        push and land on one summary — the button reads ``execute_available``,
+        the switch reads ``active``, and both are views of the same record.
+
+        Unknown programs are logged and ignored (same rationale as
+        :meth:`apply_value_changed`). A device link carried by the push is
+        folded in; an absent one never clears an existing link, matching
+        :meth:`apply_program_executed`.
+        """
+        program = self._programs.get(payload.program_id)
+        if program is None:
+            _LOGGER.debug(
+                "program_changed for unknown program %r — ignoring (catalogue out of sync)",
+                payload.program_id,
+            )
+            return
+        update: dict[str, Any] = {
+            "active": payload.active,
+            "execute_available": payload.execute_available,
+        }
+        if payload.channel:
+            update["channel"] = payload.channel
+            update["device_address"] = payload.device_address
+        self._upsert_program(summary=program.summary.model_copy(update=update))
 
     def apply_custom_data_point_state_changed(self, *, payload: CustomDataPointStateChangedPayload) -> None:
         """
@@ -1145,6 +1190,43 @@ class LoomStore:
             path=f"/programs/{program_id}/execute",
             allow_retry=False,
         )
+
+    async def set_program_enabled(self, *, program_id: str, active: bool) -> None:
+        """
+        Activate or deactivate a CCU program, then re-read it.
+
+        Wire: ``PATCH /programs/{id}`` with ``{"active": …}``. Idempotent —
+        writing the state a program already has is a no-op on the CCU — so the
+        call is retried.
+
+        The daemon accepts the write as scheduled (202) and pushes
+        ``hub.program_changed`` once the CCU confirms the flip. The re-read
+        here is the belt to that braces: it settles the local view for a
+        consumer that reads the program straight after the call, without
+        waiting for the push.
+        """
+        transport = self._require_transport()
+        await transport.request(
+            method="PATCH",
+            path=f"/programs/{quote(program_id, safe='')}",
+            json_body={"active": active},
+            allow_retry=True,
+        )
+        await self.refresh_program(program_id=program_id)
+
+    async def refresh_program(self, *, program_id: str) -> None:
+        """
+        Re-read one program from the daemon and apply it.
+
+        Wire: ``GET /programs/{id}``. No-op without a transport or when the
+        daemon does not know the program (it may have been deleted between the
+        catalogue read and this call).
+        """
+        if self._transport is None:
+            return
+        payload = await self._transport.request(method="GET", path=f"/programs/{quote(program_id, safe='')}")
+        if isinstance(payload, dict):
+            self._upsert_program(summary=ProgramSummary.model_validate(payload))
 
     async def invoke_custom_data_point(
         self,
@@ -1236,6 +1318,49 @@ class LoomStore:
         """Install the categorised calculated-DP factory (compat layer)."""
         self._calculated_factory = factory
 
+    def set_hub_data_point_factories(
+        self,
+        *,
+        program_factory: Callable[..., Sequence[Program]] | None = None,
+        sysvar_factory: Callable[..., Sysvar] | None = None,
+    ) -> None:
+        """
+        Install the categorised hub-DP factories (compat layer).
+
+        Mirrors :meth:`set_calculated_data_point_factory`: the store builds the
+        categorised instance so there is exactly one live object per hub entity
+        and an ``_upsert_*`` reaches the object a consumer already holds.
+        Install before the first catalogue merge; entries already present are
+        rebuilt so a late install is not silently half-applied.
+        """
+        self._program_factory = program_factory
+        self._sysvar_factory = sysvar_factory
+        for program in list(self._programs.values()):
+            if program_factory is not None and program.id not in self._program_dps:
+                self._program_dps[program.id] = tuple(
+                    program_factory(
+                        summary=program.summary,
+                        store=self,
+                        enabled_default=bool(program.summary.enabled_default),
+                    )
+                )
+        if sysvar_factory is not None:
+            for name, sysvar in list(self._sysvars.items()):
+                if type(sysvar) is Sysvar:  # not yet categorised
+                    self._sysvars[name] = sysvar_factory(
+                        summary=sysvar.summary,
+                        store=self,
+                        enabled_default=bool(sysvar.summary.enabled_default),
+                    )
+
+    def program_data_points(self, *, program_id: str) -> tuple[Program, ...]:
+        """
+        Return the categorised twins of one program (button + switch).
+
+        Empty when no factory is installed or the program is unknown.
+        """
+        return self._program_dps.get(program_id, ())
+
     async def refresh_calculated_data_point(self, *, address: str, channel: int, name: str) -> None:
         """Re-read one calculated DP from the daemon and apply its value."""
         if self._transport is None:
@@ -1317,15 +1442,33 @@ class LoomStore:
         existing = self._programs.get(summary.id)
         if existing is None:
             self._programs[summary.id] = Program(summary=summary, store=self)
-        else:
-            existing._replace_summary(summary=summary)
+            if self._program_factory is not None:
+                self._program_dps[summary.id] = tuple(
+                    self._program_factory(
+                        summary=summary,
+                        store=self,
+                        enabled_default=bool(summary.enabled_default),
+                    )
+                )
+            return
+        existing._replace_summary(summary=summary)
+        # The categorised twins carry their own summary reference; a consumer
+        # holds one of *those*, so the update has to reach them too. Both read
+        # the same record — the button's availability and the switch's state
+        # are two views of one program.
+        for twin in self._program_dps.get(summary.id, ()):
+            twin._replace_summary(summary=summary)
 
     def _upsert_sysvar(self, *, summary: SysvarSummary) -> None:
         existing = self._sysvars.get(summary.name)
         if existing is None:
-            self._sysvars[summary.name] = Sysvar(summary=summary, store=self)
-        else:
-            existing._replace_summary(summary=summary)
+            self._sysvars[summary.name] = (
+                self._sysvar_factory(summary=summary, store=self, enabled_default=bool(summary.enabled_default))
+                if self._sysvar_factory is not None
+                else Sysvar(summary=summary, store=self)
+            )
+            return
+        existing._replace_summary(summary=summary)
 
     def _upsert_channel(self, *, summary: ChannelSummary) -> None:
         device_address = summary.address.split(":", 1)[0]

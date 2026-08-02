@@ -281,6 +281,7 @@ class TestLiveUpdates:
                 "value": 0.8,
                 "modified_at": "2026-05-24T08:42:13Z",
                 "unique_id": "loom_test_vcu0001_1_level",
+                "available": True,
             }
         )
         populated.apply_value_changed(payload=payload)
@@ -300,6 +301,7 @@ class TestLiveUpdates:
                 "value": 1.0,
                 "modified_at": "2026-05-24T08:42:13Z",
                 "unique_id": "loom_test_vcu9999_1_never_heard_of",
+                "available": True,
             }
         )
         populated.apply_value_changed(payload=payload)
@@ -458,6 +460,7 @@ class TestRefreshStaleGuard:
                     "value": value,
                     "modified_at": modified_at,
                     "unique_id": "loom_test_vcu0001_1_state",
+                    "available": True,
                 }
             )
         )

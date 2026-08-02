@@ -193,6 +193,25 @@ class ProgramDpSwitch(_HubEntitySurface, _ProgramProtocolSurface, Program):
         """Return the daemon-owned canonical HA unique id for this program (J1)."""
         return self.summary.unique_id
 
+    @property
+    def value(self) -> bool | None:
+        """
+        Return the program's activity flag — the switch's on/off state.
+
+        ``None`` while the CCU has not reported the flag; Home Assistant
+        renders that as unknown rather than off, which is the honest answer
+        for a program whose state nobody has read yet.
+        """
+        return self.summary.active
+
+    async def turn_on(self) -> None:
+        """Activate the program on the CCU."""
+        await self._store.set_program_enabled(program_id=self.id, active=True)
+
+    async def turn_off(self) -> None:
+        """Deactivate the program on the CCU."""
+        await self._store.set_program_enabled(program_id=self.id, active=False)
+
 
 # ---- updates ----
 
