@@ -1,3 +1,19 @@
+# Version 2026.8.1 (unreleased)
+
+## What's Changed
+
+### Fixed
+
+- **A cover with inverted control no longer reports the wrong direction.**
+  `is_opening` / `is_closing` were derived from the payload's `direction`
+  field, which carries the CCU's raw travel direction. The daemon's `state`
+  token already accounts for a channel wired with inverted control, where
+  "up" on the wire means closing — so on those channels the client reported
+  the opposite of what the daemon had determined, and the raw field won
+  because it was checked first. Both now read the token. `is_closed` does
+  too, keeping position 0 as the fallback for a payload without one; the
+  daemon derives "closed" from exactly that, so the two agree.
+
 # Version 2026.8.0 (2026-08-01)
 
 Dependency release: `aiohomematic` moves to the **2026.8.0** series. No

@@ -493,24 +493,35 @@ class CustomDpCover(_CustomEntitySurface):
 
     @property
     def is_closed(self) -> bool:
-        """Return whether the cover is closed, from position 0 or the ``state`` token."""
+        """
+        Return whether the cover is closed, per the daemon's ``state`` token.
+
+        Position 0 remains the fallback for a payload without a token: the
+        daemon derives "closed" from exactly that (Position.Closed is
+        ``level == 0``), so the two agree — unlike the direction-based
+        derivations, which did not.
+        """
+        if self._state_token:
+            return self._state_token == "closed"  # noqa: S105 # nosec B105 — cover state token, not a secret
         pos = self.current_position
-        if pos is not None:
-            return pos == 0
-        return self._state_token == "closed"  # noqa: S105 # nosec B105 — cover state token, not a secret
+        return pos == 0 if pos is not None else False
 
     @property
     def is_opening(self) -> bool:
-        """Return whether the cover is opening, from ``direction`` or the ``state`` token."""
-        if self._state.get("direction") == "opening":
-            return True
+        """
+        Return whether the cover is opening, per the daemon's ``state`` token.
+
+        Deliberately not derived from ``direction``: that field carries the
+        CCU's raw travel direction, while the daemon's token already accounts
+        for a channel wired with inverted control, where "up" on the wire
+        means closing (see the daemon's Cover.IsOpening). Reading ``direction``
+        here reported the opposite of what the daemon had determined.
+        """
         return self._state_token == "opening"  # noqa: S105 # nosec B105 — cover state token, not a secret
 
     @property
     def is_closing(self) -> bool:
-        """Return whether the cover is closing, from ``direction`` or the ``state`` token."""
-        if self._state.get("direction") == "closing":
-            return True
+        """Return whether the cover is closing, per the daemon's ``state`` token (see :attr:`is_opening`)."""
         return self._state_token == "closing"  # noqa: S105 # nosec B105 — cover state token, not a secret
 
     async def open(self) -> None:

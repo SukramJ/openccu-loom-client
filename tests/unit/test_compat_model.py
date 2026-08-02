@@ -162,6 +162,82 @@ class TestCustomDataPointModel:
         # serial prefix.
         assert cover.unique_id == "loom_vcu1_1"
 
+    async def test_cover_motion_follows_the_daemon_not_the_raw_direction(self) -> None:
+        """
+        The daemon's ``state`` token decides, not the ``direction`` field.
+
+        ``direction`` carries the CCU's raw travel direction; the daemon's
+        token already accounts for a channel wired with inverted control,
+        where "up" on the wire means closing. Deriving motion from
+        ``direction`` reported the opposite of what the daemon determined.
+        """
+        central = await _adapter()
+        store = central._client.store
+        store.load_snapshot(
+            snapshot=Snapshot.model_validate(
+                {
+                    "generated_at": "2026-05-24T08:00:00Z",
+                    "devices": [
+                        {
+                            "address": "VCU1",
+                            "interface": "home:HmIP-RF",
+                            "model": "HmIP-BROLL",
+                            "name": "Shutter",
+                            "available": True,
+                            "channels_count": 1,
+                            "interface_id": "home:HmIP-RF",
+                            "updatable": False,
+                            "update_available": False,
+                            "master_pushes_config_pending": False,
+                            "has_sub_devices": False,
+                        }
+                    ],
+                }
+            )
+        )
+        store.attach_custom_data_points(
+            device_address="VCU1",
+            cdps=[_cdp(name="cover", category="cover", kind="cover_blind", unique_id="loom_vcu1_1")],
+        )
+
+        def _apply(state: dict[str, object]) -> CustomDpCover:
+            store.apply_custom_data_point_state_changed(
+                payload=CustomDataPointStateChangedPayload.model_validate(
+                    {
+                        "central": "home",
+                        "device_address": "VCU1",
+                        "channel": 1,
+                        "name": "cover",
+                        "state": state,
+                        "unique_id": "loom_test_vcu1_1_cover",
+                    }
+                )
+            )
+            cover = central.query_facade.get_data_points(data_point_type=DataPointType.Cover)[0]
+            assert isinstance(cover, CustomDpCover)
+            return cover
+
+        # Inverted control: the wire says "up" while the daemon, which knows
+        # the channel is inverted, reports closing.
+        cover = _apply({"state": "closing", "direction": "opening", "current_position": 60})
+        assert cover.is_closing is True
+        assert cover.is_opening is False
+
+        # And the mirror image.
+        cover = _apply({"state": "opening", "direction": "closing", "current_position": 60})
+        assert cover.is_opening is True
+        assert cover.is_closing is False
+
+        # Closed comes from the token too; the daemon derives it from
+        # position 0, so the two agree.
+        cover = _apply({"state": "closed", "current_position": 0})
+        assert cover.is_closed is True
+        assert cover.is_opening is False
+
+        # A payload without a token still answers from the position.
+        cover = _apply({"current_position": 0})
+        assert cover.is_closed is True
+
     async def test_climate_kind_maps_to_thermostat(self) -> None:
         central = await _adapter()
         store = central._client.store
