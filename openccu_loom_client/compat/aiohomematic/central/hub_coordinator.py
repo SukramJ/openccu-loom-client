@@ -64,6 +64,11 @@ if TYPE_CHECKING:
 
 _LOGGER: Final = logging.getLogger(__name__)
 
+# Sentinel for "the store did not hold this entry before the fetch". Distinct
+# from ``None``, which is a legitimate sysvar value and a legitimate
+# not-yet-reported activity flag — both would otherwise read as unchanged.
+_UNSET: Final = object()
+
 
 class _HubCoordinator:
     """``central.hub_coordinator`` surface (sysvars, programs, messages, singletons)."""
@@ -104,12 +109,46 @@ class _HubCoordinator:
         return sysvar.value if sysvar is not None else None
 
     async def fetch_sysvar_data(self, *, scheduled: bool = False) -> None:
+        """
+        Re-read the sysvar catalogue and re-render what changed.
+
+        Backs Home Assistant's ``fetch_system_variables`` service. Live
+        changes arrive as ``hub.sysvar_changed`` pushes, so this is the
+        manual path — and it has to announce its results, or the one action
+        an operator takes when a value looks stale appears to do nothing.
+        """
+        store = self._client.store
+        changed: list[Any] = []
         for summary in await self._client.hub.list_sysvars():
-            self._client.store._upsert_sysvar(summary=summary)
+            before = store.get_sysvar(name=summary.name)
+            previous = before.value if before is not None else _UNSET
+            store._upsert_sysvar(summary=summary)
+            if (dp := store.get_sysvar(name=summary.name)) is not None and dp.value != previous:
+                changed.append(dp)
+        await self._publish_each(dps=changed)
 
     async def fetch_program_data(self, *, scheduled: bool = False) -> None:
+        """
+        Re-read the program catalogue and re-render what changed.
+
+        One event per program, not per twin: the execute button and the
+        activity switch share the canonical key, and the button carries no
+        ``value`` of its own — the activity flag is what moved, and both
+        entities re-read their own view off the refreshed summary.
+        """
+        store = self._client.store
+        now = datetime.now(tz=UTC)
         for summary in await self._client.hub.list_programs():
-            self._client.store._upsert_program(summary=summary)
+            before = store.get_program(program_id=summary.id)
+            previous = before.summary.active if before is not None else _UNSET
+            store._upsert_program(summary=summary)
+            if summary.active == previous or not summary.unique_id:
+                continue
+            await self._ha_bus.publish(
+                event=AioDataPointStateChangedEvent(
+                    timestamp=now, unique_id=summary.unique_id, new_value=summary.active
+                )
+            )
 
     # ---- entity-spawn surface ----
 

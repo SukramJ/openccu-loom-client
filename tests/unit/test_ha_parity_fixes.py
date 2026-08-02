@@ -1004,3 +1004,102 @@ class TestSysvarStaysLive:
         # Same live object — not a copy the store updated beside it.
         assert dp.value == 42.0
         assert store.get_sysvar(name="Testvar") is dp
+
+
+class TestHubPollAnnouncesResults:
+    """The manual fetch service has to tell Home Assistant what it changed."""
+
+    @staticmethod
+    def _sysvar(value: float) -> Any:
+        from openccu_loom_types.rest import SysvarSummary
+
+        return SysvarSummary.model_validate(
+            {
+                "name": "Testvar",
+                "value": value,
+                "value_type": "FLOAT",
+                "observed": True,
+                "unique_id": "loom_sysvar_testvar",
+                "central": "home",
+            }
+        )
+
+    @staticmethod
+    def _program(*, active: bool) -> Any:
+        from openccu_loom_types.rest import ProgramSummary
+
+        return ProgramSummary.model_validate(
+            {
+                "id": "1234",
+                "name": "P",
+                "active": active,
+                "execute_available": active,
+                "unique_id": "loom_program_p",
+                "central": "home",
+            }
+        )
+
+    def _coordinator(self, *, sysvars: list[Any], programs: list[Any], published: list[Any]) -> Any:
+        from types import SimpleNamespace
+
+        from openccu_loom_client.compat.aiohomematic.central.hub_coordinator import _HubCoordinator
+        from openccu_loom_client.compat.aiohomematic.model.hub import make_program_data_points, make_sysvar_data_point
+
+        store = LoomStore()
+        store.set_central_name(central_name="home")
+        store.set_hub_data_point_factories(
+            program_factory=make_program_data_points,
+            sysvar_factory=make_sysvar_data_point,
+        )
+
+        async def _list_sysvars() -> list[Any]:
+            return sysvars
+
+        async def _list_programs() -> list[Any]:
+            return programs
+
+        class _Bus:
+            async def publish(self, *, event: Any) -> None:
+                published.append(event)
+
+        hub_ops = SimpleNamespace(list_sysvars=_list_sysvars, list_programs=_list_programs)
+        return _HubCoordinator(client=SimpleNamespace(store=store, hub=hub_ops), ha_bus=_Bus()), store
+
+    async def test_sysvar_fetch_emits_only_for_changes(self) -> None:
+        published: list[Any] = []
+        hc, store = self._coordinator(sysvars=[self._sysvar(99.0)], programs=[], published=published)
+        store._upsert_sysvar(summary=self._sysvar(1.0))
+        dp = store.get_sysvar(name="Testvar")
+        assert dp is not None
+
+        await hc.fetch_sysvar_data(scheduled=False)
+        assert dp.value == 99.0
+        assert len(published) == 1
+        assert published[0].unique_id == "loom_sysvar_testvar"
+        assert published[0].new_value == 99.0
+
+        # A second fetch with the same catalogue announces nothing.
+        published.clear()
+        await hc.fetch_sysvar_data(scheduled=False)
+        assert published == []
+
+    async def test_program_fetch_emits_once_per_program(self) -> None:
+        """
+        One event per program, keyed on the shared canonical id.
+
+        The execute button carries no ``value`` of its own — publishing per
+        twin would read an attribute that does not exist.
+        """
+        published: list[Any] = []
+        hc, store = self._coordinator(sysvars=[], programs=[self._program(active=False)], published=published)
+        store._upsert_program(summary=self._program(active=True))
+
+        await hc.fetch_program_data(scheduled=False)
+
+        assert len(published) == 1
+        assert published[0].unique_id == "loom_program_p"
+        assert published[0].new_value is False
+
+        published.clear()
+        await hc.fetch_program_data(scheduled=False)
+        assert published == []

@@ -41,6 +41,14 @@ follow the CCU at all.
   next catalogue poll. Both program entities re-render off it; they share
   the canonical key, and HA scopes unique_ids per platform.
 
+- **The "fetch system variables" service re-renders what it changed.** The
+  manual poll merged the fresh catalogue into the model and told Home
+  Assistant nothing, so the one action an operator takes when a value looks
+  stale appeared to do nothing. It now emits a state change per system
+  variable whose value moved, and one per program whose activity flag
+  moved — keyed on the program's canonical id, since its two entities share
+  it and the execute button carries no value of its own.
+
 ### Changed
 
 - **Pin `openccu-loom-types==0.2.7`** (regenerated from openccu-loom
