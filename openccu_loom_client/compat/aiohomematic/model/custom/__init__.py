@@ -350,18 +350,15 @@ class CustomDpDimmer(_CustomEntitySurface):
 
         The daemon emits a nested ``color: {h, s}`` object (hue in degrees
         [0,360], saturation in [0,1]); HA's ``hs_color`` convention is
-        saturation [0,100], so scale it up. Falls back to the legacy flat
-        ``hue``/``saturation`` keys for pre-0.8.0 daemons.
+        saturation [0,100], so scale it up. The scaling is the only
+        conversion here — the values themselves come from the daemon.
         """
         color = self._state.get("color")
-        if isinstance(color, dict):
-            hue = _as_float(value=color.get("h"))
-            sat = _as_float(value=color.get("s"))
-            return (hue, sat * 100.0) if hue is not None and sat is not None else None
-        # Legacy flat keys (pre-0.8.0 daemons) — passed through unscaled.
-        hue = _as_float(value=self._state.get("hue"))
-        sat = _as_float(value=self._state.get("saturation"))
-        return (hue, sat) if hue is not None and sat is not None else None
+        if not isinstance(color, dict):
+            return None
+        hue = _as_float(value=color.get("h"))
+        sat = _as_float(value=color.get("s"))
+        return (hue, sat * 100.0) if hue is not None and sat is not None else None
 
     @property
     def effect(self) -> str | None:

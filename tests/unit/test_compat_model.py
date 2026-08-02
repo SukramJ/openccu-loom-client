@@ -360,15 +360,22 @@ class TestCustomDeepParity:
         # hue passthrough (degrees); daemon saturation [0,1] → HA [0,100].
         assert dp.hs_color == (210.0, 80.0)
 
-    def test_light_hs_color_falls_back_to_flat_keys(self) -> None:
+    def test_light_hs_color_ignores_flat_keys(self) -> None:
+        """
+        Flat ``hue``/``saturation`` keys are not a colour source.
+
+        They were one for daemons before 0.8.0, and the fallback passed them
+        through *unscaled* — so a payload carrying both shapes would have
+        answered on a different saturation scale depending on which branch
+        ran. The supported daemon emits the nested ``color`` object.
+        """
         dp, _ = _cdp_instance(
             kind="light_color",
             category="light",
             capabilities={"color": True},
             state={"state": "ON", "hue": 120, "saturation": 50},
         )
-        # Legacy flat keys (pre-0.8.0 daemon) pass through unscaled.
-        assert dp.hs_color == (120.0, 50.0)
+        assert dp.hs_color is None
 
     def test_light_hs_color_none_without_colour(self) -> None:
         dp, _ = _cdp_instance(kind="light", category="light", state={"state": "ON"})
