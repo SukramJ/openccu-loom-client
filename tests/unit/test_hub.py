@@ -376,6 +376,43 @@ class TestProgramDeviceLink:
         assert program.device_address is None
         assert program.channel is None
 
+
+class TestProgramExecuteAvailable:
+    """api 3.12.0: the daemon answers whether a run would do anything."""
+
+    def _program(self, *, store: LoomStore, **extra: Any):
+        store.load_snapshot(snapshot=_snapshot(programs=[_program_summary(**extra)]))
+        program = store.get_program(program_id="p1")
+        assert program is not None
+        return program
+
+    def test_deactivated_program_reports_execute_unavailable(self) -> None:
+        # The CCU refuses a manual run while the activity flag is off.
+        program = self._program(store=LoomStore(), active=False, execute_available=False)
+        assert program.execute_available is False
+
+    def test_active_program_reports_execute_available(self) -> None:
+        program = self._program(store=LoomStore(), execute_available=True)
+        assert program.execute_available is True
+
+    def test_missing_field_fails_open(self) -> None:
+        # An older daemon omits the field, and the CCU may not have
+        # reported the flag yet. Neither may grey out the control — a
+        # falsy-vs-None mix-up here would silently disable every button.
+        program = self._program(store=LoomStore())
+        assert program.summary.execute_available is None
+        assert program.execute_available is True
+
+    def test_refresh_carries_the_flag_through(self) -> None:
+        # The flag rides the periodic program refresh, not a push: it
+        # changes whenever the activity flag does, and the wrapper is
+        # mutated in place rather than rebuilt.
+        store = LoomStore()
+        program = self._program(store=store, execute_available=True)
+        store._upsert_program(summary=_program_summary(active=False, execute_available=False))
+        assert store.get_program(program_id="p1") is program
+        assert program.execute_available is False
+
     def test_apply_program_executed_folds_present_link(self) -> None:
         store = LoomStore()
         store.load_snapshot(snapshot=_snapshot(programs=[_program_summary()]))
