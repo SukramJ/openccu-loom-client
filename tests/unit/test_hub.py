@@ -417,3 +417,29 @@ class TestProgramDeviceLink:
         assert program is not None
         assert program.channel_address == "VCU0001:1"
         assert program.device_address == "VCU0001"
+
+
+def test_program_button_availability_follows_the_ccu_active_flag() -> None:
+    """
+    A program deactivated in the CCU makes its execute button unavailable.
+
+    The switch toggles the CCU's own active flag; while it is off the program
+    does not run, so offering the button would promise an execution the CCU
+    refuses. aiohomematic couples the two the same way
+    (model/hub/button.py: ``available`` returns ``_is_active and ...``); the
+    hub tail's always-True availability would otherwise win here.
+    """
+    from openccu_loom_client.compat.aiohomematic.model.hub import ProgramDpButton, ProgramDpSwitch
+
+    store = LoomStore()
+
+    active = _program_summary(program_id="on", active=True)
+    inactive = _program_summary(program_id="off", active=False)
+
+    assert ProgramDpButton(summary=active, store=store).available is True
+    assert ProgramDpButton(summary=inactive, store=store).available is False
+
+    # The switch stays reachable either way — it is what turns the program
+    # back on, so tying its availability to the flag would strand the user.
+    assert ProgramDpSwitch(summary=active, store=store).available is True
+    assert ProgramDpSwitch(summary=inactive, store=store).available is True

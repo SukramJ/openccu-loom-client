@@ -1,3 +1,18 @@
+# Version 2026.8.1 (unreleased)
+
+## What's Changed
+
+### Fixed
+
+- **A program's execute button follows the CCU's active flag.** The switch
+  toggles whether a program is active in the CCU; while it is off the
+  program does not run, so the paired button offered an execution the CCU
+  would refuse. It is now unavailable in that state, mirroring
+  `ProgramDpButton.available` in aiohomematic
+  (`model/hub/button.py`), which reads `_is_active` for the same reason.
+  Previously the hub surface's always-True availability won. The switch
+  itself stays reachable either way — it is what turns the program back on.
+
 # Version 2026.8.0 (2026-08-01)
 
 Dependency release: `aiohomematic` moves to the **2026.8.0** series. No

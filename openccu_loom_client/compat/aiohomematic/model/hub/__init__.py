@@ -154,6 +154,20 @@ class ProgramDpButton(_HubEntitySurface, _ProgramProtocolSurface, Program):
         """Return the daemon-owned canonical HA unique id for this program (J1)."""
         return self.summary.unique_id
 
+    @property
+    def available(self) -> bool:
+        """
+        Follow the program's CCU-side active flag.
+
+        A program deactivated in the CCU does not run, so the button that
+        would execute it is unavailable — the paired switch is what turns it
+        back on. Mirrors ``ProgramDpButton.available`` in aiohomematic
+        (model/hub/button.py), which reads ``_is_active`` for the same
+        reason. Without this the hub tail's always-True availability wins
+        and the button offers an execution the CCU will refuse.
+        """
+        return self.is_active
+
     async def press(self) -> None:
         """Trigger the program (HA button press)."""
         await self.execute()
