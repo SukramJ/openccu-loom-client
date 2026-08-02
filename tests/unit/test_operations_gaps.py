@@ -183,7 +183,15 @@ class TestDevicesOperationsGaps:
         t, mock = http
         mock.get(
             "/api/v1/devices/VCU1/channels/1/calc-dps",
-            payload=[{"name": "DEW_POINT", "value": 12.3, "observed": True, "unique_id": "loom_test_dew_point"}],
+            payload=[
+                {
+                    "name": "DEW_POINT",
+                    "value": 12.3,
+                    "observed": True,
+                    "available": True,
+                    "unique_id": "loom_test_dew_point",
+                }
+            ],
         )
         result = await DevicesOperations(transport=t).list_calculated_data_points(address="VCU1", channel=1)
         assert result[0].name == "DEW_POINT"

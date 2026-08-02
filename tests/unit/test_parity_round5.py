@@ -1050,6 +1050,7 @@ class TestCalculatedTranslatedName:
                 "category": "sensor",
                 "value": 12.5,
                 "observed": True,
+                "available": True,
                 "translated_name": "Taupunkt",
                 "unique_id": "loom_test_dew_point",
             }
@@ -1075,6 +1076,7 @@ class TestCalculatedTranslatedName:
                 "category": "sensor",
                 "value": 12.5,
                 "observed": True,
+                "available": True,
                 "translated_name": "HEATING_CLIMATECONTROL_TRANSCEIVER Dew Point",
                 "unique_id": "loom_test_dew_point",
             }
@@ -1096,6 +1098,7 @@ class TestCalculatedTranslatedName:
                 "category": "sensor",
                 "value": 1.0,
                 "observed": True,
+                "available": True,
                 "unique_id": "loom_test_enthalpy",
             }
         )

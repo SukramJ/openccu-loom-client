@@ -555,7 +555,13 @@ class TestInPlaceUpsertHardening:
             channel_number=1,
             calculated=[
                 CalculatedDPSummary.model_validate(
-                    {"name": "OPERATING_VOLTAGE", "value": 3.0, "observed": True, "unique_id": "loom_calc_v"}
+                    {
+                        "name": "OPERATING_VOLTAGE",
+                        "value": 3.0,
+                        "observed": True,
+                        "available": True,
+                        "unique_id": "loom_calc_v",
+                    }
                 )
             ],
         )
@@ -642,6 +648,75 @@ class TestCdpRefreshStaleGuard:
         cdp = store.get_custom_data_point(address="VCU0001", name="SWITCH")
         assert cdp is not None
         assert cdp.state == {"value": True}  # the pushed state survived; the stale GET was dropped
+
+
+class _CalcRefreshTransport:
+    """Serves one calc-dps record so the refresh path can be driven directly."""
+
+    def __init__(self, *, record: dict[str, Any]) -> None:
+        self.record = record
+
+    async def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: Any = None,
+        json_body: Any = None,
+        headers: Any = None,
+        allow_retry: Any = None,
+    ) -> Any:
+        return self.record
+
+
+class TestCalculatedRefreshCarriesAvailability:
+    """A calc-dps re-read is where the client learns the daemon's verdict."""
+
+    async def test_refresh_applies_availability(self) -> None:
+        from openccu_loom_client.compat.aiohomematic.model.calculated import make_calculated_data_point
+
+        store = LoomStore()
+        store.load_snapshot(snapshot=_snapshot(devices=[_device_summary()]))
+        store.set_calculated_data_point_factory(factory=make_calculated_data_point)
+        store.attach_channel_calculated_data_points(
+            device_address="VCU0001",
+            channel_number=1,
+            calculated=[
+                CalculatedDPSummary.model_validate(
+                    {
+                        "name": "DEW_POINT",
+                        "category": "sensor",
+                        "value": 9.3,
+                        "observed": True,
+                        "available": True,
+                        "unique_id": "loom_calc_dew",
+                    }
+                )
+            ],
+        )
+        dp = store.get_data_point(address="VCU0001", channel=1, parameter="DEW_POINT")
+        assert dp is not None
+        assert dp.is_valid is True
+
+        # A source went bad: the daemon keeps computing the value, only the
+        # verdict flips — and the value's timestamp does not advance, because
+        # a status fault is not a value change.
+        store.set_transport(  # type: ignore[arg-type]
+            transport=_CalcRefreshTransport(
+                record={
+                    "name": "DEW_POINT",
+                    "category": "sensor",
+                    "value": 9.3,
+                    "observed": True,
+                    "available": False,
+                    "unique_id": "loom_calc_dew",
+                }
+            )
+        )
+        await store.refresh_calculated_data_point(address="VCU0001", channel=1, name="DEW_POINT")
+
+        assert dp.value == 9.3
+        assert dp.is_valid is False
 
 
 # ---- write-back ----

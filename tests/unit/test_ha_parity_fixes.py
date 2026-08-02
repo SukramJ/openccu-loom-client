@@ -526,6 +526,7 @@ class TestCalculatedDataPoints:
                         "category": "binary_sensor",
                         "value": False,
                         "observed": True,
+                        "available": True,
                         "unique_id": "loom_calculated_vcu7_1_window_open",
                     }
                 )
@@ -554,6 +555,7 @@ class TestCalculatedDataPoints:
                         "category": "sensor",
                         "value": 0,
                         "observed": False,
+                        "available": False,
                         "unique_id": "loom_test_dew_point",
                     }
                 )
@@ -578,6 +580,7 @@ class TestCalculatedDataPoints:
                         "category": "binary_sensor",
                         "value": False,
                         "observed": True,
+                        "available": True,
                         "unique_id": "loom_test_window_open",
                     }
                 )
@@ -599,6 +602,70 @@ class TestCalculatedDataPoints:
         )
         dp = store.get_data_point(address="VCU7", channel=1, parameter="WINDOW_OPEN")
         assert dp.value is True
+
+    def _attach_dew_point(self, *, store: LoomStore, available: bool) -> Any:
+        from openccu_loom_types.rest import CalculatedDPSummary
+
+        store.attach_channel_calculated_data_points(
+            device_address="VCU7",
+            channel_number=1,
+            calculated=[
+                CalculatedDPSummary.model_validate(
+                    {
+                        "name": "DEW_POINT",
+                        "category": "sensor",
+                        "value": 9.3,
+                        "observed": True,
+                        "available": available,
+                        "unique_id": "loom_test_dew_point",
+                    }
+                )
+            ],
+        )
+        return store.get_data_point(address="VCU7", channel=1, parameter="DEW_POINT")
+
+    def test_calculated_is_valid_follows_daemon_availability(self) -> None:
+        """
+        A derived value the daemon disowned must not read as valid.
+
+        The generic rule ("a value is present") cannot see a source fault — the
+        daemon keeps recomputing the number, only its `available` flag flips.
+        Home Assistant restores an entity's previous state exactly when
+        `is_valid` is False, so this is what keeps a dew point computed off a
+        thermometer stuck at OVERFLOW off the dashboard.
+        """
+        store = self._store()
+
+        healthy = self._attach_dew_point(store=store, available=True)
+        assert healthy.is_valid is True
+
+        faulted = self._attach_dew_point(store=store, available=False)
+        assert faulted.value == 9.3  # the daemon still computes it …
+        assert faulted.is_valid is False  # … but it is not a confirmed reading
+
+    def test_calculated_is_valid_requires_a_value(self) -> None:
+        """An available-but-unobserved calc DP is still not valid — no value to read."""
+        from openccu_loom_types.rest import CalculatedDPSummary
+
+        store = self._store()
+        store.attach_channel_calculated_data_points(
+            device_address="VCU7",
+            channel_number=1,
+            calculated=[
+                CalculatedDPSummary.model_validate(
+                    {
+                        "name": "ENTHALPY",
+                        "category": "sensor",
+                        "value": None,
+                        "observed": False,
+                        "available": True,
+                        "unique_id": "loom_test_enthalpy",
+                    }
+                )
+            ],
+        )
+        dp = store.get_data_point(address="VCU7", channel=1, parameter="ENTHALPY")
+        assert dp.is_valid is False
 
 
 class TestUsageVerdictFilter:

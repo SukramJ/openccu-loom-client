@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 import logging
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any, Final, Protocol, runtime_checkable
 from urllib.parse import quote
 
 from openccu_loom_types.rest import (
@@ -89,6 +89,22 @@ _LOGGER: Final = logging.getLogger(__name__)
 # thousands of devices, so this ceiling never bites legitimately; on exceed we
 # refuse the new address (existing devices keep updating) and warn once.
 _DEFAULT_MAX_DEVICES: Final = 20000
+
+
+@runtime_checkable
+class _CalculatedAvailabilityAware(Protocol):
+    """
+    Data point that carries the daemon's verdict on a derived value.
+
+    Calculated data points are the only ones today: their ``available`` flag
+    rides the calc-dps record, not the generic summary, because a derived value
+    is only as good as the readings it was computed from. Declared structurally
+    so the store keeps its independence from the compat layer that installs the
+    calculated-DP factory.
+    """
+
+    def apply_calculated_availability(self, *, available: bool) -> None:
+        """Record the daemon's verdict on the derived value."""
 
 
 class LoomStore:
@@ -1243,6 +1259,12 @@ class LoomStore:
                 }
             )
             dp._replace_summary(summary=new_summary)
+            # `available` has no slot on the generic summary shape, so it is
+            # applied to the data point itself. A source the daemon flagged
+            # leaves value and `observed` untouched — this flag is the only
+            # thing that changes, and the re-read is where the client learns it.
+            if isinstance(dp, _CalculatedAvailabilityAware):
+                dp.apply_calculated_availability(available=calc.available)
             self._clear_value_override(dp=dp)
 
     async def refresh_device(self, *, address: str) -> None:

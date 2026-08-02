@@ -1,3 +1,46 @@
+# Version 2026.8.2 (2026-08-02)
+
+Follows the daemon to **API 3.13.0** (openccu-loom 0.52.9): a calculated
+sensor is only as trustworthy as the readings it was computed from, and the
+daemon now says which of the two it is.
+
+## What's Changed
+
+### Fixed
+
+- **A calculated sensor computed off a broken reading no longer counts as
+  valid.** Dew point, frost point, enthalpy, apparent temperature, vapour
+  concentration and the derived battery level are derived from a channel's
+  ordinary parameters. Those can be _read but unusable_ — the CCU flags a
+  measurement fault through the paired `…_STATUS` parameter, or the reading
+  falls outside the bounds the device declares. The derived number keeps
+  updating right through such a fault, so the generic rule this client
+  applied — "a value is present, therefore it is valid" — could not see it:
+  a dew point computed off a thermometer stuck at `OVERFLOW` read as a
+  perfectly ordinary measurement.
+
+  The daemon answers this as `available` on the calc-dps record (API
+  3.13.0), and `CalculatedDpSensor` / `CalculatedDpBinarySensor` now take
+  `is_valid` from it instead of re-deriving. Home Assistant restores an
+  entity's previous state exactly when `is_valid` is False and stops
+  rendering the live value — which is the point: the last known good
+  reading beats a confident wrong one. Device availability is untouched;
+  this is a verdict about the value, not about reachability.
+
+  **Scope.** The flag is carried by the calc-dps record, so the client
+  learns it at bootstrap and on every re-read (`load_data_point_value`,
+  which Home Assistant calls when an entity is added and on a manual
+  refresh). The `datapoint.value_changed` push carries no availability
+  today, so a fault that starts mid-session is picked up at the next
+  re-read rather than on the push that reports the new value.
+
+### Changed
+
+- **Pin `openccu-loom-types==0.2.6`** (regenerated from openccu-loom
+  0.52.9, API 3.13.0). The transport's API guard derives from
+  `DAEMON_API_VERSION`, so `connect()` now requires a daemon on API major
+  3 with minor ≥ 13 — deploy openccu-loom 0.52.9+ alongside this release.
+
 # Version 2026.8.1 (2026-08-02)
 
 Follows the daemon to **API 3.12.0** (openccu-loom 0.52.7): a CCU program
