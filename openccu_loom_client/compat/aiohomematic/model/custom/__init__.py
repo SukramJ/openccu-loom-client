@@ -350,18 +350,15 @@ class CustomDpDimmer(_CustomEntitySurface):
 
         The daemon emits a nested ``color: {h, s}`` object (hue in degrees
         [0,360], saturation in [0,1]); HA's ``hs_color`` convention is
-        saturation [0,100], so scale it up. Falls back to the legacy flat
-        ``hue``/``saturation`` keys for pre-0.8.0 daemons.
+        saturation [0,100], so scale it up. The scaling is the only
+        conversion here — the values themselves come from the daemon.
         """
         color = self._state.get("color")
-        if isinstance(color, dict):
-            hue = _as_float(value=color.get("h"))
-            sat = _as_float(value=color.get("s"))
-            return (hue, sat * 100.0) if hue is not None and sat is not None else None
-        # Legacy flat keys (pre-0.8.0 daemons) — passed through unscaled.
-        hue = _as_float(value=self._state.get("hue"))
-        sat = _as_float(value=self._state.get("saturation"))
-        return (hue, sat) if hue is not None and sat is not None else None
+        if not isinstance(color, dict):
+            return None
+        hue = _as_float(value=color.get("h"))
+        sat = _as_float(value=color.get("s"))
+        return (hue, sat * 100.0) if hue is not None and sat is not None else None
 
     @property
     def effect(self) -> str | None:
@@ -493,24 +490,35 @@ class CustomDpCover(_CustomEntitySurface):
 
     @property
     def is_closed(self) -> bool:
-        """Return whether the cover is closed, from position 0 or the ``state`` token."""
+        """
+        Return whether the cover is closed, per the daemon's ``state`` token.
+
+        Position 0 remains the fallback for a payload without a token: the
+        daemon derives "closed" from exactly that (Position.Closed is
+        ``level == 0``), so the two agree — unlike the direction-based
+        derivations, which did not.
+        """
+        if self._state_token:
+            return self._state_token == "closed"  # noqa: S105 # nosec B105 — cover state token, not a secret
         pos = self.current_position
-        if pos is not None:
-            return pos == 0
-        return self._state_token == "closed"  # noqa: S105 # nosec B105 — cover state token, not a secret
+        return pos == 0 if pos is not None else False
 
     @property
     def is_opening(self) -> bool:
-        """Return whether the cover is opening, from ``direction`` or the ``state`` token."""
-        if self._state.get("direction") == "opening":
-            return True
+        """
+        Return whether the cover is opening, per the daemon's ``state`` token.
+
+        Deliberately not derived from ``direction``: that field carries the
+        CCU's raw travel direction, while the daemon's token already accounts
+        for a channel wired with inverted control, where "up" on the wire
+        means closing (see the daemon's Cover.IsOpening). Reading ``direction``
+        here reported the opposite of what the daemon had determined.
+        """
         return self._state_token == "opening"  # noqa: S105 # nosec B105 — cover state token, not a secret
 
     @property
     def is_closing(self) -> bool:
-        """Return whether the cover is closing, from ``direction`` or the ``state`` token."""
-        if self._state.get("direction") == "closing":
-            return True
+        """Return whether the cover is closing, per the daemon's ``state`` token (see :attr:`is_opening`)."""
         return self._state_token == "closing"  # noqa: S105 # nosec B105 — cover state token, not a secret
 
     async def open(self) -> None:

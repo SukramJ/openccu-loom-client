@@ -1,3 +1,25 @@
+# Version 2026.8.1 (unreleased)
+
+## What's Changed
+
+### Fixed
+
+- **A cover with inverted control no longer reports the wrong direction.**
+  `is_opening` / `is_closing` were derived from the payload's `direction`
+  field, which carries the CCU's raw travel direction. The daemon's `state`
+  token already accounts for a channel wired with inverted control, where
+  "up" on the wire means closing — so on those channels the client reported
+  the opposite of what the daemon had determined, and the raw field won
+  because it was checked first. Both now read the token. `is_closed` does
+  too, keeping position 0 as the fallback for a payload without one; the
+  daemon derives "closed" from exactly that, so the two agree.
+- **The colour fallback for pre-0.8.0 daemons is gone.** `hs_color` read the
+  nested `color: {h, s}` object and, failing that, flat `hue`/`saturation`
+  keys — which it passed through _unscaled_, so a payload carrying both
+  shapes answered on a different saturation scale depending on which branch
+  ran. Those daemons are dozens of releases old; the nested object is the
+  only source now.
+
 # Version 2026.8.0 (2026-08-01)
 
 Dependency release: `aiohomematic` moves to the **2026.8.0** series. No
