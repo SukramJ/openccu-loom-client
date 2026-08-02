@@ -32,6 +32,7 @@ from openccu_loom_client.events import (
     DataPointValueChangedEvent,
     DeviceCreatedEvent,
     DeviceRemovedEvent,
+    ProgramChangedEvent,
     ProgramExecutedEvent,
     SysvarChangedEvent,
 )
@@ -59,6 +60,7 @@ def bind_ws_events_to_store(
     - ``DeviceRemovedEvent`` → ``store.apply_device_removed``
     - ``SysvarChangedEvent`` → ``store.apply_sysvar_changed``
     - ``ProgramExecutedEvent`` → ``store.apply_program_executed``
+    - ``ProgramChangedEvent`` → ``store.apply_program_changed``
     - the six ``alarm.*`` store mutations (panel/state/countdown/
       readiness/triggered/health) → ``store.apply_alarm_*``
 
@@ -93,6 +95,9 @@ def bind_ws_events_to_store(
     async def on_program(event: ProgramExecutedEvent) -> None:
         store.apply_program_executed(payload=event.payload)
 
+    async def on_program_changed(event: ProgramChangedEvent) -> None:
+        store.apply_program_changed(payload=event.payload)
+
     async def on_alarm_panel(event: AlarmPanelChangedEvent) -> None:
         store.apply_alarm_panel_changed(payload=event.payload)
 
@@ -117,6 +122,7 @@ def bind_ws_events_to_store(
     group.subscribe(event_type=DeviceRemovedEvent, handler=on_removed)
     group.subscribe(event_type=SysvarChangedEvent, handler=on_sysvar)
     group.subscribe(event_type=ProgramExecutedEvent, handler=on_program)
+    group.subscribe(event_type=ProgramChangedEvent, handler=on_program_changed)
     group.subscribe(event_type=AlarmPanelChangedEvent, handler=on_alarm_panel)
     group.subscribe(event_type=AlarmStateChangedEvent, handler=on_alarm_state)
     group.subscribe(event_type=AlarmCountdownEvent, handler=on_alarm_countdown)

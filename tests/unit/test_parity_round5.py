@@ -332,6 +332,7 @@ class TestRefreshBridgePingsChannelCdp:
                         "value": 22.0,
                         "modified_at": "2026-06-12T08:00:00Z",
                         "unique_id": "loom_vcu1_1_actual_temperature",
+                        "available": True,
                     }
                 ),
             )

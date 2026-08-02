@@ -597,6 +597,7 @@ class TestCalculatedDataPoints:
                     "value": True,
                     "modified_at": "2026-06-11T10:00:00Z",
                     "unique_id": "loom_test_window_open",
+                    "available": True,
                 }
             )
         )
@@ -834,3 +835,172 @@ class TestHubDeviceLinkRouting:
             store=self._store_with_channel(),
         )
         assert dp.channel is None
+
+
+class TestProgramControls:
+    """A CCU program is two controls, and both have to track the CCU."""
+
+    @staticmethod
+    def _store() -> LoomStore:
+        from openccu_loom_client.compat.aiohomematic.model.hub import make_program_data_points, make_sysvar_data_point
+
+        store = LoomStore()
+        store.set_serial(serial="3014F711A0001234")
+        store.set_hub_data_point_factories(
+            program_factory=make_program_data_points,
+            sysvar_factory=make_sysvar_data_point,
+        )
+        return store
+
+    @staticmethod
+    def _program(*, active: bool, execute_available: bool) -> Any:
+        from openccu_loom_types.rest import ProgramSummary
+
+        return ProgramSummary.model_validate(
+            {
+                "id": "1234",
+                "name": "Testprogramm",
+                "active": active,
+                "execute_available": execute_available,
+                "unique_id": "loom_program_testprogramm",
+                "central": "home",
+            }
+        )
+
+    def test_switch_reports_the_activity_flag(self) -> None:
+        """Home Assistant reads the switch's state off ``value``."""
+        store = self._store()
+        store._upsert_program(summary=self._program(active=True, execute_available=True))
+        _button, switch = store.program_data_points(program_id="1234")
+        assert switch.value is True
+
+    def test_catalogue_refresh_reaches_both_controls(self) -> None:
+        """
+        A deactivation on the CCU takes the button down with it.
+
+        This is the regression the whole change exists for: the twins used to
+        be built beside the store's program, so a refresh updated a copy while
+        Home Assistant kept reading the original.
+        """
+        store = self._store()
+        store._upsert_program(summary=self._program(active=True, execute_available=True))
+        button, switch = store.program_data_points(program_id="1234")
+        assert button.available is True
+
+        store._upsert_program(summary=self._program(active=False, execute_available=False))
+
+        assert switch.value is False
+        assert button.available is False
+
+    def test_push_reaches_both_controls(self) -> None:
+        """The live ``hub.program_changed`` push does the same without a poll."""
+        from openccu_loom_types.ws import ProgramChangedPayload
+
+        store = self._store()
+        store._upsert_program(summary=self._program(active=False, execute_available=False))
+        button, switch = store.program_data_points(program_id="1234")
+
+        store.apply_program_changed(
+            payload=ProgramChangedPayload.model_validate(
+                {
+                    "central": "home",
+                    "program_id": "1234",
+                    "active": True,
+                    "execute_available": True,
+                    "unique_id": "loom_program_testprogramm",
+                }
+            )
+        )
+
+        assert switch.value is True
+        assert button.available is True
+
+    def test_push_for_unknown_program_is_ignored(self) -> None:
+        from openccu_loom_types.ws import ProgramChangedPayload
+
+        store = self._store()
+        store.apply_program_changed(
+            payload=ProgramChangedPayload.model_validate(
+                {"central": "home", "program_id": "ghost", "active": True, "execute_available": True}
+            )
+        )
+        assert store.get_program(program_id="ghost") is None
+
+    async def test_turn_off_writes_and_re_reads(self) -> None:
+        """
+        The switch writes the flag and settles the local view.
+
+        The daemon accepts the write as scheduled and pushes the flip once the
+        CCU confirms it; the re-read is what a consumer reading the program
+        straight after the call sees.
+        """
+        calls: list[tuple[str, str, Any]] = []
+
+        class _Transport:
+            async def request(
+                self,
+                method: str,
+                path: str,
+                *,
+                params: Any = None,
+                json_body: Any = None,
+                headers: Any = None,
+                allow_retry: Any = None,
+            ) -> Any:
+                calls.append((method, path, json_body))
+                if method == "GET":
+                    return TestProgramControls._program(active=False, execute_available=False).model_dump(mode="json")
+                return None
+
+        store = self._store()
+        store._upsert_program(summary=self._program(active=True, execute_available=True))
+        store.set_transport(transport=_Transport())  # type: ignore[arg-type]
+        button, switch = store.program_data_points(program_id="1234")
+
+        await switch.turn_off()
+
+        assert calls[0] == ("PATCH", "/programs/1234", {"active": False})
+        assert calls[1][:2] == ("GET", "/programs/1234")
+        assert switch.value is False
+        assert button.available is False
+
+
+class TestSysvarStaysLive:
+    """A sysvar push has to reach the object Home Assistant holds."""
+
+    def test_push_updates_the_categorised_twin(self) -> None:
+        from openccu_loom_types.rest import SysvarSummary
+        from openccu_loom_types.ws import SysvarChangedPayload
+
+        from openccu_loom_client.compat.aiohomematic.model.hub import make_program_data_points, make_sysvar_data_point
+
+        store = LoomStore()
+        store.set_hub_data_point_factories(
+            program_factory=make_program_data_points,
+            sysvar_factory=make_sysvar_data_point,
+        )
+        store._upsert_sysvar(
+            summary=SysvarSummary.model_validate(
+                {
+                    "name": "Testvar",
+                    "value": 1.0,
+                    "value_type": "FLOAT",
+                    "observed": True,
+                    "unique_id": "loom_sysvar_testvar",
+                    "central": "home",
+                }
+            )
+        )
+        dp = store.get_sysvar(name="Testvar")
+        assert dp is not None
+        assert dp.value == 1.0
+
+        store.apply_sysvar_changed(
+            payload=SysvarChangedPayload.model_validate(
+                {"central": "home", "name": "Testvar", "value": 42.0, "unique_id": "loom_sysvar_testvar"}
+            )
+        )
+
+        # Same live object — not a copy the store updated beside it.
+        assert dp.value == 42.0
+        assert store.get_sysvar(name="Testvar") is dp

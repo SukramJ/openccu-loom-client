@@ -82,6 +82,7 @@ from openccu_loom_client.compat.aiohomematic.model.custom import (
 )
 from openccu_loom_client.compat.aiohomematic.model.event_group import build_event_groups
 from openccu_loom_client.compat.aiohomematic.model.generic import make_generic_data_point
+from openccu_loom_client.compat.aiohomematic.model.hub import make_program_data_points, make_sysvar_data_point
 from openccu_loom_client.compat.aiohomematic.model.update import make_update_data_point
 from openccu_loom_client.compat.aiohomematic.model.week_profile import (
     ClimateWeekProfileDp,
@@ -996,6 +997,13 @@ class LoomCentralAdapter:
         client.store.set_calculated_data_point_factory(factory=make_calculated_data_point)
         client.store.set_custom_data_point_factory(factory=make_custom_data_point)
         client.store.set_alarm_panel_factory(factory=make_alarm_panel_data_point)
+        # Hub entities follow the same rule: one live object per entity, owned
+        # by the store, so a catalogue refresh or a push reaches the instance
+        # HA holds instead of a copy beside it.
+        client.store.set_hub_data_point_factories(
+            program_factory=make_program_data_points,
+            sysvar_factory=make_sysvar_data_point,
+        )
         # HA links every device to this central via Device.central_info.name,
         # which must equal the adapter name (the integration's instance name).
         client.store.set_central_name(central_name=name)

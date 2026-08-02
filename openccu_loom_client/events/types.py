@@ -55,6 +55,7 @@ from openccu_loom_types.ws import (
     MatterFabric,
     MatterFabricRemovedPayload,
     OptimisticRollbackPayload,
+    ProgramChangedPayload,
     ProgramExecutedPayload,
     SystemStatusChangedPayload,
     SysvarChangedPayload,
@@ -230,6 +231,26 @@ class ProgramExecutedEvent(LoomEvent):
 
     payload: ProgramExecutedPayload
     type_id: ClassVar[str] = "hub.program_executed"
+
+    def __post_init__(self) -> None:
+        """Default the routing key to the payload's central name."""
+        if self.event_key is None:
+            self.event_key = self.payload.central
+
+
+@dataclass(slots=True, kw_only=True)
+class ProgramChangedEvent(LoomEvent):
+    """
+    A CCU program's activity flag changed.
+
+    A program is two controls: the flag decides whether it reacts at all,
+    and the execution runs it once. The CCU refuses the execution while
+    the flag is off, so ``execute_available`` travels with it and both of
+    the program's entities re-render off one message.
+    """
+
+    payload: ProgramChangedPayload
+    type_id: ClassVar[str] = "hub.program_changed"
 
     def __post_init__(self) -> None:
         """Default the routing key to the payload's central name."""
@@ -654,6 +675,7 @@ _EVENT_REGISTRY: Final[dict[str, tuple[Callable[..., LoomEvent], type[BaseModel]
     SystemStatusChangedEvent.type_id: (SystemStatusChangedEvent, SystemStatusChangedPayload),
     SysvarChangedEvent.type_id: (SysvarChangedEvent, SysvarChangedPayload),
     ProgramExecutedEvent.type_id: (ProgramExecutedEvent, ProgramExecutedPayload),
+    ProgramChangedEvent.type_id: (ProgramChangedEvent, ProgramChangedPayload),
     InstallModeChangedEvent.type_id: (InstallModeChangedEvent, InstallModeChangedPayload),
     HubAlarmMessageCountChangedEvent.type_id: (HubAlarmMessageCountChangedEvent, HubCountChangedPayload),
     HubServiceMessageCountChangedEvent.type_id: (HubServiceMessageCountChangedEvent, HubCountChangedPayload),

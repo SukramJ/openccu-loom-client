@@ -256,6 +256,7 @@ class TestWsBridge:
                         "value": 0.75,
                         "modified_at": "2026-05-24T08:42:13Z",
                         "unique_id": "loom_test_vcu0001_1_level",
+                        "available": True,
                     }
                 ),
             )
