@@ -1,3 +1,51 @@
+# Version 2026.8.5 (2026-08-06)
+
+Context for the Security & Safety entities: every one of them now names the
+detectors behind its state, and the severity is readable rather than a raw
+token.
+
+## What's Changed
+
+### Added
+
+- **Every Security & Safety entity carries its sources.** "Opening or motion
+  detected: on" is not actionable without the answer to "which detector?".
+  The class sensors, the severity sensor, the fault count and both report
+  sensors now expose the same attribute set the daemon's MQTT plane
+  publishes: `sources[]` with the full identity of each contributing data
+  point — including the `ref` that `PUT /security/sources/{ref}` takes back
+  to correct a misclassification — plus `source_names[]` for a message,
+  `count`, `total` and `truncated`. The list is bounded at 20 and says so
+  rather than pretending to be complete.
+
+  The class sensors previously carried bare names under `sources`; that key
+  now holds the objects and the names moved to `source_names`.
+
+### Fixed
+
+- **The security state showed the raw token `alarm`.** Home Assistant
+  renders an enum sensor — and translates its values — only when the data
+  point declares a value list. The severity sensor declared a plain string,
+  so the operator read the wire vocabulary instead of their own language. It
+  now declares the severity ladder (`ok`, `info`, `warning`, `alarm`,
+  `critical`) as its options.
+
+### Changed
+
+- **The class device classes match the MQTT plane** (`technical` →
+  `problem`, `intrusion` / `panic` → `safety`). Note the limit: Home
+  Assistant resolves a hub entity's device class from its own entity
+  descriptions, never from the data point, so this reaches non-HA consumers
+  of this library and keeps the two planes from diverging — it does not by
+  itself put an icon on the HA entity.
+
+- **The entity names come from openccu-loom 0.54.2**, which renamed the
+  hazard classes to say what was detected rather than what it means:
+  "Intrusion" became "Opening or motion detected", because that sensor
+  stands on as soon as a monitored door, window or motion detector reports —
+  including while the alarm system is disarmed. No change is needed here;
+  the names are read from the daemon catalogue at bootstrap.
+
 # Version 2026.8.4 (2026-08-06)
 
 Follows the daemon to **API 5.2.0** (openccu-loom 0.54.0). The Security &

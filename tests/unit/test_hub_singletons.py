@@ -5,11 +5,13 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 from openccu_loom_types.rest import AddonUpdateStatus, AlarmMessage, ServiceMessage, SystemUpdateEntry
 
 from openccu_loom_client.compat.aiohomematic.model.hub.singletons import (
+    MAX_ATTRIBUTE_SOURCES,
     AddonUpdateDp,
     AlarmMessagesSensor,
     ConnectionLatencySensor,
@@ -18,6 +20,10 @@ from openccu_loom_client.compat.aiohomematic.model.hub.singletons import (
     InstallModeDpSensor,
     InterfaceConnectivityDp,
     LastEventAgeSensor,
+    SecurityClassDp,
+    SecurityFaultsSensor,
+    SecurityReportSensor,
+    SecuritySeveritySensor,
     ServiceMessagesSensor,
     SystemHealthSensor,
     SystemUpdateDp,
@@ -367,3 +373,111 @@ class TestInstallMode:
             {"interface": "BidCos-RF", "active": True, "seconds": 120},
             {"interface": "BidCos-RF", "active": False, "seconds": 0},
         ]
+
+
+class TestSecurityEntityContext:
+    """
+    Every Security & Safety entity names the detectors behind its state.
+
+    "Opening or motion detected: on" is not actionable without the answer
+    to "which detector?" — so the source list is part of the contract, in
+    the same shape the daemon's MQTT plane publishes.
+    """
+
+    @staticmethod
+    def _source(*, ref: str, name: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            ref=ref,
+            central="home",
+            interface_id="home:HmIP-RF",
+            channel_address="ABC123:1",
+            device_address="ABC123",
+            parameter="MOTION",
+            name=name,
+            sensor_type=None,
+            class_="intrusion",
+            at=None,
+        )
+
+    def test_class_sensor_carries_refs_and_names(self) -> None:
+        dp = SecurityClassDp(store=_store(), security_class="intrusion")
+        dp.update_class(
+            active=True,
+            sources=[self._source(ref="r1", name="Fenster Küche"), self._source(ref="r2", name="Bewegung Flur")],
+        )
+
+        assert dp.value is True
+        assert dp.attributes["source_names"] == ["Fenster Küche", "Bewegung Flur"]
+        # The ref is the key REST takes back to the same source.
+        assert [s["ref"] for s in dp.attributes["sources"]] == ["r1", "r2"]
+        assert dp.attributes["count"] == 2
+        assert dp.attributes["total"] == 2
+        assert dp.attributes["truncated"] is False
+
+    def test_the_source_list_is_bounded_and_says_so(self) -> None:
+        """An attribute is read by a human or a template, not by a database."""
+        dp = SecurityClassDp(store=_store(), security_class="intrusion")
+        many = [self._source(ref=f"r{i}", name=f"Melder {i}") for i in range(MAX_ATTRIBUTE_SOURCES + 5)]
+        dp.update_class(active=True, sources=many)
+
+        assert dp.attributes["count"] == MAX_ATTRIBUTE_SOURCES
+        assert dp.attributes["total"] == MAX_ATTRIBUTE_SOURCES + 5
+        assert dp.attributes["truncated"] is True
+
+    def test_severity_is_an_enum_so_the_value_is_translatable(self) -> None:
+        """
+        A plain string sensor showed the operator the raw token `alarm`.
+
+        Home Assistant renders an enum only when the data point declares
+        LIST plus a value list, so both are part of this entity's contract.
+        """
+        dp = SecuritySeveritySensor(store=_store())
+        assert dp.data_type == "LIST"
+        assert dp.values == ("ok", "info", "warning", "alarm", "critical")
+
+        dp.update_severity(severity="alarm", sources=[self._source(ref="r1", name="Bewegung Flur")])
+        assert dp.value == "alarm"
+        assert dp.attributes["source_names"] == ["Bewegung Flur"]
+
+    def test_fault_sensor_carries_the_sources_of_its_faults(self) -> None:
+        dp = SecurityFaultsSensor(store=_store())
+        fault = SimpleNamespace(
+            reason=SimpleNamespace(value="low_battery"),
+            source=self._source(ref="r1", name="Fenster Küche"),
+        )
+        dp.update_faults(faults=[fault])
+
+        assert dp.value == 1
+        assert dp.attributes["fault_1"] == "Fenster Küche: low_battery"
+        assert dp.attributes["sources"][0]["ref"] == "r1"
+
+    def test_report_sensor_carries_the_sources_of_the_report(self) -> None:
+        dp = SecurityReportSensor(store=_store(), fault=False)
+        report = SimpleNamespace(
+            subject="Rauchalarm",
+            message="Rauchmelder Flur meldet Rauch.",
+            class_="smoke",
+            severity="alarm",
+            verb=SimpleNamespace(value="triggered"),
+            i18n_key="security.smoke.triggered",
+            args=None,
+            zone_name=None,
+            at=None,
+            sources=[self._source(ref="r1", name="Rauchmelder Flur")],
+        )
+        dp.update_report(report=report)
+
+        assert dp.value == "Rauchalarm"
+        assert dp.attributes["source_names"] == ["Rauchmelder Flur"]
+
+    def test_device_classes_match_the_mqtt_plane(self) -> None:
+        """A class must not render with an icon on one plane and without on the other."""
+        for security_class, expected in (
+            ("smoke", "smoke"),
+            ("water", "moisture"),
+            ("technical", "problem"),
+            ("intrusion", "safety"),
+            ("panic", "safety"),
+        ):
+            dp = SecurityClassDp(store=_store(), security_class=security_class)
+            assert dp.device_class == expected
