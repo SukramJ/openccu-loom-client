@@ -78,6 +78,21 @@ _LOGGER: Final = logging.getLogger(__name__)
 _UNSET: Final = object()
 
 
+def _active_hazard_sources(*, snapshot: Any) -> list[Any]:
+    """
+    Collect the sources of every currently-active class.
+
+    The folded severity says something is wrong; this says what. Without
+    it the severity entity is the one surface of the domain that reports
+    a verdict with no way back to the detector behind it.
+    """
+    out: list[Any] = []
+    for state in snapshot.classes or ():
+        if state.active:
+            out.extend(state.sources or ())
+    return out
+
+
 class _HubCoordinator:
     """``central.hub_coordinator`` surface (sysvars, programs, messages, singletons)."""
 
@@ -391,7 +406,9 @@ class _HubCoordinator:
             _LOGGER.debug("security snapshot unavailable while building hub singletons", exc_info=True)
             return
         self._security_severity_dp = SecuritySeveritySensor(store=store)
-        self._security_severity_dp.update_value(value=str(snapshot.severity))
+        self._security_severity_dp.update_severity(
+            severity=str(snapshot.severity), sources=_active_hazard_sources(snapshot=snapshot)
+        )
         self._security_faults_dp = SecurityFaultsSensor(store=store)
         self._security_faults_dp.update_faults(faults=snapshot.faults or ())
         self._security_alarm_report_dp = SecurityReportSensor(store=store, fault=False)
@@ -525,7 +542,9 @@ class _HubCoordinator:
             _LOGGER.debug("security snapshot refresh failed", exc_info=True)
             return []
         changed: list[Any] = []
-        if self._security_severity_dp.update_value(value=str(snapshot.severity)):
+        if self._security_severity_dp.update_severity(
+            severity=str(snapshot.severity), sources=_active_hazard_sources(snapshot=snapshot)
+        ):
             changed.append(self._security_severity_dp)
         if self._security_faults_dp is not None and self._security_faults_dp.update_faults(
             faults=snapshot.faults or ()
@@ -569,7 +588,7 @@ class _HubCoordinator:
     async def _on_security_state_push(self, event: SecurityStateChangedEvent, /) -> None:
         """Apply a ``security.state_changed`` fold push."""
         dp = self._security_severity_dp
-        if dp is not None and dp.update_value(value=str(event.payload.severity)):
+        if dp is not None and dp.update_severity(severity=str(event.payload.severity)):
             await self._publish_changed(dp=dp)
 
     async def _on_security_class_push(self, event: SecurityClassChangedEvent, /) -> None:

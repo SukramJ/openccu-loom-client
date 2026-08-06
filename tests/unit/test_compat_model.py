@@ -1504,8 +1504,13 @@ class TestSecurityHubEntities:
 
         smoke = next(dp for dp in coord.get_hub_data_points() if dp.name == "security_smoke")
         assert smoke.value is True
-        assert smoke.attributes["sources"] == ["Rauchmelder Flur"]
         assert smoke.device_class == "smoke"
+        # The names are what an automation writes into a message; the full
+        # objects carry the ref REST needs to reach the same source back.
+        assert smoke.attributes["source_names"] == ["Rauchmelder Flur"]
+        assert smoke.attributes["sources"][0]["ref"] == "r1"
+        assert smoke.attributes["count"] == 1
+        assert smoke.attributes["truncated"] is False
         assert smoke.unique_id in seen
 
     async def test_state_push_moves_the_severity(self) -> None:

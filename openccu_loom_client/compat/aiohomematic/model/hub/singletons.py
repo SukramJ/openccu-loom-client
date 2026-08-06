@@ -761,10 +761,18 @@ class InstallModeDpButton(HubSingletonDp):
 # ---- Security & Safety ----
 
 # Class → HA binary-sensor device class. The mapping is what turns a
-# generic on/off into a smoke alarm on the dashboard, so it is stated
-# once here rather than derived per surface. `technical`, `intrusion`
-# and `panic` have no HA device class that fits — HA's `safety` is the
-# generic hazard bucket and would flatten them into the others.
+# generic on/off into a smoke alarm on the dashboard.
+#
+# It mirrors the daemon's MQTT plane one for one, including the three
+# that have no exact HA equivalent: `technical` takes `problem`, and
+# `intrusion` / `panic` take `safety`, HA's generic hazard bucket.
+#
+# Note what this does NOT do: Home Assistant resolves a hub entity's
+# device class from its own entity descriptions, never from the data
+# point, so the value below reaches a non-HA consumer of this library and
+# the MQTT plane — not the HA entity. Aligning the two planes is still
+# worth it, because a divergence here is a divergence nobody can explain
+# later; making HA honour it needs an entity description on that side.
 SECURITY_CLASS_DEVICE_CLASS: Final[dict[str, str]] = {
     "smoke": "smoke",
     "water": "moisture",
@@ -772,7 +780,65 @@ SECURITY_CLASS_DEVICE_CLASS: Final[dict[str, str]] = {
     "co": "carbon_monoxide",
     "tamper": "tamper",
     "battery": "battery",
+    "technical": "problem",
+    "intrusion": "safety",
+    "panic": "safety",
 }
+
+
+# Upper bound on the sources rendered into one attribute payload. Mirrors
+# the daemon's MQTT plane: an installation can have dozens of active
+# detectors, and a Home Assistant attribute is read by a human or a
+# template, not by a database. The payload says when it truncated rather
+# than pretending the list is complete.
+MAX_ATTRIBUTE_SOURCES: Final = 20
+
+
+def _source_payload(*, source: Any) -> dict[str, Any]:
+    """Render one security source as a flat attribute object."""
+    fields = (
+        ("ref", getattr(source, "ref", None)),
+        ("central", getattr(source, "central", None)),
+        ("interface_id", getattr(source, "interface_id", None)),
+        ("channel_address", getattr(source, "channel_address", None)),
+        ("device_address", getattr(source, "device_address", None)),
+        ("parameter", getattr(source, "parameter", None)),
+        ("name", getattr(source, "name", None)),
+        ("sensor_type", _enum_value(value=getattr(source, "sensor_type", None))),
+        ("class", _enum_value(value=getattr(source, "class_", None))),
+        ("at", _isoformat(value=getattr(source, "at", None))),
+    )
+    return {key: value for key, value in fields if value}
+
+
+def _source_name(*, source: Any) -> str:
+    """Return the best human label for one source."""
+    return str(getattr(source, "name", None) or getattr(source, "channel_address", None) or getattr(source, "ref", ""))
+
+
+def sources_attribute(*, sources: Sequence[Any] | None) -> dict[str, Any]:
+    """
+    Render a bounded source list plus its names, and say when it truncated.
+
+    Every entity of this domain whose state comes from data points carries
+    this: "Opening or motion detected: on" is not actionable without the
+    answer to "which detector?". The shape matches the daemon's MQTT plane
+    so an automation written against one works against the other.
+    """
+    all_sources = list(sources or ())
+    shown = all_sources[:MAX_ATTRIBUTE_SOURCES]
+    return {
+        "sources": [_source_payload(source=source) for source in shown],
+        "source_names": [name for source in shown if (name := _source_name(source=source))],
+        "count": len(shown),
+        "total": len(all_sources),
+        "truncated": len(all_sources) > len(shown),
+    }
+
+
+# The severity ladder, ascending. Declared as the sensor's value list so
+# a consumer renders it as an enum and translates the tokens.
+SECURITY_SEVERITIES: Final[tuple[str, ...]] = ("ok", "info", "warning", "alarm", "critical")
 
 
 class SecuritySeveritySensor(HubSingletonDp):
@@ -783,7 +849,10 @@ class SecuritySeveritySensor(HubSingletonDp):
     "is anything wrong here" without reading nine class entities.
     """
 
-    _data_type: ClassVar[str | None] = "STRING"
+    # LIST rather than STRING: the consumer maps that onto an enum sensor
+    # with `values` as its options, which is what makes the state
+    # translatable instead of the bare wire token `alarm`.
+    _data_type: ClassVar[str | None] = "LIST"
 
     def __init__(self, *, store: LoomStore) -> None:
         """Bind the severity singleton to the store."""
@@ -794,6 +863,20 @@ class SecuritySeveritySensor(HubSingletonDp):
             translation_key="security_severity",
             name_key="security.entity.state",
         )
+
+    @property
+    def values(self) -> tuple[str, ...]:
+        """Return the severity vocabulary, ascending."""
+        return SECURITY_SEVERITIES
+
+    @property
+    def value_list(self) -> tuple[str, ...]:
+        """Return the severity vocabulary, ascending."""
+        return SECURITY_SEVERITIES
+
+    def update_severity(self, *, severity: str, sources: Sequence[Any] | None = None) -> bool:
+        """Apply the folded severity plus the sources that produced it."""
+        return self.update_value(value=severity, attributes=sources_attribute(sources=sources))
 
 
 class SecurityFaultsSensor(HubSingletonDp):
@@ -820,7 +903,15 @@ class SecurityFaultsSensor(HubSingletonDp):
 
     def update_faults(self, *, faults: Sequence[Any]) -> bool:
         """Apply the fetched fault ledger: count + ``fault_<n>`` attributes."""
-        attributes = {f"fault_{idx}": _fault_attribute(fault=fault) for idx, fault in enumerate(faults, start=1)}
+        attributes: dict[str, Any] = {
+            f"fault_{idx}": _fault_attribute(fault=fault) for idx, fault in enumerate(faults, start=1)
+        }
+        # The data points behind the standing faults, in the same shape
+        # every other entity of this domain uses: "open faults: 3" is not
+        # actionable without the detectors it refers to.
+        attributes.update(
+            sources_attribute(sources=[src for fault in faults if (src := getattr(fault, "source", None))])
+        )
         return self.update_value(value=len(faults), attributes=attributes)
 
 
@@ -858,11 +949,15 @@ class SecurityClassDp(HubSingletonDp):
         return SECURITY_CLASS_DEVICE_CLASS.get(self._security_class)
 
     def update_class(self, *, active: bool, sources: Sequence[Any] | None = None) -> bool:
-        """Apply an active flag plus the names of the contributing sources."""
-        names = [str(name) for source in sources or () if (name := getattr(source, "name", None))]
+        """
+        Apply an active flag plus the sources that produced it.
+
+        The full source objects, not just their names: `ref` is the key
+        REST takes back to correct a misclassification, and an automation
+        that wants to name the detector reads `source_names`.
+        """
         attributes: dict[str, Any] = {"security_class": self._security_class}
-        if names:
-            attributes["sources"] = names
+        attributes.update(sources_attribute(sources=sources))
         return self.update_value(value=active, attributes=attributes)
 
 
@@ -918,6 +1013,8 @@ class SecurityReportSensor(HubSingletonDp):
             )
             if value
         }
+        # The detectors the report is about, same shape as everywhere else.
+        attributes.update(sources_attribute(sources=getattr(report, "sources", None)))
         return self.update_value(value=getattr(report, "subject", None), attributes=attributes)
 
 
