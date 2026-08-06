@@ -876,10 +876,11 @@ class TestJsonRpcClientRecords:
                 "address": "VCU1:0",
                 "device_name": "Lamp",
                 "type": "LOW_BAT",
-                "description": "battery",
-                "priority": 1,
                 "timestamp": timestamp,
+                "last_timestamp": datetime(2026, 7, 13, 11, 0, tzinfo=UTC),
                 "counter": 2,
+                "rooms": ["Kitchen", "Hall"],
+                "functions": ["Light"],
                 "quittable": True,
                 "display_name": "Low battery",
             }
@@ -890,14 +891,10 @@ class TestJsonRpcClientRecords:
                 "id": "A1",
                 "name": "ERROR",
                 "description": "d",
-                "device_name": "Lamp",
-                "address": "VCU1:0",
-                "state_value": "1",
                 "timestamp": timestamp,
+                "last_timestamp": datetime(2026, 7, 13, 11, 30, tzinfo=UTC),
                 "counter": 1,
-                "last_trigger": "2026-07-13T09:00:00Z",
                 "display_name": "Error",
-                "rooms": ["Kitchen"],
             }
         )
         acks: dict[str, Any] = {"calls": []}
@@ -934,13 +931,25 @@ class TestJsonRpcClientRecords:
         assert payload["msg_type_name"] == "LOW_BAT"
         assert payload["quittable"] is True
         assert payload["timestamp"].startswith("2026-07-13T10:00")
+        # rooms/functions have been on the record all along; the daemon only
+        # started populating them with api 5.0.0, and they arrive as arrays.
+        assert payload["rooms"] == ("Kitchen", "Hall")
+        assert payload["functions"] == ("Light",)
+        assert payload["last_timestamp"].startswith("2026-07-13T11:00")
 
     async def test_alarm_messages_are_asdict_able_records(self) -> None:
         json_rpc, _ = self._client()
         alarms = await json_rpc.get_alarm_messages()
         payload = dataclasses.asdict(alarms[0])
         assert payload["alarm_id"] == "A1"
-        assert payload["rooms"] == ("Kitchen",)
+        assert payload["last_timestamp"].startswith("2026-07-13T11:30")
+        # An alarm entry is backed by a system variable a program raises, not
+        # by a device: the CCU reports the trigger data point as the "unknown"
+        # sentinel, so these three never carried data and left the wire with
+        # api 4.0.0. Filling them here would mean inventing a device.
+        assert payload["device_name"] == ""
+        assert payload["last_trigger"] == ""
+        assert payload["rooms"] == ()
 
     async def test_inbox_devices_are_asdict_able_records(self) -> None:
         json_rpc, _ = self._client()

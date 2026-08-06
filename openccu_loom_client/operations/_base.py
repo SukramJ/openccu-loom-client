@@ -49,5 +49,14 @@ class _OperationsBase:
 
     @staticmethod
     def _to_json_body(model: BaseModel) -> Any:
-        """Serialise a request model to a JSON-ready body (drops unset fields)."""
-        return model.model_dump(mode="json", exclude_none=True)
+        """
+        Serialise a request model to a JSON-ready body (drops unset fields).
+
+        ``by_alias=True`` is not cosmetic: the generator renames every
+        field colliding with a Python keyword, so ``AlarmOutput``'s
+        ``class`` becomes ``class_`` and ``EnergyResponse``'s ``from``
+        becomes ``from_``. Dumping by field name sent the daemon
+        ``{"class_": …}`` for a property its schema requires as
+        ``class`` — the wire name is the alias, always.
+        """
+        return model.model_dump(mode="json", by_alias=True, exclude_none=True)

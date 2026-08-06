@@ -23,9 +23,11 @@ from openccu_loom_client.operations.devices import DevicesOperations
 from openccu_loom_client.operations.diagnostics import DiagnosticsOperations
 from openccu_loom_client.operations.groups import GroupsOperations
 from openccu_loom_client.operations.hub import HubOperations
+from openccu_loom_client.operations.i18n import I18nOperations
 from openccu_loom_client.operations.links import LinksOperations
 from openccu_loom_client.operations.matter import MatterOperations
 from openccu_loom_client.operations.schedules import SchedulesOperations
+from openccu_loom_client.operations.security import SecurityOperations
 from openccu_loom_client.operations.sessions import SessionsOperations
 from openccu_loom_client.operations.system import SystemOperations
 from openccu_loom_client.operations.users import UsersOperations
@@ -44,9 +46,11 @@ __all__ = [
     "DiagnosticsOperations",
     "GroupsOperations",
     "HubOperations",
+    "I18nOperations",
     "LinksOperations",
     "MatterOperations",
     "SchedulesOperations",
+    "SecurityOperations",
     "SessionsOperations",
     "SystemOperations",
     "UsersOperations",

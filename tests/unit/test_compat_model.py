@@ -34,6 +34,7 @@ from openccu_loom_types.rest import (
     HubDataPoints,
     Kind1 as Kind,
     ProgramSummary,
+    SecuritySnapshot,
     Snapshot,
 )
 from openccu_loom_types.ws import (
@@ -49,6 +50,10 @@ from openccu_loom_types.ws import (
     HubSystemUpdateChangedPayload,
     InstallModeChangedPayload,
     OptimisticRollbackPayload,
+    SecurityClassChangedPayload,
+    SecurityFaultChangedPayload,
+    SecurityNotificationPayload,
+    SecurityStateChangedPayload,
     SysvarChangedPayload,
 )
 
@@ -85,6 +90,10 @@ from openccu_loom_client.events import (
     HubMetricsChangedEvent,
     HubSystemUpdateChangedEvent,
     InstallModeChangedEvent,
+    SecurityClassChangedEvent,
+    SecurityFaultChangedEvent,
+    SecurityNotificationEvent,
+    SecurityStateChangedEvent,
     SysvarChangedEvent,
 )
 from openccu_loom_client.events.types import (
@@ -611,11 +620,71 @@ class _FakeSystemOps:
         return self._addon
 
 
+class _FakeI18nOps:
+    """
+    Stand-in for ``client.i18n``.
+
+    ``entries=None`` reproduces a daemon older than api 5.2.0: the read
+    raises and every entity keeps its own token.
+    """
+
+    def __init__(self, *, entries: dict[str, str] | None = None, locale: str = "de") -> None:
+        self._entries = entries
+        self._locale = locale
+        self.calls = 0
+        self.locales_requested: list[str | None] = []
+
+    async def get_entity_names(self, *, locale: str | None = None) -> Any:
+        self.calls += 1
+        self.locales_requested.append(locale)
+        if self._entries is None:
+            msg = "404 not found"
+            raise RuntimeError(msg)
+        return SimpleNamespace(locale=locale or self._locale, entries=dict(self._entries))
+
+
+class _FakeSecurityOps:
+    """
+    Stand-in for ``client.security``.
+
+    ``snapshot=None`` reproduces a daemon without the Security & Safety
+    domain (no persistence tier, or older than api 5.0.0): the read
+    raises and no security entity is ever built.
+    """
+
+    def __init__(self, *, snapshot: Any = None, faults: list[Any] | None = None) -> None:
+        self._snapshot = snapshot
+        self._faults = list(faults or ())
+        self.snapshot_calls = 0
+        self.fault_calls = 0
+
+    async def get_snapshot(self) -> Any:
+        self.snapshot_calls += 1
+        if self._snapshot is None:
+            msg = "503 security domain unavailable"
+            raise RuntimeError(msg)
+        return self._snapshot
+
+    async def list_faults(self) -> list[Any]:
+        self.fault_calls += 1
+        return list(self._faults)
+
+
 class _FakeHubClient:
-    def __init__(self, *, store: LoomStore, hub: _FakeHubOps, system: _FakeSystemOps) -> None:
+    def __init__(
+        self,
+        *,
+        store: LoomStore,
+        hub: _FakeHubOps,
+        system: _FakeSystemOps,
+        security: _FakeSecurityOps | None = None,
+        i18n: _FakeI18nOps | None = None,
+    ) -> None:
         self.store = store
         self.hub = hub
         self.system = system
+        self.security = security or _FakeSecurityOps()
+        self.i18n = i18n or _FakeI18nOps()
 
 
 def _iface(*, ident: str = "HmIP-RF", central_id: str = "home", connected: bool = True) -> SimpleNamespace:
@@ -645,6 +714,8 @@ class TestHubPushRouting:
         aggregate: list[Any] | None = None,
         update: list[Any] | None = None,
         addon: AddonUpdateStatus | None = None,
+        security: _FakeSecurityOps | None = None,
+        i18n: _FakeI18nOps | None = None,
     ) -> tuple[_HubCoordinator, EventBus, Any, Looper, list[str]]:
         store = LoomStore()
         store.set_serial(serial="ABC1234567")
@@ -662,6 +733,8 @@ class TestHubPushRouting:
                 store=store,
                 hub=hub or _FakeHubOps(),
                 system=_FakeSystemOps(interfaces=interfaces, aggregate=aggregate, update=update, addon=addon),
+                security=security,
+                i18n=i18n,
             ),
             ha_bus=ha_bus,
         )
@@ -787,7 +860,9 @@ class TestHubPushRouting:
         assert coord.addon_update_dp.update_available is True
 
     async def test_alarm_count_push_refetches_then_skips_when_unchanged(self) -> None:
-        hub = _FakeHubOps(alarms=[SimpleNamespace(central="home", name="Low battery", device_name="Sensor")])
+        hub = _FakeHubOps(
+            alarms=[SimpleNamespace(central="home", name="LOW_BAT", display_name="Low battery", timestamp=None)]
+        )
         coord, loom_bus, group, looper, seen = self._coordinator(hub=hub)
         await coord._ensure_singletons()
         coord.install_push_routing(group=group)
@@ -1356,3 +1431,323 @@ class TestProgramControlAvailability:
         # observed yet, must not present a dead button.
         button, _switch = self._twins()
         assert button.available is True
+
+
+def _security_snapshot(**overrides: Any) -> SecuritySnapshot:
+    payload: dict[str, Any] = {
+        "severity": "ok",
+        "engine_healthy": True,
+        "classes": [
+            {"class": "smoke", "active": False, "known": 2, "sources": []},
+            {"class": "water", "active": False, "known": 1, "sources": []},
+        ],
+    }
+    payload.update(overrides)
+    return SecuritySnapshot.model_validate(payload)
+
+
+class TestSecurityHubEntities:
+    """
+    The Security & Safety entities are built from the snapshot and live on push.
+
+    Before daemon 0.54.0 the domain had no WebSocket push at all, so
+    everything here would have needed a poll loop. These tests drive the
+    real ``install_push_routing`` rather than calling the handlers, because
+    a handler that works while nothing subscribes it is the failure mode
+    that produces a permanently "ok" smoke sensor.
+    """
+
+    def _coordinator(self, *, security: _FakeSecurityOps) -> tuple[_HubCoordinator, EventBus, Any, Looper, list[str]]:
+        return TestHubPushRouting._coordinator(TestHubPushRouting(), security=security)
+
+    async def test_entities_are_built_from_the_snapshot(self) -> None:
+        security = _FakeSecurityOps(snapshot=_security_snapshot(severity="warning"))
+        coord, _, _, _, _ = self._coordinator(security=security)
+        await coord._ensure_singletons()
+
+        names = {dp.name for dp in coord.get_hub_data_points()}
+        assert {"security_severity", "security_faults", "security_last_alarm", "security_last_fault"} <= names
+        # One binary sensor per class the installation actually has sources
+        # for — never a permanently-off gas alarm for a home without gas.
+        assert {"security_smoke", "security_water"} <= names
+        assert "security_gas" not in names
+        severity = next(dp for dp in coord.get_hub_data_points() if dp.name == "security_severity")
+        assert severity.value == "warning"
+
+    async def test_no_security_domain_builds_no_entities(self) -> None:
+        """A daemon without the domain answers 503; the entities must simply not exist."""
+        coord, _, _, _, _ = self._coordinator(security=_FakeSecurityOps(snapshot=None))
+        await coord._ensure_singletons()
+        assert not [dp for dp in coord.get_hub_data_points() if dp.name.startswith("security_")]
+
+    async def test_class_push_flips_the_binary_sensor_and_names_the_detector(self) -> None:
+        security = _FakeSecurityOps(snapshot=_security_snapshot())
+        coord, loom_bus, group, looper, seen = self._coordinator(security=security)
+        await coord._ensure_singletons()
+        coord.install_push_routing(group=group)
+
+        await loom_bus.publish(
+            event=SecurityClassChangedEvent(
+                seq=1,
+                kind=Kind.change,
+                ts="2026-08-05T08:00:00Z",
+                payload=SecurityClassChangedPayload.model_validate(
+                    {
+                        "class": "smoke",
+                        "active": True,
+                        "sources": [{"ref": "r1", "name": "Rauchmelder Flur", "at": "2026-08-05T08:00:00Z"}],
+                    }
+                ),
+            )
+        )
+        await looper.block_till_done()
+
+        smoke = next(dp for dp in coord.get_hub_data_points() if dp.name == "security_smoke")
+        assert smoke.value is True
+        assert smoke.attributes["sources"] == ["Rauchmelder Flur"]
+        assert smoke.device_class == "smoke"
+        assert smoke.unique_id in seen
+
+    async def test_state_push_moves_the_severity(self) -> None:
+        security = _FakeSecurityOps(snapshot=_security_snapshot())
+        coord, loom_bus, group, looper, seen = self._coordinator(security=security)
+        await coord._ensure_singletons()
+        coord.install_push_routing(group=group)
+
+        await loom_bus.publish(
+            event=SecurityStateChangedEvent(
+                seq=1,
+                kind=Kind.change,
+                ts="2026-08-05T08:00:00Z",
+                payload=SecurityStateChangedPayload.model_validate(
+                    {"severity": "alarm", "previous_severity": "ok", "open_faults": 0}
+                ),
+            )
+        )
+        await looper.block_till_done()
+
+        severity = next(dp for dp in coord.get_hub_data_points() if dp.name == "security_severity")
+        assert severity.value == "alarm"
+        assert severity.unique_id in seen
+
+    async def test_fault_push_refetches_the_ledger(self) -> None:
+        """The count rides the push; the per-fault attribution needs the read."""
+        fault = SimpleNamespace(
+            reason=SimpleNamespace(value="low_battery"),
+            source=SimpleNamespace(name="Fenster Küche", channel_address="ABC:1"),
+        )
+        security = _FakeSecurityOps(snapshot=_security_snapshot(), faults=[fault])
+        coord, loom_bus, group, looper, seen = self._coordinator(security=security)
+        await coord._ensure_singletons()
+        coord.install_push_routing(group=group)
+
+        await loom_bus.publish(
+            event=SecurityFaultChangedEvent(
+                seq=1,
+                kind=Kind.change,
+                ts="2026-08-05T08:00:00Z",
+                payload=SecurityFaultChangedPayload.model_validate(
+                    {
+                        "fault_id": "f1",
+                        "class": "battery",
+                        "reason": "low_battery",
+                        "severity": "warning",
+                        "source": {"ref": "r1", "at": "2026-08-05T08:00:00Z"},
+                        "open": True,
+                        "acknowledged": False,
+                        "open_count": 1,
+                    }
+                ),
+            )
+        )
+        await looper.block_till_done()
+
+        faults = next(dp for dp in coord.get_hub_data_points() if dp.name == "security_faults")
+        assert faults.value == 1
+        assert faults.attributes["fault_1"] == "Fenster Küche: low_battery"
+        assert faults.unique_id in seen
+
+    async def test_notification_push_routes_hazard_and_fault_apart(self) -> None:
+        security = _FakeSecurityOps(snapshot=_security_snapshot())
+        coord, loom_bus, group, looper, _ = self._coordinator(security=security)
+        await coord._ensure_singletons()
+        coord.install_push_routing(group=group)
+
+        for fault_flag, subject in ((False, "Rauchalarm"), (True, "Melder nicht erreichbar")):
+            await loom_bus.publish(
+                event=SecurityNotificationEvent(
+                    seq=1,
+                    kind=Kind.change,
+                    ts="2026-08-05T08:00:00Z",
+                    payload=SecurityNotificationPayload.model_validate(
+                        {
+                            "class": "smoke",
+                            "severity": "alarm",
+                            "verb": "triggered",
+                            "subject": subject,
+                            "message": f"{subject}.",
+                            "i18n_key": "security.smoke.triggered",
+                            "at": "2026-08-05T08:00:00Z",
+                            "fault": fault_flag,
+                        }
+                    ),
+                )
+            )
+        await looper.block_till_done()
+
+        by_name = {dp.name: dp for dp in coord.get_hub_data_points()}
+        assert by_name["security_last_alarm"].value == "Rauchalarm"
+        assert by_name["security_last_fault"].value == "Melder nicht erreichbar"
+        assert by_name["security_last_alarm"].attributes["i18n_key"] == "security.smoke.triggered"
+
+    async def test_a_class_appearing_mid_session_gets_its_sensor(self) -> None:
+        """A newly-paired detector introduces a class the snapshot did not have."""
+        security = _FakeSecurityOps(snapshot=_security_snapshot())
+        coord, loom_bus, group, looper, _ = self._coordinator(security=security)
+        await coord._ensure_singletons()
+        coord.install_push_routing(group=group)
+        assert "security_gas" not in {dp.name for dp in coord.get_hub_data_points()}
+
+        await loom_bus.publish(
+            event=SecurityClassChangedEvent(
+                seq=1,
+                kind=Kind.change,
+                ts="2026-08-05T08:00:00Z",
+                payload=SecurityClassChangedPayload.model_validate({"class": "gas", "active": True}),
+            )
+        )
+        await looper.block_till_done()
+
+        gas = next(dp for dp in coord.get_hub_data_points() if dp.name == "security_gas")
+        assert gas.value is True
+
+
+_ENTITY_NAMES_DE = {
+    "discovery.alarm_messages": "Alarmmeldungen",
+    "discovery.service_messages": "Servicemeldungen",
+    "discovery.inbox": "Posteingang",
+    "discovery.system_health": "Systemzustand",
+    "discovery.connection_latency": "Verbindungslatenz",
+    "discovery.last_event_age": "Alter letztes Ereignis",
+    "discovery.connectivity": "Konnektivität {iface}",
+    "discovery.install_mode_duration": "Anlernmodus {iface} Dauer",
+    "discovery.install_mode_activate": "Anlernmodus {iface} aktivieren",
+    "security.entity.state": "Sicherheitsstatus",
+    "security.entity.problem": "Sicherheitsstörung",
+    "security.entity.last_alarm": "Letzte Gefahrenmeldung",
+    "security.entity.last_fault": "Letzte Störungsmeldung",
+    "security.entity.class.smoke": "Rauch",
+    "security.entity.class.water": "Wasser",
+    "security.entity.class.gas": "Gas",
+}
+
+
+class TestEntityNamesFromTheDaemon:
+    """
+    The daemon names its own entities; this layer renders those names.
+
+    The words lived in the daemon's catalogue and again in the Home
+    Assistant integration's strings.json, with nothing comparing them.
+    Reading the daemon's copy removes the second one — but `name` has to
+    stay the English token, because HA matches its entity descriptions
+    (icon, device class, category) against it with `var_name_contains`.
+    """
+
+    def _coordinator(
+        self, *, i18n: _FakeI18nOps, security: _FakeSecurityOps | None = None
+    ) -> tuple[_HubCoordinator, EventBus, Any, Looper, list[str]]:
+        return TestHubPushRouting._coordinator(
+            TestHubPushRouting(),
+            interfaces=[_iface(ident="HmIP-RF")],
+            security=security or _FakeSecurityOps(snapshot=_security_snapshot()),
+            i18n=i18n,
+        )
+
+    async def test_the_catalogue_is_read_in_home_assistants_language(self) -> None:
+        """
+        The entity names must follow Home Assistant's UI language.
+
+        HA's language and the daemon's configured locale are separate
+        choices and often disagree.
+        """
+        i18n = _FakeI18nOps(entries=_ENTITY_NAMES_DE)
+        coord, _, _, _, _ = self._coordinator(i18n=i18n)
+        coord._client.store.set_locale(locale="de")
+        await coord._ensure_singletons()
+
+        assert i18n.locales_requested == ["de"]
+
+    async def test_singletons_adopt_the_daemon_names(self) -> None:
+        coord, _, _, _, _ = self._coordinator(i18n=_FakeI18nOps(entries=_ENTITY_NAMES_DE))
+        await coord._ensure_singletons()
+
+        by_name = {dp.name: dp for dp in coord.get_hub_data_points()}
+        assert by_name["alarm_messages"].resolved_name == "Alarmmeldungen"
+        assert by_name["inbox"].resolved_name == "Posteingang"
+        assert by_name["system_health"].resolved_name == "Systemzustand"
+        assert by_name["security_severity"].resolved_name == "Sicherheitsstatus"
+        assert by_name["security_smoke"].resolved_name == "Rauch"
+        assert by_name["security_last_fault"].resolved_name == "Letzte Störungsmeldung"
+
+    async def test_the_match_token_never_changes(self) -> None:
+        """
+        `name` is HA's entity-description key, not a display name.
+
+        homematicip_local matches `var_name_contains="ALARM_MESSAGES"` and
+        friends against it; a localized token there would cost the entity
+        its icon, device class and category.
+        """
+        coord, _, _, _, _ = self._coordinator(i18n=_FakeI18nOps(entries=_ENTITY_NAMES_DE))
+        await coord._ensure_singletons()
+
+        names = {dp.name for dp in coord.get_hub_data_points()}
+        assert {"alarm_messages", "service_messages", "inbox", "install_mode_hmip"} <= names
+        for dp in coord.get_hub_data_points():
+            assert dp.name == dp.name.strip()
+            assert "ä" not in dp.name and "ö" not in dp.name and "ü" not in dp.name
+
+    async def test_templates_are_filled_per_interface(self) -> None:
+        """`Konnektivität {iface}` can only be completed by this side."""
+        coord, _, _, _, _ = self._coordinator(i18n=_FakeI18nOps(entries=_ENTITY_NAMES_DE))
+        await coord._ensure_singletons()
+
+        by_name = {dp.name: dp for dp in coord.get_hub_data_points()}
+        assert by_name["Connectivity HmIP-RF"].resolved_name == "Konnektivität HmIP-RF"
+        assert by_name["install_mode_hmip"].resolved_name == "Anlernmodus HmIP-RF Dauer"
+        assert by_name["install_mode_hmip_button"].resolved_name == "Anlernmodus HmIP-RF aktivieren"
+
+    async def test_an_old_daemon_leaves_every_name_unset(self) -> None:
+        """A 404 is not an error: the consumer falls back to its own rendering."""
+        coord, _, _, _, _ = self._coordinator(i18n=_FakeI18nOps(entries=None))
+        await coord._ensure_singletons()
+
+        assert all(dp.resolved_name is None for dp in coord.get_hub_data_points())
+
+    async def test_a_key_the_catalogue_omits_leaves_that_name_unset(self) -> None:
+        coord, _, _, _, _ = self._coordinator(i18n=_FakeI18nOps(entries={"discovery.inbox": "Posteingang"}))
+        await coord._ensure_singletons()
+
+        by_name = {dp.name: dp for dp in coord.get_hub_data_points()}
+        assert by_name["inbox"].resolved_name == "Posteingang"
+        assert by_name["alarm_messages"].resolved_name is None
+
+    async def test_a_class_appearing_later_is_named_like_its_siblings(self) -> None:
+        i18n = _FakeI18nOps(entries=_ENTITY_NAMES_DE)
+        coord, loom_bus, group, looper, _ = self._coordinator(i18n=i18n)
+        await coord._ensure_singletons()
+        coord.install_push_routing(group=group)
+
+        await loom_bus.publish(
+            event=SecurityClassChangedEvent(
+                seq=1,
+                kind=Kind.change,
+                ts="2026-08-05T08:00:00Z",
+                payload=SecurityClassChangedPayload.model_validate({"class": "gas", "active": True}),
+            )
+        )
+        await looper.block_till_done()
+
+        gas = next(dp for dp in coord.get_hub_data_points() if dp.name == "security_gas")
+        assert gas.resolved_name == "Gas"
+        # One read at build time, not one per lazily-created sensor.
+        assert i18n.calls == 1

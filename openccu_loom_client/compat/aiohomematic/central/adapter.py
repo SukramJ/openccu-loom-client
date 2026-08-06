@@ -544,11 +544,21 @@ def _iso(*, value: Any) -> str:
 
 
 def _to_service_message(*, message: Any) -> ServiceMessageData:
-    """Convert a wire ``ServiceMessage`` into aiohomematic's ``ServiceMessageData``."""
+    """
+    Convert a wire ``ServiceMessage`` into aiohomematic's ``ServiceMessageData``.
+
+    ``rooms`` / ``functions`` / ``last_timestamp`` have been on the
+    aiohomematic record since it was written but stayed empty here until
+    daemon api 5.0.0 started populating them: the CCU script emitted them
+    all along, the loader never read them. ``description`` and
+    ``priority`` went the other way — the script never emitted either, so
+    both are gone from the wire and the record carries no slot for them.
+    """
     return ServiceMessageData(
         msg_id=message.id,
         name=message.name,
         timestamp=_iso(value=message.timestamp),
+        last_timestamp=_iso(value=message.last_timestamp),
         # The CCU's numeric message type has no daemon equivalent; the textual
         # `type` carries the same information and is what the card renders.
         msg_type=0,
@@ -557,22 +567,32 @@ def _to_service_message(*, message: Any) -> ServiceMessageData:
         address=message.address or "",
         device_name=message.device_name or "",
         counter=message.counter or 0,
+        rooms=tuple(message.rooms or ()),
+        functions=tuple(message.functions or ()),
         quittable=bool(message.quittable),
     )
 
 
 def _to_alarm_message(*, message: Any) -> AlarmMessageData:
-    """Convert a wire ``AlarmMessage`` into aiohomematic's ``AlarmMessageData``."""
+    """
+    Convert a wire ``AlarmMessage`` into aiohomematic's ``AlarmMessageData``.
+
+    An alarm entry is backed by an alarm system variable a program raises,
+    not by a device — the CCU reports its trigger data point as the 65535
+    "unknown" sentinel. ``device_name``, ``last_trigger`` and ``rooms``
+    therefore never carried real data and left the wire in daemon api
+    4.0.0; the record's defaults stand in for them rather than a value
+    invented here. In their place ``last_timestamp`` carries the CCU's
+    actual occurrence data.
+    """
     return AlarmMessageData(
         alarm_id=message.id,
         name=message.name,
         display_name=message.display_name or "",
         description=message.description or "",
-        device_name=message.device_name or "",
         timestamp=_iso(value=message.timestamp),
+        last_timestamp=_iso(value=message.last_timestamp),
         counter=message.counter or 0,
-        last_trigger=_iso(value=message.last_trigger),
-        rooms=tuple(message.rooms or ()),
     )
 
 

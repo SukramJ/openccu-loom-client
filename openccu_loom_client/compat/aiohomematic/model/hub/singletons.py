@@ -29,7 +29,7 @@ from openccu_loom_client.compat.aiohomematic.model._protocol_surface import _Sys
 from openccu_loom_client.compat.aiohomematic.model.hub._surface import _HubEntitySurface
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
     from openccu_loom_types.rest import AddonUpdateStatus, SystemUpdateEntry
     from openccu_loom_types.ws import HubSystemUpdateChangedPayload
@@ -69,6 +69,7 @@ class HubSingletonDp(_HubEntitySurface, _SysvarProtocolSurface):
         name: str,
         parameter_slug: str,
         translation_key: str,
+        name_key: str | None = None,
         enabled_default: bool = True,
     ) -> None:
         """Bind the singleton to its store, registry slug and translation key."""
@@ -76,6 +77,8 @@ class HubSingletonDp(_HubEntitySurface, _SysvarProtocolSurface):
         self._name = name
         self._parameter_slug = parameter_slug
         self._translation_key = translation_key
+        self._name_key = name_key
+        self._resolved_name: str | None = None
         # Read back by _HubEntitySurface.enabled_default — singletons are
         # enabled by default in aiohomematic (unlike generic sysvars).
         self._enabled_default = enabled_default
@@ -104,6 +107,56 @@ class HubSingletonDp(_HubEntitySurface, _SysvarProtocolSurface):
     def translation_key(self) -> str:
         """Return the HA translation key."""
         return self._translation_key
+
+    @property
+    def name_key(self) -> str | None:
+        """Return the daemon catalogue key naming this entity, if any."""
+        return self._name_key
+
+    @property
+    def name_args(self) -> dict[str, str]:
+        """
+        Return the placeholder substitutions for :attr:`name_key`.
+
+        The daemon hands out templates — `Connectivity {iface}` — because
+        it does not know which interface a consumer is naming. Subclasses
+        that carry such a template override this.
+        """
+        return {}
+
+    @property
+    def resolved_name(self) -> str | None:
+        """
+        Return the daemon's name for this entity, or ``None``.
+
+        The daemon is the single naming authority, but :attr:`name` stays
+        the stable English token: Home Assistant matches its entity
+        descriptions against it (`var_name_contains`), and renaming that
+        token would cost the entity its icon, device class and category.
+        A consumer renders this and matches on :attr:`name`.
+        """
+        return self._resolved_name
+
+    def apply_entity_names(self, *, entries: Mapping[str, str]) -> bool:
+        """
+        Adopt the daemon's name from a catalogue; return whether it moved.
+
+        A key the catalogue does not carry leaves the name unset, which is
+        the same state as a daemon too old to serve the catalogue at all —
+        the consumer falls back to its own rendering either way.
+        """
+        if self._name_key is None:
+            return False
+        template = entries.get(self._name_key)
+        if not template:
+            return False
+        rendered = template
+        for placeholder, value in self.name_args.items():
+            rendered = rendered.replace("{" + placeholder + "}", value)
+        if rendered == self._resolved_name:
+            return False
+        self._resolved_name = rendered
+        return True
 
     # Singletons reuse ``_SysvarProtocolSurface`` structurally but are not real
     # sysvars: they hold no wire-side ``SysvarSummary`` (state comes from the
@@ -192,6 +245,15 @@ class HubSingletonDp(_HubEntitySurface, _SysvarProtocolSurface):
 # ---- message / inbox sensors ----
 
 
+def _alarm_attribute(*, message: Any) -> str:
+    """Render one alarm message as a single attribute line."""
+    label = str(message.display_name or message.name)
+    raised = getattr(message, "timestamp", None)
+    if raised is None:
+        return label
+    return f"{label} ({raised.isoformat()})" if hasattr(raised, "isoformat") else f"{label} ({raised})"
+
+
 class AlarmMessagesSensor(HubSingletonDp):
     """Count of pending CCU alarm messages, one attribute per message."""
 
@@ -204,15 +266,21 @@ class AlarmMessagesSensor(HubSingletonDp):
             name="alarm_messages",
             parameter_slug="alarm-messages",
             translation_key="alarm_messages",
+            name_key="discovery.alarm_messages",
         )
 
     def update_messages(self, *, messages: Sequence[Any]) -> bool:
-        """Apply the fetched alarm list: count + ``alarm_<n>`` attributes."""
+        """
+        Apply the fetched alarm list: count + ``alarm_<n>`` attributes.
+
+        An alarm entry names no device — it is backed by an alarm system
+        variable a program raises, and the CCU reports its trigger data
+        point as the "unknown" sentinel — so the attribute carries the
+        translated message and, where the daemon knows it, when the alarm
+        was raised. Prefixing a device name here would mean inventing one.
+        """
         attributes = {
-            f"alarm_{idx}": (
-                f"{message.device_name}: {message.name}" if getattr(message, "device_name", None) else str(message.name)
-            )
-            for idx, message in enumerate(messages, start=1)
+            f"alarm_{idx}": _alarm_attribute(message=message) for idx, message in enumerate(messages, start=1)
         }
         return self.update_value(value=len(messages), attributes=attributes)
 
@@ -229,6 +297,7 @@ class ServiceMessagesSensor(HubSingletonDp):
             name="service_messages",
             parameter_slug="service-messages",
             translation_key="service_messages",
+            name_key="discovery.service_messages",
         )
 
     def update_messages(self, *, messages: Sequence[Any]) -> bool:
@@ -254,6 +323,7 @@ class InboxSensor(HubSingletonDp):
             name="inbox",
             parameter_slug="inbox",
             translation_key="inbox",
+            name_key="discovery.inbox",
         )
 
 
@@ -273,6 +343,7 @@ class SystemHealthSensor(HubSingletonDp):
             name="system_health",
             parameter_slug="system-health",
             translation_key="system_health",
+            name_key="discovery.system_health",
         )
 
 
@@ -289,6 +360,7 @@ class ConnectionLatencySensor(HubSingletonDp):
             name="connection_latency",
             parameter_slug="connection-latency",
             translation_key="connection_latency",
+            name_key="discovery.connection_latency",
         )
 
 
@@ -305,6 +377,7 @@ class LastEventAgeSensor(HubSingletonDp):
             name="last_event_age",
             parameter_slug="last-event-age",
             translation_key="last_event_age",
+            name_key="discovery.last_event_age",
         )
 
 
@@ -324,6 +397,7 @@ class InterfaceConnectivityDp(HubSingletonDp):
             name=f"Connectivity {interface_id}",
             parameter_slug=f"connectivity-{slugify(interface_id)}",
             translation_key="interface_connectivity",
+            name_key="discovery.connectivity",
         )
         self._interface_id: Final = interface_id
 
@@ -331,6 +405,11 @@ class InterfaceConnectivityDp(HubSingletonDp):
     def interface_id(self) -> str:
         """Return the interface id this sensor tracks."""
         return self._interface_id
+
+    @property
+    def name_args(self) -> dict[str, str]:
+        """Fill the catalogue template's `{iface}` with the interface id."""
+        return {"iface": self._interface_id}
 
     @property
     def available(self) -> bool:
@@ -353,6 +432,7 @@ class SystemUpdateDp(HubSingletonDp):
             name="System Update",
             parameter_slug="system-update",
             translation_key="system_update",
+            name_key="discovery.system_update",
         )
         self._system_ops: Final = system_ops
         self._current_firmware: str = ""
@@ -475,6 +555,7 @@ class AddonUpdateDp(HubSingletonDp):
             name="Add-on Update",
             parameter_slug="addon-update",
             translation_key="addon_update",
+            name_key="discovery.addon_update",
         )
         self._system_ops: Final = system_ops
         self._current_firmware: str = ""
@@ -590,6 +671,7 @@ class InstallModeDpSensor(HubSingletonDp):
             name=f"install_mode_{token}",
             parameter_slug=token,
             translation_key="install_mode",
+            name_key="discovery.install_mode_duration",
         )
         self._interface: Final = interface
 
@@ -597,6 +679,11 @@ class InstallModeDpSensor(HubSingletonDp):
     def interface(self) -> str:
         """Return the interface this sensor belongs to."""
         return self._interface
+
+    @property
+    def name_args(self) -> dict[str, str]:
+        """Fill the catalogue template's `{iface}` with the interface name."""
+        return {"iface": self._interface}
 
     @property
     def is_active(self) -> bool:
@@ -625,6 +712,7 @@ class InstallModeDpButton(HubSingletonDp):
             name=f"install_mode_{token}_button",
             parameter_slug=f"{token}-button",
             translation_key="install_mode",
+            name_key="discovery.install_mode_activate",
         )
         self._hub_ops: Final = hub_ops
         self._interface: Final = interface
@@ -634,6 +722,11 @@ class InstallModeDpButton(HubSingletonDp):
     def interface(self) -> str:
         """Return the interface this button belongs to."""
         return self._interface
+
+    @property
+    def name_args(self) -> dict[str, str]:
+        """Fill the catalogue template's `{iface}` with the interface name."""
+        return {"iface": self._interface}
 
     @property
     def sensor(self) -> InstallModeDpSensor:
@@ -665,6 +758,187 @@ class InstallModeDpButton(HubSingletonDp):
         await self.activate()
 
 
+# ---- Security & Safety ----
+
+# Class → HA binary-sensor device class. The mapping is what turns a
+# generic on/off into a smoke alarm on the dashboard, so it is stated
+# once here rather than derived per surface. `technical`, `intrusion`
+# and `panic` have no HA device class that fits — HA's `safety` is the
+# generic hazard bucket and would flatten them into the others.
+SECURITY_CLASS_DEVICE_CLASS: Final[dict[str, str]] = {
+    "smoke": "smoke",
+    "water": "moisture",
+    "gas": "gas",
+    "co": "carbon_monoxide",
+    "tamper": "tamper",
+    "battery": "battery",
+}
+
+
+class SecuritySeveritySensor(HubSingletonDp):
+    """
+    The folded severity of the Security & Safety domain.
+
+    One value (`ok`/`info`/`warning`/`alarm`/`critical`) that answers
+    "is anything wrong here" without reading nine class entities.
+    """
+
+    _data_type: ClassVar[str | None] = "STRING"
+
+    def __init__(self, *, store: LoomStore) -> None:
+        """Bind the severity singleton to the store."""
+        super().__init__(
+            store=store,
+            name="security_severity",
+            parameter_slug="security-severity",
+            translation_key="security_severity",
+            name_key="security.entity.state",
+        )
+
+
+class SecurityFaultsSensor(HubSingletonDp):
+    """
+    Count of standing Security & Safety faults, one attribute per fault.
+
+    A fault is a *self-diagnosis*: an unreachable detector, a flat
+    battery, a blocked radio. It never clears through acknowledgement —
+    the condition is still there, the operator has merely seen it — so
+    the count keeps standing until the installation is repaired.
+    """
+
+    _data_type: ClassVar[str | None] = "INTEGER"
+
+    def __init__(self, *, store: LoomStore) -> None:
+        """Bind the fault-count singleton to the store."""
+        super().__init__(
+            store=store,
+            name="security_faults",
+            parameter_slug="security-faults",
+            translation_key="security_faults",
+            name_key="security.entity.problem",
+        )
+
+    def update_faults(self, *, faults: Sequence[Any]) -> bool:
+        """Apply the fetched fault ledger: count + ``fault_<n>`` attributes."""
+        attributes = {f"fault_{idx}": _fault_attribute(fault=fault) for idx, fault in enumerate(faults, start=1)}
+        return self.update_value(value=len(faults), attributes=attributes)
+
+
+class SecurityClassDp(HubSingletonDp):
+    """
+    Binary sensor for one hazard or fault class (smoke, water, gas, …).
+
+    A class the installation has no source for is never built: the
+    daemon omits it from the snapshot rather than reporting it inactive,
+    so a home without gas detectors gets no permanently-off gas alarm.
+    """
+
+    _category: ClassVar[DataPointCategory] = DataPointCategory.HubBinarySensor
+    _data_type: ClassVar[str | None] = "LOGIC"
+
+    def __init__(self, *, store: LoomStore, security_class: str) -> None:
+        """Bind the class singleton to its hazard/fault class."""
+        super().__init__(
+            store=store,
+            name=f"security_{security_class}",
+            parameter_slug=f"security-{slugify(security_class)}",
+            translation_key="security_class",
+            name_key=f"security.entity.class.{security_class}",
+        )
+        self._security_class: Final = security_class
+
+    @property
+    def security_class(self) -> str:
+        """Return the hazard/fault class this sensor tracks."""
+        return self._security_class
+
+    @property
+    def device_class(self) -> str | None:
+        """Return the HA binary-sensor device class, if the class maps onto one."""
+        return SECURITY_CLASS_DEVICE_CLASS.get(self._security_class)
+
+    def update_class(self, *, active: bool, sources: Sequence[Any] | None = None) -> bool:
+        """Apply an active flag plus the names of the contributing sources."""
+        names = [str(name) for source in sources or () if (name := getattr(source, "name", None))]
+        attributes: dict[str, Any] = {"security_class": self._security_class}
+        if names:
+            attributes["sources"] = names
+        return self.update_value(value=active, attributes=attributes)
+
+
+class SecurityReportSensor(HubSingletonDp):
+    """
+    The last rendered Security & Safety report — hazard or fault.
+
+    The value is the report's one-line subject; the attributes carry the
+    full sentence plus the i18n key and args, so a consumer that would
+    rather render in its own locale can.
+
+    A covert report (duress code, silent panic) never arrives here
+    unless the daemon runs ``alarm.duress_visibility: full``: it gates
+    the WebSocket exactly as it gates its own retained state, because a
+    wall tablet showing "duress code entered" defeats the covert trigger
+    it reports.
+    """
+
+    _data_type: ClassVar[str | None] = "STRING"
+
+    def __init__(self, *, store: LoomStore, fault: bool) -> None:
+        """Bind the report singleton to the hazard or the fault plane."""
+        slug = "security-last-fault" if fault else "security-last-alarm"
+        super().__init__(
+            store=store,
+            name=slug.replace("-", "_"),
+            parameter_slug=slug,
+            translation_key=slug.replace("-", "_"),
+            name_key="security.entity.last_fault" if fault else "security.entity.last_alarm",
+        )
+        self._fault: Final = fault
+
+    @property
+    def fault(self) -> bool:
+        """Return whether this sensor tracks fault reports rather than hazards."""
+        return self._fault
+
+    def update_report(self, *, report: Any) -> bool:
+        """Apply one rendered report (or clear the sensor when there is none)."""
+        if report is None:
+            return self.update_value(value=None, attributes={})
+        attributes = {
+            key: value
+            for key, value in (
+                ("message", getattr(report, "message", None)),
+                ("security_class", getattr(report, "class_", None)),
+                ("severity", getattr(report, "severity", None)),
+                ("verb", _enum_value(value=getattr(report, "verb", None))),
+                ("i18n_key", getattr(report, "i18n_key", None)),
+                ("args", getattr(report, "args", None)),
+                ("zone_name", getattr(report, "zone_name", None)),
+                ("at", _isoformat(value=getattr(report, "at", None))),
+            )
+            if value
+        }
+        return self.update_value(value=getattr(report, "subject", None), attributes=attributes)
+
+
+def _fault_attribute(*, fault: Any) -> str:
+    """Render one standing fault as a single attribute line."""
+    reason = _enum_value(value=getattr(fault, "reason", None)) or "fault"
+    source = getattr(fault, "source", None)
+    name = getattr(source, "name", None) or getattr(source, "channel_address", None) or ""
+    return f"{name}: {reason}" if name else str(reason)
+
+
+def _enum_value(*, value: Any) -> Any:
+    """Unwrap a generated StrEnum to its wire string; pass anything else through."""
+    return getattr(value, "value", value)
+
+
+def _isoformat(*, value: Any) -> Any:
+    """Render a datetime as ISO-8601; pass anything else through unchanged."""
+    return value.isoformat() if hasattr(value, "isoformat") else value
+
+
 class InstallModeDpType(NamedTuple):
     """Button + sensor pair for one interface's install mode."""
 
@@ -690,6 +964,7 @@ class ConnectivityDpType(NamedTuple):
 
 __all__ = [
     "INSTALL_MODE_TOKEN_BY_INTERFACE",
+    "SECURITY_CLASS_DEVICE_CLASS",
     "AddonUpdateDp",
     "AlarmMessagesSensor",
     "ConnectionLatencySensor",
@@ -702,6 +977,10 @@ __all__ = [
     "InterfaceConnectivityDp",
     "LastEventAgeSensor",
     "MetricsDpType",
+    "SecurityClassDp",
+    "SecurityFaultsSensor",
+    "SecurityReportSensor",
+    "SecuritySeveritySensor",
     "ServiceMessagesSensor",
     "SystemHealthSensor",
     "SystemUpdateDp",

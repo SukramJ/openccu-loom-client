@@ -20,7 +20,13 @@ import pytest
 
 from openccu_loom_client.events import InstallModeChangedEvent
 from openccu_loom_client.events.types import event_from_envelope
-from openccu_loom_client.operations import DevicesOperations, HubOperations, LinksOperations, SchedulesOperations
+from openccu_loom_client.operations import (
+    DevicesOperations,
+    HubOperations,
+    I18nOperations,
+    LinksOperations,
+    SchedulesOperations,
+)
 from openccu_loom_client.transport import HttpTransport
 from tests.helpers import MockDaemon
 
@@ -346,3 +352,26 @@ class TestInstallModeChangedEvent:
         assert ev.payload.remaining_s == 60
         # Routing key derives from the central name.
         assert ev.event_key == "home"
+
+
+class TestI18nOperations:
+    """The daemon's entity-name catalogue (daemon ≥ 0.54.0, api 5.2.0)."""
+
+    async def test_get_entity_names_defaults_to_the_daemon_locale(self, http) -> None:
+        transport, mock_daemon = http
+        mock_daemon.get(
+            "/api/v1/i18n/entities",
+            payload={"locale": "de", "entries": {"discovery.inbox": "Posteingang"}},
+        )
+        catalogue = await I18nOperations(transport=transport).get_entity_names()
+        assert catalogue.locale == "de"
+        assert catalogue.entries["discovery.inbox"] == "Posteingang"
+        # No locale asked for means no locale sent: the daemon's own
+        # configured language answers.
+        assert mock_daemon.requests[-1].query == {}
+
+    async def test_get_entity_names_passes_the_requested_locale(self, http) -> None:
+        transport, mock_daemon = http
+        mock_daemon.get("/api/v1/i18n/entities", payload={"locale": "en", "entries": {}})
+        await I18nOperations(transport=transport).get_entity_names(locale="en")
+        assert mock_daemon.requests[-1].query == {"locale": "en"}

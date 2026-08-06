@@ -57,6 +57,11 @@ from openccu_loom_types.ws import (
     OptimisticRollbackPayload,
     ProgramChangedPayload,
     ProgramExecutedPayload,
+    SecurityClassChangedPayload,
+    SecurityFaultChangedPayload,
+    SecurityNotificationPayload,
+    SecurityStateChangedPayload,
+    SecurityZoneChangedPayload,
     SystemStatusChangedPayload,
     SysvarChangedPayload,
     WsEnvelope,
@@ -599,6 +604,107 @@ class AlarmNotificationEvent(LoomEvent):
 
 
 @dataclass(slots=True, kw_only=True)
+class SecurityStateChangedEvent(LoomEvent):
+    """
+    The folded severity of the Security & Safety domain changed.
+
+    Carries the fold only — the classes contributing to it and the
+    standing fault count, not the detail. A consumer that needs the
+    per-class source lists reads ``GET /security``.
+    """
+
+    payload: SecurityStateChangedPayload
+    type_id: ClassVar[str] = "security.state_changed"
+
+
+@dataclass(slots=True, kw_only=True)
+class SecurityClassChangedEvent(LoomEvent):
+    """
+    One hazard or fault class went active or inactive.
+
+    Also fires when the source set changes while the class stays
+    active: a second smoke detector joining an existing fire is a
+    change worth announcing even though the class was already on.
+
+    The routing key is the class, so a consumer can subscribe with
+    ``event_key="smoke"`` and never see a battery warning.
+    """
+
+    payload: SecurityClassChangedPayload
+    type_id: ClassVar[str] = "security.class_changed"
+
+    def __post_init__(self) -> None:
+        """Default the routing key to the hazard/fault class."""
+        if self.event_key is None:
+            self.event_key = self.payload.class_
+
+
+@dataclass(slots=True, kw_only=True)
+class SecurityZoneChangedEvent(LoomEvent):
+    """
+    One alarm zone's security view changed.
+
+    Never arrives on an installation without an alarm engine, where
+    the domain still reports classes and faults.
+    """
+
+    payload: SecurityZoneChangedPayload
+    type_id: ClassVar[str] = "security.zone_changed"
+
+    def __post_init__(self) -> None:
+        """Default the routing key to the payload's zone id."""
+        if self.event_key is None:
+            self.event_key = self.payload.zone_id
+
+
+@dataclass(slots=True, kw_only=True)
+class SecurityFaultChangedEvent(LoomEvent):
+    """
+    A fault opened, cleared or was acknowledged.
+
+    ``acknowledged`` marks the third case: the condition is unchanged,
+    the operator has merely stopped needing to be told. ``open_count``
+    carries the standing count after the change, so a count entity
+    needs no second read.
+    """
+
+    payload: SecurityFaultChangedPayload
+    type_id: ClassVar[str] = "security.fault_changed"
+
+    def __post_init__(self) -> None:
+        """Default the routing key to the fault id."""
+        if self.event_key is None:
+            self.event_key = self.payload.fault_id
+
+
+@dataclass(slots=True, kw_only=True)
+class SecurityNotificationEvent(LoomEvent):
+    """
+    One rendered Security & Safety report.
+
+    The only payload in the domain that carries prose, plus the i18n
+    key and args to re-render it in the consumer's own locale.
+    ``fault`` separates a fault report from a hazard report so the two
+    can be routed apart without inspecting the class.
+
+    A covert report (duress code, silent panic) reaches this broadcast
+    only when the daemon runs ``alarm.duress_visibility: full``: the
+    WebSocket is a local screen surface, and a wall tablet showing
+    "duress code entered" defeats the covert trigger it reports. Under
+    the other levels the report still reaches the daemon's webhook and
+    raw MQTT event topic — it simply never reaches this client.
+    """
+
+    payload: SecurityNotificationPayload
+    type_id: ClassVar[str] = "security.notification"
+
+    def __post_init__(self) -> None:
+        """Default the routing key to the hazard/fault class."""
+        if self.event_key is None:
+            self.event_key = self.payload.class_
+
+
+@dataclass(slots=True, kw_only=True)
 class MatterCommissioningProgressEvent(LoomEvent):
     """Progress update while a Matter device is being commissioned."""
 
@@ -701,6 +807,11 @@ _EVENT_REGISTRY: Final[dict[str, tuple[Callable[..., LoomEvent], type[BaseModel]
     AlarmPanelChangedEvent.type_id: (AlarmPanelChangedEvent, AlarmPanelChangedPayload),
     AlarmReminderEvent.type_id: (AlarmReminderEvent, AlarmReminderPayload),
     AlarmNotificationEvent.type_id: (AlarmNotificationEvent, AlarmNotificationPayload),
+    SecurityStateChangedEvent.type_id: (SecurityStateChangedEvent, SecurityStateChangedPayload),
+    SecurityClassChangedEvent.type_id: (SecurityClassChangedEvent, SecurityClassChangedPayload),
+    SecurityZoneChangedEvent.type_id: (SecurityZoneChangedEvent, SecurityZoneChangedPayload),
+    SecurityFaultChangedEvent.type_id: (SecurityFaultChangedEvent, SecurityFaultChangedPayload),
+    SecurityNotificationEvent.type_id: (SecurityNotificationEvent, SecurityNotificationPayload),
     MatterCommissioningProgressEvent.type_id: (
         MatterCommissioningProgressEvent,
         MatterCommissioningProgressPayload,
