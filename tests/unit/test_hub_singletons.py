@@ -32,16 +32,24 @@ def _store() -> LoomStore:
     return store
 
 
-def _alarm(*, name: str, device_name: str | None = None) -> AlarmMessage:
-    return AlarmMessage.model_validate(
-        {
-            "id": f"al-{name}",
-            "name": name,
-            "device_name": device_name,
-            "timestamp": "2026-06-12T08:00:00Z",
-            "counter": 1,
-        }
-    )
+def _alarm(
+    *, name: str, display_name: str | None = None, timestamp: str | None = "2026-06-12T08:00:00Z"
+) -> AlarmMessage:
+    """
+    Build one wire alarm message.
+
+    An alarm entry names no device: it is backed by an alarm system
+    variable a program raises, and the CCU reports the trigger data point
+    as the "unknown" sentinel — so there is no device_name to pass. The
+    timestamp is optional because a CCU can report an occurrence of 0,
+    which the daemon omits rather than turning into the 1970 epoch.
+    """
+    payload: dict[str, object] = {"id": f"al-{name}", "name": name, "counter": 1}
+    if display_name is not None:
+        payload["display_name"] = display_name
+    if timestamp is not None:
+        payload["timestamp"] = timestamp
+    return AlarmMessage.model_validate(payload)
 
 
 def _service(*, name: str, device_name: str | None = None) -> ServiceMessage:
@@ -149,28 +157,36 @@ class TestMessageSensors:
         assert dp.is_valid is False
         changed = dp.update_messages(
             messages=[
-                _alarm(name="SABOTAGE", device_name="Door Sensor"),
+                _alarm(name="SABOTAGE", display_name="Sabotage"),
                 _alarm(name="ERROR_OVERHEAT"),
             ]
         )
         assert changed is True
         assert dp.value == 2
         assert dp.is_valid is True
+        # The translated label wins over the raw code, and the raised-at
+        # stamp stands in for the device the entry does not name.
         assert dp.attributes == {
-            "alarm_1": "Door Sensor: SABOTAGE",
-            "alarm_2": "ERROR_OVERHEAT",
+            "alarm_1": "Sabotage (2026-06-12T08:00:00+00:00)",
+            "alarm_2": "ERROR_OVERHEAT (2026-06-12T08:00:00+00:00)",
         }
         assert dp.additional_information == dp.attributes
         # Unchanged payload only refreshes.
         assert (
             dp.update_messages(
                 messages=[
-                    _alarm(name="SABOTAGE", device_name="Door Sensor"),
+                    _alarm(name="SABOTAGE", display_name="Sabotage"),
                     _alarm(name="ERROR_OVERHEAT"),
                 ]
             )
             is False
         )
+
+    def test_alarm_message_without_a_timestamp_renders_the_label_alone(self) -> None:
+        """A CCU report carrying no occurrence must not produce a 1970 stamp."""
+        dp = AlarmMessagesSensor(store=_store())
+        dp.update_messages(messages=[_alarm(name="SABOTAGE", timestamp=None)])
+        assert dp.attributes == {"alarm_1": "SABOTAGE"}
 
     def test_service_messages_count_and_attributes(self) -> None:
         dp = ServiceMessagesSensor(store=_store())

@@ -1,3 +1,117 @@
+# Version 2026.8.4 (2026-08-06)
+
+Follows the daemon to **API 5.2.0** (openccu-loom 0.54.0). The Security &
+Safety domain becomes a live Home Assistant surface, the CCU's message
+records gain the fields they always should have carried, and an alarm
+output could never be enrolled.
+
+## What's Changed
+
+### Added
+
+- **Security & Safety reaches Home Assistant, and it pushes.** The daemon's
+  hazard-and-fault domain — smoke, water, gas, CO, tamper, battery,
+  technical, intrusion, panic — had no Python surface at all, and until
+  openccu-loom 0.54.0 it had no WebSocket push either: its five events
+  reached MQTT, the webhook plane and the metrics collector while every
+  REST/WebSocket consumer had to re-read `GET /security` on its own
+  schedule to learn that a smoke detector had fired.
+
+  This release binds all five broadcasts and spawns the entities off them:
+
+  - one **binary sensor per hazard class**, carrying the HA device class
+    that turns it into a real smoke/moisture/gas/CO alarm on the
+    dashboard, plus the names of the detectors currently reporting;
+  - a **severity sensor** with the folded verdict, so "is anything wrong"
+    is one entity rather than nine;
+  - a **fault-count sensor** over the standing ledger — an unreachable
+    detector, a flat battery, a blocked radio — with one attribute per
+    fault. Acknowledging never clears it: the condition is still there;
+  - **two report sensors**, last hazard and last fault, carrying the
+    daemon's rendered sentence plus the i18n key and args so a consumer
+    can render in its own locale instead.
+
+  A class the installation has no source for is never built — the daemon
+  omits it rather than reporting it inactive, so a home without gas
+  detectors gets no permanently-off gas alarm. A class that appears
+  mid-session (a newly-paired detector) gets its sensor on the spot.
+
+  **A covert report stays off this surface.** A duress code or silent
+  panic trigger reaches the notification broadcast only when the daemon
+  runs `alarm.duress_visibility: full` — the WebSocket is a local screen
+  surface, and a wall tablet showing "duress code entered" while the
+  attacker reads it defeats the trigger the feature exists for. Under the
+  other levels the report still goes out over the daemon's webhook and
+  raw MQTT event topic.
+
+- **`client.security` — the full REST façade.** The folded snapshot, the
+  per-class view, the classified source inventory with its filters and
+  the operator override that corrects a misclassification, and the fault
+  ledger with its acknowledgement. The domain runs with or without an
+  alarm engine, so nothing here gates on the `alarm.v1` capability.
+
+- **`alarm.list_sensor_candidates()`, `list_incidents()`,
+  `get_incident()`.** Sensor enrolment was the one alarm surface without
+  a candidate list — outputs and remote keys had one, sensors were
+  unvalidated free text over (central, interface, channel address,
+  parameter), so a typo produced a sensor that silently never fired. Each
+  candidate now carries the suggested role, the hazard class, the value
+  list and the recommended active values. The incident reads answer "what
+  else went off while the alarm ran" after the fact.
+
+- **Entity names now come from the daemon — `client.i18n`.** The daemon
+  has been the single naming authority since 0.45.0 and names its own hub
+  and Security & Safety entities in both locales, but those names only
+  ever reached the MQTT discovery plane. This layer therefore rendered
+  Home Assistant's copy of the same words, and the two drifted the moment
+  either side was edited alone.
+
+  Every hub singleton now adopts the daemon's name (`resolved_name`) from
+  `GET /i18n/entities`, read once at bootstrap: alarm and service
+  messages, inbox, the metric sensors, connectivity, both install-mode
+  entities, system and add-on update, plus the whole Security & Safety
+  family. Templates are completed here — the daemon hands out
+  `Konnektivität {iface}` because it does not know which interface is
+  being named.
+
+  `name` deliberately keeps its stable English token: Home Assistant
+  matches its entity descriptions against it (`var_name_contains`), and a
+  localized token there would cost the entity its icon, device class and
+  category. A daemon older than api 5.2.0 answers 404 and every entity
+  keeps its own rendering — the same fallback an unknown key takes.
+
+### Fixed
+
+- **An alarm output could never be enrolled.** `replace_zone_outputs` sent
+  the output's class under the field name `class_` rather than its wire
+  name `class`. The generated model renames the field because `class` is
+  a Python keyword, and the daemon's schema marks the property required,
+  so every enrolment failed validation — a zone that arms and then stays
+  silent. The request serialiser now dumps by alias throughout, which is
+  the wire name by definition; `EnergyResponse`'s `from` was exposed to
+  the same defect.
+
+### Changed
+
+- **Alarm messages dropped the device fields they never had, and gained
+  real timestamps** (daemon API 4.0.0). An alarm entry is backed by an
+  alarm system variable a program raises, not by a device — the CCU
+  reports its trigger data point as the 65535 "unknown" sentinel — so
+  `device_name`, `last_trigger` and `rooms` never carried data. The hub
+  sensor's per-alarm attribute now shows the translated message and when
+  it was raised instead of a device name it had to invent.
+
+- **Service messages gained real rooms, functions and timestamps** (daemon
+  API 5.0.0). All three have been on the aiohomematic record since it was
+  written and stayed empty: the CCU script emitted them, the loader never
+  read them. `description` and `priority` went the other way — the script
+  never emitted either, so both are gone.
+
+- **Pin `openccu-loom-types==0.3.1`** (regenerated from openccu-loom
+  0.54.0, API 5.2.0). The transport's API guard derives from
+  `DAEMON_API_VERSION`, so `connect()` now requires a daemon on API major
+  5 with minor ≥ 2 — deploy openccu-loom 0.54.0+ alongside this release.
+
 # Version 2026.8.3 (2026-08-02)
 
 Follows the daemon to **API 3.14.0** (openccu-loom 0.52.10) and fixes the

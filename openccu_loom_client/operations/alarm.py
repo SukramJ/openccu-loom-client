@@ -30,6 +30,7 @@ from openccu_loom_types.rest import (
     AlarmArmAccepted,
     AlarmCode,
     AlarmCodeRequest,
+    AlarmIncident,
     AlarmJournalEntry,
     AlarmModeReadiness,
     AlarmOutput,
@@ -37,6 +38,7 @@ from openccu_loom_types.rest import (
     AlarmPanelEntity,
     AlarmRemoteKeyCandidate,
     AlarmSensor,
+    AlarmSensorCandidate,
     AlarmWalkTestStatus,
     AlarmZone,
     AlarmZoneStatus,
@@ -188,6 +190,60 @@ class AlarmOperations(_OperationsBase):
         return await self._request_list(
             method="GET", path="/alarm/remote-key-candidates", model=AlarmRemoteKeyCandidate
         )
+
+    async def list_sensor_candidates(self, *, unenrolled_only: bool = False) -> list[AlarmSensorCandidate]:
+        """
+        Return the data points a zone can enrol as alarm sensors.
+
+        Wire: ``GET /alarm/sensor-candidates`` (daemon ≥ 0.53.1, api
+        5.0.0). Sensor enrollment was the one alarm surface without a
+        candidate list — outputs and remote keys had one, sensors were
+        unvalidated free text over (central, interface, channel address,
+        parameter), so a typo produced a sensor that silently never
+        fired.
+
+        Each candidate carries the pre-fill an enrollment needs: the
+        suggested role, the hazard class, the parameter's value list and
+        ``active_values`` wherever the default "anything but index 0 is
+        active" rule would be wrong. ``unenrolled_only`` drops the ones
+        already enrolled.
+        """
+        params = {"enrolled": "false"} if unenrolled_only else None
+        return await self._request_list(
+            method="GET", path="/alarm/sensor-candidates", params=params, model=AlarmSensorCandidate
+        )
+
+    # ---- incidents ----
+
+    async def list_incidents(self, *, zone_id: str, limit: int | None = None) -> list[AlarmIncident]:
+        """
+        Return one zone's incident history, newest first.
+
+        Wire: ``GET /alarm/incidents`` (daemon ≥ 0.53.1, api 5.0.0).
+        ``zone_id`` is required — an incident belongs to exactly one
+        zone. ``limit`` defaults to 50 daemon-side and caps at 500.
+
+        An incident is the unit the journal's individual rows belong to:
+        it carries every contributing source, the silence attribution
+        and why it closed.
+        """
+        params: dict[str, Any] = {"zone_id": zone_id}
+        if limit is not None:
+            params["limit"] = limit
+        return await self._request_list(method="GET", path="/alarm/incidents", params=params, model=AlarmIncident)
+
+    async def get_incident(self, *, incident_id: int | str) -> AlarmIncident:
+        """
+        Return one alarm incident with its full source ledger.
+
+        Wire: ``GET /alarm/incidents/{id}``. ``sources`` lists every
+        contributing data point oldest first, so "what else went off
+        while the alarm ran" is answerable after the fact.
+        """
+        payload = await self._transport.request(
+            method="GET", path=f"/alarm/incidents/{quote(str(incident_id), safe='')}"
+        )
+        return AlarmIncident.model_validate(payload)
 
     # ---- verbs ----
 

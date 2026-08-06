@@ -39,6 +39,10 @@ from openccu_loom_client.compat.aiohomematic.model.hub.singletons import (
     InterfaceConnectivityDp,
     LastEventAgeSensor,
     MetricsDpType,
+    SecurityClassDp,
+    SecurityFaultsSensor,
+    SecurityReportSensor,
+    SecuritySeveritySensor,
     ServiceMessagesSensor,
     SystemHealthSensor,
     SystemUpdateDp,
@@ -52,6 +56,10 @@ from openccu_loom_client.events import (
     HubServiceMessageCountChangedEvent,
     HubSystemUpdateChangedEvent,
     InstallModeChangedEvent,
+    SecurityClassChangedEvent,
+    SecurityFaultChangedEvent,
+    SecurityNotificationEvent,
+    SecurityStateChangedEvent,
 )
 
 if TYPE_CHECKING:
@@ -96,6 +104,21 @@ class _HubCoordinator:
         # Maps an interface_id (state.id, as the aggregate / connectivity push
         # use it) to the interface token that keys _install_mode_dps.
         self._install_token_by_id: dict[str, str] = {}
+        # Security & Safety singletons. The severity, the fault ledger and
+        # the two report sensors are fixed; the per-class binary sensors are
+        # built from what the installation actually has sources for — the
+        # daemon omits a class it has none of rather than reporting it
+        # inactive, so a home without gas detectors gets no gas entity.
+        self._security_severity_dp: SecuritySeveritySensor | None = None
+        self._security_faults_dp: SecurityFaultsSensor | None = None
+        self._security_alarm_report_dp: SecurityReportSensor | None = None
+        self._security_fault_report_dp: SecurityReportSensor | None = None
+        self._security_class_dps: dict[str, SecurityClassDp] = {}
+        # The daemon's entity-name catalogue, read once at singleton build.
+        # Kept so a class sensor created later — a newly-paired detector
+        # introduces its class mid-session — is named like its siblings
+        # instead of falling back to its raw token.
+        self._entity_names: dict[str, str] = {}
         # Per-message-list locks so the 300 s reconcile loop and the count
         # push handlers can't interleave a fetch/apply on the same singleton
         # (a slower in-flight fetch would otherwise clobber a newer list).
@@ -292,23 +315,7 @@ class _HubCoordinator:
         """Return the built hub singletons (empty before the first hub fetch)."""
         if not self._singletons_built:
             return []
-        singletons: list[Any] = [
-            dp
-            for dp in (
-                self._alarm_messages_dp,
-                self._service_messages_dp,
-                self._inbox_dp,
-                self._update_dp,
-                self._addon_update_dp,
-            )
-            if dp is not None
-        ]
-        if self._metrics_dps is not None:
-            singletons.extend(self._metrics_dps)
-        singletons.extend(entry.sensor for entry in self._connectivity_dps.values())
-        for pair in self._install_mode_dps.values():
-            singletons.extend((pair.sensor, pair.button))
-        return singletons
+        return self._hub_singletons_unfiltered()
 
     async def _ensure_singletons(self) -> None:
         """Build the hub singletons once (needs the daemon's interface list)."""
@@ -335,6 +342,7 @@ class _HubCoordinator:
             connection_latency=ConnectionLatencySensor(store=store),
             last_event_age=LastEventAgeSensor(store=store),
         )
+        await self._build_security_singletons(store=store)
         try:
             interfaces = await self._client.system.list_interfaces()
         except Exception:
@@ -360,7 +368,40 @@ class _HubCoordinator:
                     sensor=sensor,
                 )
                 self._install_token_by_id[state.id] = state.interface
+        await self._apply_entity_names()
         self._singletons_built = True
+
+    async def _build_security_singletons(self, *, store: Any) -> None:
+        """
+        Build the Security & Safety singletons from the domain snapshot.
+
+        The snapshot decides which class sensors exist: the daemon omits a
+        class the installation has no source for rather than reporting it
+        inactive, so this never spawns a permanently-off gas alarm for a
+        home without gas detectors.
+
+        The domain has no capability token — it runs with or without the
+        alarm engine — so "not available" shows up as the daemon serving
+        503 for a missing persistence tier, or 404 on a daemon older than
+        api 5.0.0. Either way the entities are simply not built.
+        """
+        try:
+            snapshot = await self._client.security.get_snapshot()
+        except Exception:
+            _LOGGER.debug("security snapshot unavailable while building hub singletons", exc_info=True)
+            return
+        self._security_severity_dp = SecuritySeveritySensor(store=store)
+        self._security_severity_dp.update_value(value=str(snapshot.severity))
+        self._security_faults_dp = SecurityFaultsSensor(store=store)
+        self._security_faults_dp.update_faults(faults=snapshot.faults or ())
+        self._security_alarm_report_dp = SecurityReportSensor(store=store, fault=False)
+        self._security_alarm_report_dp.update_report(report=snapshot.last_alarm)
+        self._security_fault_report_dp = SecurityReportSensor(store=store, fault=True)
+        self._security_fault_report_dp.update_report(report=snapshot.last_fault)
+        for state in snapshot.classes or ():
+            dp = SecurityClassDp(store=store, security_class=str(state.class_))
+            dp.update_class(active=bool(state.active), sources=state.sources)
+            self._security_class_dps[str(state.class_)] = dp
 
     async def fetch_hub_singleton_data(self, *, scheduled: bool = False) -> None:
         """
@@ -399,7 +440,177 @@ class _HubCoordinator:
         )
         changed += await self._fetch_system_update()
         changed += await self._fetch_addon_update()
+        changed += await self._refresh_security()
         await self._publish_each(dps=changed)
+
+    async def _apply_entity_names(self) -> None:
+        """
+        Adopt the daemon's own names for every hub singleton.
+
+        The daemon is the single naming authority and has named these
+        entities in its i18n catalogue since long before this call — but
+        the names only ever reached the MQTT discovery plane, so this
+        layer kept rendering Home Assistant's copy of the same words.
+        Reading them here removes the second copy; each singleton keeps
+        its English token as ``name`` because Home Assistant matches its
+        entity descriptions against it.
+
+        Best-effort: a daemon older than api 5.2.0 answers 404, and an
+        entity whose key the catalogue does not carry keeps its own
+        rendering. Neither is an error — both land on the same fallback.
+        """
+        try:
+            # The store carries Home Assistant's own UI language (set from
+            # `hass.config.language` at adapter construction). Asking for it
+            # rather than letting the daemon answer in its configured locale
+            # is the difference between a German dashboard and a German
+            # daemon: they are separate choices and often disagree.
+            catalogue = await self._client.i18n.get_entity_names(locale=self._client.store.locale)
+        except Exception:
+            _LOGGER.debug("entity-name catalogue unavailable; keeping local entity names", exc_info=True)
+            return
+        entries = catalogue.entries or {}
+        if not entries:
+            return
+        self._entity_names = dict(entries)
+        for dp in self._hub_singletons_unfiltered():
+            dp.apply_entity_names(entries=entries)
+
+    def _hub_singletons_unfiltered(self) -> list[Any]:
+        """
+        Return the built singletons regardless of the built flag.
+
+        :meth:`_hub_singletons` gates on ``_singletons_built``, which is
+        still false while the build runs — naming has to reach the
+        objects before that flag flips, or the first announce would carry
+        the untranslated tokens.
+        """
+        singletons: list[Any] = [
+            dp
+            for dp in (
+                self._alarm_messages_dp,
+                self._service_messages_dp,
+                self._inbox_dp,
+                self._update_dp,
+                self._addon_update_dp,
+                self._security_severity_dp,
+                self._security_faults_dp,
+                self._security_alarm_report_dp,
+                self._security_fault_report_dp,
+            )
+            if dp is not None
+        ]
+        if self._metrics_dps is not None:
+            singletons.extend(self._metrics_dps)
+        singletons.extend(self._security_class_dps.values())
+        singletons.extend(entry.sensor for entry in self._connectivity_dps.values())
+        for pair in self._install_mode_dps.values():
+            singletons.extend((pair.sensor, pair.button))
+        return singletons
+
+    async def _refresh_security(self) -> list[Any]:
+        """
+        Re-read the Security & Safety snapshot; return the changed singletons.
+
+        The push handlers below carry every change as it happens; this is
+        the reconcile backstop for a missed frame, and the path that lets
+        a class sensor appear when a newly-paired detector gives the
+        installation its first source of that class.
+        """
+        if self._security_severity_dp is None:
+            return []
+        try:
+            snapshot = await self._client.security.get_snapshot()
+        except Exception:
+            _LOGGER.debug("security snapshot refresh failed", exc_info=True)
+            return []
+        changed: list[Any] = []
+        if self._security_severity_dp.update_value(value=str(snapshot.severity)):
+            changed.append(self._security_severity_dp)
+        if self._security_faults_dp is not None and self._security_faults_dp.update_faults(
+            faults=snapshot.faults or ()
+        ):
+            changed.append(self._security_faults_dp)
+        if self._security_alarm_report_dp is not None and self._security_alarm_report_dp.update_report(
+            report=snapshot.last_alarm
+        ):
+            changed.append(self._security_alarm_report_dp)
+        if self._security_fault_report_dp is not None and self._security_fault_report_dp.update_report(
+            report=snapshot.last_fault
+        ):
+            changed.append(self._security_fault_report_dp)
+        for state in snapshot.classes or ():
+            dp = self._security_class_dp(security_class=str(state.class_))
+            if dp is not None and dp.update_class(active=bool(state.active), sources=state.sources):
+                changed.append(dp)
+        return changed
+
+    def _security_class_dp(self, *, security_class: str) -> SecurityClassDp | None:
+        """
+        Return the class sensor, building it the first time the class appears.
+
+        A class only enters the snapshot once the installation has a source
+        for it, so a newly-paired smoke detector introduces the smoke class
+        mid-session. Building it lazily here keeps that first activation
+        from landing on nothing; the entity reaches Home Assistant on the
+        next announce pass.
+        """
+        if (dp := self._security_class_dps.get(security_class)) is not None:
+            return dp
+        if self._security_severity_dp is None:
+            # No Security & Safety domain on this daemon at all.
+            return None
+        dp = SecurityClassDp(store=self._client.store, security_class=security_class)
+        if self._entity_names:
+            dp.apply_entity_names(entries=self._entity_names)
+        self._security_class_dps[security_class] = dp
+        return dp
+
+    async def _on_security_state_push(self, event: SecurityStateChangedEvent, /) -> None:
+        """Apply a ``security.state_changed`` fold push."""
+        dp = self._security_severity_dp
+        if dp is not None and dp.update_value(value=str(event.payload.severity)):
+            await self._publish_changed(dp=dp)
+
+    async def _on_security_class_push(self, event: SecurityClassChangedEvent, /) -> None:
+        """Apply a ``security.class_changed`` push onto the class binary sensor."""
+        dp = self._security_class_dp(security_class=str(event.payload.class_))
+        if dp is not None and dp.update_class(active=bool(event.payload.active), sources=event.payload.sources):
+            await self._publish_changed(dp=dp)
+
+    async def _on_security_fault_push(self, event: SecurityFaultChangedEvent, /) -> None:
+        """
+        Apply a ``security.fault_changed`` push.
+
+        The broadcast carries the standing count after the change, so the
+        count entity needs no second read. The per-fault attributes do
+        come from a read: a fault line carries an attribution the delta
+        does not.
+        """
+        dp = self._security_faults_dp
+        if dp is None:
+            return
+        try:
+            faults = await self._client.security.list_faults()
+        except Exception:
+            _LOGGER.debug("fault ledger refetch failed after a fault push", exc_info=True)
+            if dp.update_value(value=event.payload.open_count, attributes=dp.attributes):
+                await self._publish_changed(dp=dp)
+            return
+        if dp.update_faults(faults=faults):
+            await self._publish_changed(dp=dp)
+
+    async def _on_security_notification_push(self, event: SecurityNotificationEvent, /) -> None:
+        """
+        Apply a ``security.notification`` push onto the matching report sensor.
+
+        A covert report never arrives here: the daemon gates it off the
+        WebSocket unless the operator chose ``duress_visibility: full``,
+        exactly as it gates its own retained state.
+        """
+        dp = self._security_fault_report_dp if event.payload.fault else self._security_alarm_report_dp
+        if dp is not None and dp.update_report(report=event.payload):
+            await self._publish_changed(dp=dp)
 
     async def _publish_each(self, *, dps: list[Any]) -> None:
         """Emit a keyed HA state-changed event for each changed singleton."""
@@ -519,6 +730,13 @@ class _HubCoordinator:
         group.subscribe(event_type=HubSystemUpdateChangedEvent, handler=self._on_system_update_push)
         group.subscribe(event_type=AddonUpdateStateChangedEvent, handler=self._on_addon_update_push)
         group.subscribe(event_type=InstallModeChangedEvent, handler=self._on_install_mode_push)
+        # The Security & Safety plane (daemon ≥ 0.54.0 / api 5.1.0). Before it
+        # existed the domain had no push at all, so a smoke alarm reached a
+        # consumer whenever it next happened to read GET /security.
+        group.subscribe(event_type=SecurityStateChangedEvent, handler=self._on_security_state_push)
+        group.subscribe(event_type=SecurityClassChangedEvent, handler=self._on_security_class_push)
+        group.subscribe(event_type=SecurityFaultChangedEvent, handler=self._on_security_fault_push)
+        group.subscribe(event_type=SecurityNotificationEvent, handler=self._on_security_notification_push)
 
     async def _publish_changed(self, *, dp: Any) -> None:
         """Emit the keyed HA state-changed event for a single mutated singleton."""

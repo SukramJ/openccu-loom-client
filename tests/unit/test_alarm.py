@@ -18,7 +18,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from openccu_loom_types import DAEMON_API_VERSION
-from openccu_loom_types.rest import AlarmPanelEntity, AlarmZoneStatus, Kind1 as Kind
+from openccu_loom_types.rest import AlarmOutput, AlarmPanelEntity, AlarmZoneStatus, Kind1 as Kind
 from openccu_loom_types.ws import (
     AlarmCountdownPayload,
     AlarmHealthChangedPayload,
@@ -579,6 +579,101 @@ class TestAlarmOperations:
         mock_daemon.post("/api/v1/alarm/outputs/home|OUT:3/test", status=204)
         await AlarmOperations(transport=http).test_output(output_id="home|OUT:3", optical_only=True)
         assert mock_daemon.requests[-1].json() == {"optical_only": True}
+
+    async def test_zone_outputs_are_sent_under_their_wire_names(
+        self, mock_daemon: MockDaemon, http: HttpTransport
+    ) -> None:
+        """
+        The output class must reach the daemon as ``class``, not ``class_``.
+
+        The generated model renames the field because ``class`` is a Python
+        keyword, and the schema marks the property required — so a body
+        dumped by field name fails validation and no output is ever
+        enrolled. The symptom is a zone that arms and then stays silent.
+        """
+        mock_daemon.put("/api/v1/alarm/zones/eg/outputs", status=204)
+        output = AlarmOutput.model_validate(
+            {
+                "id": "home|SIREN:3",
+                "class": "acoustic_siren",
+                "central": "home",
+                "channel_address": "SIREN:3",
+            }
+        )
+        await AlarmOperations(transport=http).replace_zone_outputs(zone_id="eg", outputs=[output])
+        sent = mock_daemon.requests[-1].json()
+        assert sent == [
+            {
+                "id": "home|SIREN:3",
+                "class": "acoustic_siren",
+                "central": "home",
+                "channel_address": "SIREN:3",
+            }
+        ]
+
+    async def test_list_sensor_candidates(self, mock_daemon: MockDaemon, http: HttpTransport) -> None:
+        """Sensor enrolment was the one alarm surface without a candidate list."""
+        mock_daemon.get(
+            "/api/v1/alarm/sensor-candidates",
+            payload=[
+                {
+                    "central": "home",
+                    "interface_id": "home:HmIP-RF",
+                    "device_address": "ABC123",
+                    "channel_address": "ABC123:1",
+                    "channel_no": 1,
+                    "parameter": "SMOKE_DETECTOR_ALARM_STATUS",
+                    "sensor_type": "hazard",
+                    "security_class": "smoke",
+                    "value_list": ["IDLE_OFF", "PRIMARY_ALARM", "INTRUSION_ALARM"],
+                    "active_values": ["PRIMARY_ALARM"],
+                }
+            ],
+        )
+        candidates = await AlarmOperations(transport=http).list_sensor_candidates()
+        assert candidates[0].sensor_type is not None
+        assert candidates[0].sensor_type.value == "hazard"
+        # The clearest reason active_values exists: the value list contains
+        # INTRUSION_ALARM, which the alarm system drives — the default
+        # "anything but index 0 is active" rule would feed the alarm its own echo.
+        assert candidates[0].active_values == ["PRIMARY_ALARM"]
+        assert mock_daemon.requests[-1].query == {}
+
+    async def test_sensor_candidates_unenrolled_filter(self, mock_daemon: MockDaemon, http: HttpTransport) -> None:
+        mock_daemon.get("/api/v1/alarm/sensor-candidates", payload=[])
+        await AlarmOperations(transport=http).list_sensor_candidates(unenrolled_only=True)
+        assert mock_daemon.requests[-1].query == {"enrolled": "false"}
+
+    async def test_list_incidents_requires_a_zone(self, mock_daemon: MockDaemon, http: HttpTransport) -> None:
+        mock_daemon.get("/api/v1/alarm/incidents", payload=[])
+        await AlarmOperations(transport=http).list_incidents(zone_id="eg", limit=10)
+        assert mock_daemon.requests[-1].query == {"zone_id": "eg", "limit": "10"}
+
+    async def test_get_incident_carries_the_source_ledger(self, mock_daemon: MockDaemon, http: HttpTransport) -> None:
+        mock_daemon.get(
+            "/api/v1/alarm/incidents/42",
+            payload={
+                "id": 42,
+                "zone_id": "eg",
+                "mode": "full",
+                "cause": "sensor",
+                "sources": [
+                    {"ref": "r1", "name": "Fenster Küche", "at": "2026-08-05T10:00:00Z"},
+                    {"ref": "r2", "name": "Bewegung Flur", "at": "2026-08-05T10:00:04Z"},
+                ],
+                "started_at": "2026-08-05T10:00:00Z",
+                "silenced": False,
+                "retrigger_cycles": 0,
+                "acoustic_seconds": 180,
+                "open": True,
+            },
+        )
+        incident = await AlarmOperations(transport=http).get_incident(incident_id=42)
+        assert incident.open is True
+        assert incident.sources is not None
+        # Oldest first: "what else went off while the alarm ran" is the
+        # question the ledger answers after the fact.
+        assert [s.ref for s in incident.sources] == ["r1", "r2"]
 
     async def test_readiness_map(self, mock_daemon: MockDaemon, http: HttpTransport) -> None:
         mock_daemon.get(

@@ -64,9 +64,11 @@ from openccu_loom_client.operations import (
     DiagnosticsOperations,
     GroupsOperations,
     HubOperations,
+    I18nOperations,
     LinksOperations,
     MatterOperations,
     SchedulesOperations,
+    SecurityOperations,
     SessionsOperations,
     SystemOperations,
     UsersOperations,
@@ -90,8 +92,12 @@ _LOGGER: Final = logging.getLogger(__name__)
 # ``custom_data_point.*`` are the live-state plane — without them every
 # entity freezes on its bootstrap value. ``alarm.*`` carries the alarm
 # panel plane (daemon ≥ 0.42.0); a daemon without the alarm subsystem
-# simply never publishes on it. Callers that want narrower scope can
-# pass an explicit list to start_events().
+# simply never publishes on it. ``security.*`` carries the Security &
+# Safety plane (daemon ≥ 0.54.0, api 5.1.0) across its three topics —
+# state, faults and notifications; before that release the domain had no
+# push at all and a consumer had to re-read GET /security on its own
+# schedule to learn that a smoke detector had fired. Callers that want
+# narrower scope can pass an explicit list to start_events().
 _DEFAULT_WS_SUBSCRIPTIONS: Final = (
     "datapoint.*",
     "custom_data_point.*",
@@ -100,6 +106,7 @@ _DEFAULT_WS_SUBSCRIPTIONS: Final = (
     "system.*",
     "hub.*",
     "alarm.*",
+    "security.*",
 )
 
 # Minimum spacing between replay-lost re-bootstraps, measured from the end of
@@ -174,6 +181,15 @@ class LoomClient:
         self.links: Final = LinksOperations(transport=self._http)
         self.groups: Final = GroupsOperations(transport=self._http)
         self.alarm: Final = AlarmOperations(transport=self._http)
+        # The Security & Safety domain runs with or without the alarm
+        # engine, so it is wired unconditionally next to it rather than
+        # behind the alarm capability token.
+        self.security: Final = SecurityOperations(transport=self._http)
+        # The daemon's own entity-name vocabulary. Read once at bootstrap so
+        # the compat layer renders the daemon's words instead of keeping a
+        # second copy of them (daemon ≥ 0.54.0; older ones answer 404 and
+        # every consumer falls back to its own token).
+        self.i18n: Final = I18nOperations(transport=self._http)
         # Admin / ops surface — present for completeness; HA typically
         # touches only auth (token provisioning) and diagnostics.
         self.auth: Final = AuthOperations(transport=self._http)
