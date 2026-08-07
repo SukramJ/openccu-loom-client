@@ -82,12 +82,12 @@ async def get_hub_data_points(self) -> list[HubDataPoints]:
 ```python
 await self._ensure_singletons()
 changed = []
-changed.extend(await self._fetch_messages())       # list_alarm_messages + list_service_messages
-changed.extend(await self._fetch_inbox())          # list_inbox
-changed.extend(await self._fetch_metrics())        # get_hub_metrics
+changed.extend(await self._fetch_messages())  # list_alarm_messages + list_service_messages
+changed.extend(await self._fetch_inbox())  # list_inbox
+changed.extend(await self._fetch_metrics())  # get_hub_metrics
 changed.extend(await self._fetch_system_update())  # get_system_update
-changed.extend(await self._fetch_install_mode())   # list_install_mode_interfaces
-changed.extend(await self._fetch_connectivity())   # list_interfaces
+changed.extend(await self._fetch_install_mode())  # list_install_mode_interfaces
+changed.extend(await self._fetch_connectivity())  # list_interfaces
 ```
 
 **After** (1 call + conditional follow-ups):
@@ -100,10 +100,10 @@ if data is None:
 changed: list[Any] = []
 
 # Fully covered by the aggregate — direct scalar fans:
-changed += self._apply_inbox(data.inbox)              # inbox_dp.update_value(count)
-changed += self._apply_metrics(data.metrics)          # 3 metrics sensors, matched by legacy_name
-changed += self._apply_connectivity(data.connectivity)# per-interface .update_value(reachable)
-changed += self._apply_install_mode(data.install_mode)# per-interface .update_value(remaining_s if enabled else 0)
+changed += self._apply_inbox(data.inbox)  # inbox_dp.update_value(count)
+changed += self._apply_metrics(data.metrics)  # 3 metrics sensors, matched by legacy_name
+changed += self._apply_connectivity(data.connectivity)  # per-interface .update_value(reachable)
+changed += self._apply_install_mode(data.install_mode)  # per-interface .update_value(remaining_s if enabled else 0)
 
 # Cheap count → fetch the heavy list only when it actually changed:
 changed += await self._refresh_messages_if_count_changed(
@@ -111,7 +111,7 @@ changed += await self._refresh_messages_if_count_changed(
     service_count=data.service_messages.value,
 )
 # Update flags drive the entity; firmware strings fetched only if needed:
-changed += self._apply_update_flags(data.update)      # or call _fetch_system_update() on a flag flip
+changed += self._apply_update_flags(data.update)  # or call _fetch_system_update() on a flag flip
 ```
 
 - `_select_central(...)` picks this coordinator's entry from the per-central

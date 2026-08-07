@@ -74,7 +74,7 @@ sat = self._state.get("saturation")
 color = self._state.get("color") or {}
 if color:
     hue = color.get("h")
-    sat = color.get("s")        # daemon sends saturation in [0,1]
+    sat = color.get("s")  # daemon sends saturation in [0,1]
 # color_temp_kelvin / effect already map 1:1 — leave them.
 ```
 
@@ -101,6 +101,7 @@ mode to report. Add a unit test with a `color`/`color_mode` state fixture.
 @property
 def available_background_colors(self) -> tuple[str, ...]:
     return tuple(self._state.get("available_background_colors") or ())
+
 
 # same for available_text_colors / available_alignments
 # (+ available_repetitions / available_intervals if the notify entity uses them)
@@ -193,10 +194,9 @@ But the HA integration still defends against the old behaviour at
 
 ```python
 try:
-    event_groups = control_unit.central.query_facade.get_event_groups(
-        event_type=event_type, registered=False)
+    event_groups = control_unit.central.query_facade.get_event_groups(event_type=event_type, registered=False)
 except NotImplementedError:
-    continue   # platform set up without bootstrap entities
+    continue  # platform set up without bootstrap entities
 ```
 
 **Daemon now provides** `GET /devices/{addr}/channels/{no}/event-groups`:
@@ -276,7 +276,7 @@ This removes the last polling island in an otherwise push-driven client.
 
 ```python
 async def set_on_time(self, *, on_time: float) -> None:
-    _LOGGER.debug(...)   # no-op
+    _LOGGER.debug(...)  # no-op
 ```
 
 The switch surface already has `send_value(...)` (writes the channel's primary
@@ -289,8 +289,10 @@ The switch surface already has `send_value(...)` (writes the channel's primary
 ```python
 async def set_on_time(self, *, on_time: float) -> None:
     await self._client.datapoints.set_value(
-        address=self._address, channel=self._channel,
-        parameter="ON_TIME", value=on_time,
+        address=self._address,
+        channel=self._channel,
+        parameter="ON_TIME",
+        value=on_time,
     )
 ```
 

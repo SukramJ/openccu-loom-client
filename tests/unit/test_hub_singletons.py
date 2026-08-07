@@ -424,6 +424,41 @@ class TestSecurityEntityContext:
         assert dp.attributes["total"] == MAX_ATTRIBUTE_SOURCES + 5
         assert dp.attributes["truncated"] is True
 
+    def test_class_sensor_carries_the_graded_severity(self) -> None:
+        """
+        `active` says that something reported; `severity` says how bad it is.
+
+        The daemon grades each class arm-aware (types 0.3.3, daemon API
+        5.5.0): an active intrusion source in a disarmed zone grades
+        `info`, not `alarm`. A consumer colouring the class must read
+        this attribute, never the boolean.
+        """
+        dp = SecurityClassDp(store=_store(), security_class="intrusion")
+        dp.update_class(active=True, severity="info", sources=[self._source(ref="r1", name="Fenster Küche")])
+
+        assert dp.value is True
+        assert dp.attributes["severity"] == "info"
+
+    def test_a_push_without_a_grade_keeps_the_last_one(self) -> None:
+        """
+        The `security.class_changed` push carries no severity.
+
+        Only the REST snapshot grades classes; a source-set push landing
+        between snapshots must not wipe the last known grade off the
+        attributes — stale-but-labelled beats silently ungraded.
+        """
+        dp = SecurityClassDp(store=_store(), security_class="intrusion")
+        dp.update_class(active=True, severity="alarm", sources=[self._source(ref="r1", name="Fenster Küche")])
+        dp.update_class(active=True, sources=[self._source(ref="r2", name="Bewegung Flur")])
+
+        assert dp.attributes["severity"] == "alarm"
+
+    def test_a_class_never_graded_has_no_severity_attribute(self) -> None:
+        dp = SecurityClassDp(store=_store(), security_class="intrusion")
+        dp.update_class(active=True, sources=[self._source(ref="r1", name="Fenster Küche")])
+
+        assert "severity" not in dp.attributes
+
     def test_severity_is_an_enum_so_the_value_is_translatable(self) -> None:
         """
         A plain string sensor showed the operator the raw token `alarm`.

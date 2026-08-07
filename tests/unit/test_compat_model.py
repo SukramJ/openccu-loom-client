@@ -1438,8 +1438,8 @@ def _security_snapshot(**overrides: Any) -> SecuritySnapshot:
         "severity": "ok",
         "engine_healthy": True,
         "classes": [
-            {"class": "smoke", "active": False, "known": 2, "sources": []},
-            {"class": "water", "active": False, "known": 1, "sources": []},
+            {"class": "smoke", "active": False, "severity": "ok", "known": 2, "sources": []},
+            {"class": "water", "active": False, "severity": "ok", "known": 1, "sources": []},
         ],
     }
     payload.update(overrides)

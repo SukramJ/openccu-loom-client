@@ -417,7 +417,11 @@ class _HubCoordinator:
         self._security_fault_report_dp.update_report(report=snapshot.last_fault)
         for state in snapshot.classes or ():
             dp = SecurityClassDp(store=store, security_class=str(state.class_))
-            dp.update_class(active=bool(state.active), sources=state.sources)
+            dp.update_class(
+                active=bool(state.active),
+                severity=str(state.severity) if getattr(state, "severity", None) is not None else None,
+                sources=state.sources,
+            )
             self._security_class_dps[str(state.class_)] = dp
 
     async def fetch_hub_singleton_data(self, *, scheduled: bool = False) -> None:
@@ -560,7 +564,11 @@ class _HubCoordinator:
             changed.append(self._security_fault_report_dp)
         for state in snapshot.classes or ():
             dp = self._security_class_dp(security_class=str(state.class_))
-            if dp is not None and dp.update_class(active=bool(state.active), sources=state.sources):
+            if dp is not None and dp.update_class(
+                active=bool(state.active),
+                severity=str(state.severity) if getattr(state, "severity", None) is not None else None,
+                sources=state.sources,
+            ):
                 changed.append(dp)
         return changed
 

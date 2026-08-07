@@ -948,15 +948,28 @@ class SecurityClassDp(HubSingletonDp):
         """Return the HA binary-sensor device class, if the class maps onto one."""
         return SECURITY_CLASS_DEVICE_CLASS.get(self._security_class)
 
-    def update_class(self, *, active: bool, sources: Sequence[Any] | None = None) -> bool:
+    def update_class(self, *, active: bool, severity: str | None = None, sources: Sequence[Any] | None = None) -> bool:
         """
         Apply an active flag plus the sources that produced it.
 
         The full source objects, not just their names: `ref` is the key
         REST takes back to correct a misclassification, and an automation
         that wants to name the detector reads `source_names`.
+
+        `severity` is the class's graded contribution to the folded
+        severity (daemon API 5.5.0): arm-aware, so an active intrusion
+        source in a disarmed zone grades `info`, not `alarm`. A consumer
+        colouring the class reads this attribute, never the boolean.
+        Only the REST snapshot carries it — the `security.class_changed`
+        push does not — so a push (severity=None) keeps the last known
+        grade rather than wiping it: stale-but-labelled beats silently
+        ungraded, and the next snapshot re-grades.
         """
         attributes: dict[str, Any] = {"security_class": self._security_class}
+        if severity is not None:
+            attributes["severity"] = severity
+        elif (previous := self.attributes.get("severity")) is not None:
+            attributes["severity"] = previous
         attributes.update(sources_attribute(sources=sources))
         return self.update_value(value=active, attributes=attributes)
 
