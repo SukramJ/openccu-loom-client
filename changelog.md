@@ -1,3 +1,26 @@
+# Version 2026.8.6 (2026-08-07)
+
+Types 0.3.3 (daemon API 5.5.0): the class sensors now carry the daemon's
+arm-aware grade.
+
+## What's Changed
+
+### Added
+
+- **Each Security & Safety class sensor exposes its graded `severity`.**
+  `active` says that something reported; the new `severity` attribute says
+  how bad it is — graded arm-aware by the daemon (API 5.5.0), so an active
+  intrusion source in a disarmed zone reads `info`, not `alarm`, and
+  `warning` flags an unresolvable arm state. A consumer colouring the class
+  reads this attribute, never the boolean. Only the REST snapshot carries
+  the grade — the `security.class_changed` push does not — so a source-set
+  push keeps the last known grade until the next snapshot re-grades.
+
+### Changed
+
+- **openccu-loom-types 0.3.3** (daemon API 5.5.0, regenerated from
+  openccu-loom v0.54.6), pinned in `pyproject.toml` and `requirements.txt`.
+
 # Version 2026.8.5 (2026-08-06)
 
 Context for the Security & Safety entities: every one of them now names the

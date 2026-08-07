@@ -78,6 +78,7 @@ class TestSecurityOperations:
                     {
                         "class": "smoke",
                         "active": True,
+                        "severity": "alarm",
                         "known": 3,
                         "sources": [{"ref": "r1", "name": "Flur", "at": "2026-08-05T10:00:00Z"}],
                     }
@@ -93,7 +94,7 @@ class TestSecurityOperations:
     async def test_get_class_percent_encodes(self, mock_daemon: MockDaemon, http: HttpTransport) -> None:
         mock_daemon.get(
             "/api/v1/security/classes/smoke",
-            payload={"class": "smoke", "active": False, "known": 1},
+            payload={"class": "smoke", "active": False, "severity": "ok", "known": 1},
         )
         state = await SecurityOperations(transport=http).get_class(security_class="smoke")
         assert state.active is False
