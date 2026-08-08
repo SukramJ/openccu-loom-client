@@ -1,0 +1,127 @@
+# Open work — openccu-loom-client
+
+The single backlog for this repository. Items land here when they are open;
+they leave when they ship (the changelog carries them from there). Decisions
+_not_ to do something stay, so they are not re-proposed without new
+information.
+
+**Strategy (unchanged since 2026-06-21):** `openccu-loom*` is an _alternative
+backend_ for `homematicip_local`, coexisting with `aiohomematic` — not a
+replacement. Runtime reuse of `aiohomematic` is deliberate, and the
+`compat/aiohomematic/` namespace shim is the chosen plug-in point. The
+rationale lives in `CLAUDE.md` → "What this is".
+
+Every claim below was re-verified against the tree on 2026-08-08 (daemon
+0.55.0, API 5.8.0, `openccu-loom-types` 0.3.5).
+
+---
+
+## Verify against a real CCU
+
+These are correct as far as the simulator can show; only real hardware can
+close them. None is blocked on code.
+
+- **`legacy_name` equivalence.** Hub keys use `hub_slug(name)`, so the
+  daemon's sysvar/program `name` must equal aiohomematic's `legacy_name` (the
+  ReGa name) _before_ slugify. Assumed, never confirmed on a live CCU.
+- **Serial equivalence.** The client keys off the `/system/ccu` serial while
+  the HA registry migration keys off `entry.unique_id`. Both should be the
+  real CCU serial — confirm once end-to-end.
+- **Sysvar `extended` marker.** Wired end-to-end
+  (`compat/aiohomematic/model/hub/__init__.py`); confirm an extended variable
+  surfaces as the writable flavour.
+- **HS colour round-trip.** `CustomDpDimmer.hs_color` reads nested
+  `color:{h,s}` and scales saturation `[0,1] → [0,100]` for HA, but the write
+  path (`turn_on` → `set_color`) sends HA's `[0,100]` through unscaled.
+  Confirm the daemon's `set_color` scale; a write-path fix may follow.
+- **`rename_device(ise_id)`.** Implemented and unit-tested, but godevccu
+  assigns no `ise_id`, so it cannot be exercised against the simulator.
+
+## Verification gaps in the e2e suite
+
+Currently `xfail`. Each needs harness work rather than production code.
+
+- **`test_device_trigger_pushed_over_ws`** — needs the daemon `interface_id`
+  for `FireEvent`; wire it from the snapshot.
+- **`test_optimistic_rollback_pushed_over_ws`** — model a non-confirming data
+  point in the godevccu harness so the rollback is deterministic.
+- **Hub `sysvar_changed`** — not a daemon gap. The daemon _does_ broadcast on
+  client-initiated writes (`PatchSysvar → UpdateSysvar → SysvarChangedEvent`),
+  with same-value dedup. The `xfail` is a simulator artefact: godevccu never
+  effects a real value change. Drive it with a genuine delta or a real CCU.
+- **Hub `program_executed`** — CCU-originated by design; a client `execute`
+  gets REST 202 with no push. Not self-initiated-testable; verify via a
+  CCU-side program run.
+
+## Open in this repository
+
+- **Optimistic rollback in the store model.** The daemon's
+  `datapoint.optimistic_rolled_back` broadcast is bridged to the public
+  `OptimisticRollbackEvent` with `restored_value=present`
+  (`compat/aiohomematic/central/refresh.py`). Whether the **store's** model is
+  reverted on that path — rather than only when the next genuine daemon value
+  arrives via the optimistic-drop in `store.py` — is unverified. A reader
+  could otherwise still see the un-confirmed value in between. Establish which
+  it is before deciding whether anything needs fixing.
+- **mypy cannot resolve editable first-party deps.** Under `strict = true`,
+  mypy reports "Cannot find implementation or library stub" for
+  `openccu_loom_types.*` even though it ships `py.typed`, because editable
+  installs are not followed; this cascades into spurious `no-any-return`
+  errors. Logic is unaffected — the type gate is just noisy. Current
+  workaround: install the package non-editable. Fix by setting `mypy_path` /
+  `explicit_package_bases`, or by installing first-party deps non-editable in
+  the type-check environment, so strict mode means something again.
+
+## Open in `homematicip_local` (cross-repo)
+
+- **Registry migration + serial wiring.** The one-time migration to the
+  canonical `loom_`/serial scheme lives in `async_migrate_entries`; the old
+  `entry_id[-10:]` `central_id` injection is obsolete.
+- **Orphan-cleanup guard.** Remove the `BACKEND_LOOM` early-return in
+  `control_unit.py` `_async_cleanup_orphaned_entity_registry_entries` now that
+  the full singleton set is modelled — guard on singleton presence rather than
+  skipping the whole backend.
+- **`event` platform bootstrap.** Drop the `NotImplementedError` fallback in
+  `event.py` so the platform gets its bootstrap entities.
+- **Async paramset getters.** The config-UI paramset description getters are
+  _async_ on the loom backend (the daemon serves them over REST) where
+  aiohomematic's are sync and cached. `await` them on the loom path:
+  `get_paramset_description`, `get_link_paramset_description`.
+- **`code_format` prompt UX** for the alarm panel.
+
+## Decided, and deliberately not done
+
+- **Consume `GET`/`PUT /api/v1/ui/surfaces` (daemon 0.55.0, PR #509).** No.
+  That endpoint pair configures the _daemon's own_ Config-UI navigation —
+  which views, settings tabs and device tabs an operator wants visible. It is
+  not device or hub state, so nothing in the HA integration path reads or
+  writes it. `openccu-loom-types` 0.3.5 ships the models (`SurfaceInfo`,
+  `SurfacesRequest`, `SurfacesResponse`); leaving them unused is correct, not
+  an omission.
+- **Handle the embedded-profile write refusal.** Not applicable, verified
+  rather than assumed. `SurfaceWrites`
+  (`internal/north/rest/middleware/surface_writes.go` in the daemon) gates
+  exactly one identity — the Home Assistant Ingress passthrough
+  (`auth.SchemeIngress`) — and only write methods; reads are never gated. This
+  client authenticates with `BasicAuth`, `BearerAuth` or `SessionAuth`
+  (`auth.py`) and never presents an Ingress assertion, so a hidden surface
+  cannot refuse its writes. That separation is the daemon's stated intent: a
+  navigation switch must not widen or narrow a real credential's rights.
+- **Enrich `get_event_groups()` from REST (G5).** `get_event_groups` already
+  builds groups locally, `last_triggered_event` is live (the refresh bridge
+  calls `record_trigger` on every `device.trigger` push), and `available`
+  tracks the device. Backing it with a per-trigger-channel
+  `GET …/event-groups` fetch at bootstrap would reintroduce exactly the N×M
+  cost the nested-snapshot work removed — for a snapshot no fresher than the
+  live trigger feed. Revisit only if event groups ever join the nested
+  snapshot.
+- **Selective reuse of aiohomematic to shrink the compat stubs.** Assessed and
+  rejected. The stubs are protocol-tail members (`config_payload`,
+  `state_path`, `service_methods`, …) whose aiohomematic implementations need
+  a live `CentralUnit` and paramset descriptors that a daemon-mediated client
+  does not hold, so their neutral defaults are correct. The fix was making the
+  imitation _typed and loud_, not removing it.
+- **A clean backend abstraction inside `homematicip_local`.** The deferred
+  alternative to the compat shim. It would mean rebuilding the production
+  aiohomematic integration for unclear gain, so it is pursued only if
+  `homematicip_local` grows such a layer for its own reasons.

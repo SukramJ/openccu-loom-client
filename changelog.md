@@ -1,3 +1,59 @@
+# Version 2026.8.7 (2026-08-08)
+
+Types 0.3.5 (daemon API 5.8.0). No behaviour change: the working documents
+are consolidated into one backlog, and the pin CI installs from now matches
+the one `pip install` resolves.
+
+## What's Changed
+
+### Changed
+
+- **openccu-loom-types 0.3.5** (daemon API 5.8.0), now pinned identically in
+  `pyproject.toml` and `requirements.txt`. The two had drifted — CI installs
+  from `requirements.txt` (0.3.5) while a plain `pip install` resolved
+  `pyproject.toml` (0.3.3), which is how this repository has produced
+  conftest import errors before.
+- **The working documents are one backlog.** `notes/open-work.md` replaces
+  `todo.md` and `docs/optimization-needs.md`, which overlapped: an item could
+  be open in one and closed in the other, with nothing saying which to trust.
+  `notes/README.md` records what belongs there. The name mirrors the daemon
+  repository, where `notes/` is the working set and `docs/` the published
+  site — this package publishes no site.
+
+### Removed
+
+- **Three executed implementation plans and one stale review.** Each was
+  verified closed against the tree before deletion: the loom wire-gap
+  follow-ups (G1–G7 all shipped — nested `color`, the `available_*` lists,
+  locally built event groups, WS push instead of the poll loop, `set_on_time`
+  routed to `ON_TIME`), the `GET /hub/data-points` consumption plan (the
+  aggregate seeds the hub coordinator today), and a graded architecture
+  review measured against daemon 0.11.0 / types 0.1.29 — forty-odd releases
+  back, so its scores read as a current assessment and were not one. Every
+  still-open item moved into the new backlog first; git history keeps the
+  rest.
+
+### Fixed
+
+- **Three dead cross-repository links.** The daemon reorganised its
+  documentation, so `README.md` pointed at a moved external-client contract
+  and at ADR-0022 under a filename it never had (`0022-ws-resume-cursor.md`;
+  it is `0022-ws-resume-and-kind.md`), and a working document referenced a
+  daemon page that has since been deleted. Daemon pages are now cited by URL
+  rather than by repo-relative path, which is what broke.
+
+### Verified, no change needed
+
+- **Daemon PR #509 (`/ui/surfaces`, daemon 0.55.0).** It adds one REST path
+  pair and three schemas, and no WebSocket surface at all. The endpoints
+  configure the daemon's own Config-UI navigation, so this client has no
+  reason to read or write them. Its embedded-profile write refusal gates
+  exactly one identity — the Home Assistant Ingress passthrough — while this
+  client authenticates with Basic, Bearer or session credentials and never
+  presents an Ingress assertion, so a hidden surface cannot refuse its
+  writes. Both findings are recorded in the backlog so they are not
+  re-litigated.
+
 # Version 2026.8.6 (2026-08-07)
 
 Types 0.3.3 (daemon API 5.5.0): the class sensors now carry the daemon's

@@ -10,7 +10,7 @@ every such symbol through this one module gives that coupling a single,
 grep-able surface: the place to reason about the ``aiohomematic<2026.7``
 version bound, the protocol drift-guard
 (``tests/compat/test_aiohomematic_protocol_parity.py``), and the eventual
-selective-reuse rollback (``docs/architecture-review.md`` §2.1/§2.2).
+selective-reuse rollback.
 
 The one exception is the bit-identical routing-key contract — it stays
 isolated in :mod:`openccu_loom_client.canonical` (``generate_unique_id`` &

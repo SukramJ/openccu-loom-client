@@ -196,7 +196,7 @@ def test_compat_dp_satisfies_aiohomematic_protocol(class_name: str, builder: Any
 # REMOVES a model protocol, this test fails so a human decides whether a
 # compat twin (and a parity case above) needs to follow — turning silent,
 # runtime-only HA breakage into a loud CI failure. Bump the aiohomematic
-# version bound (pyproject) and this snapshot together. See todo.md P1.
+# version bound (pyproject) and this snapshot together.
 _KNOWN_AIOHM_MODEL_PROTOCOLS: frozenset[str] = frozenset(
     {
         "BaseDataPointProtocol",

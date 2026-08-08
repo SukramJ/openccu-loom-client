@@ -15,7 +15,7 @@ the openccu-loom daemon. Reusing `aiohomematic` at runtime (routing-key
 algorithm, protocols, selected model code) is a deliberate part of this
 strategy: it shares one contract between two backends and avoids silent
 drift. The `compat/aiohomematic/` namespace shim is how the backend is
-plugged in today (see [`docs/architecture-review.md`](./docs/architecture-review.md) §2.1).
+plugged in today; `CLAUDE.md` carries the reasoning behind that form.
 
 ## Architecture
 
@@ -29,7 +29,7 @@ adds:
   `problem+json` parsing, retry/backoff.
 - `transport/ws.py` — WebSocket loop with subscribe/unsubscribe,
   heartbeat, resume-after-reconnect via `seq`/`since` cursor per
-  [ADR-0022](https://github.com/SukramJ/openccu-loom/blob/main/docs/adr/0022-ws-resume-cursor.md).
+  [ADR-0022](https://github.com/SukramJ/openccu-loom/blob/main/docs/adr/0022-ws-resume-and-kind.md).
 - `client.py` — `LoomClient` facade: snapshot bootstrap, event bus,
   in-memory store, and the operation modules (`devices`, `datapoints`,
   `custom_data_points`, `hub`, `system`, `schedules`, `links`).
@@ -47,7 +47,7 @@ adds:
 ## Status of the wire contract
 
 The daemon's external-client contract is tracked in
-[`docs/external-clients/asks.md`](https://github.com/SukramJ/openccu-loom/blob/main/docs/external-clients/asks.md)
+[`notes/reference/external-client-asks.md`](https://github.com/SukramJ/openccu-loom/blob/main/notes/reference/external-client-asks.md)
 in the daemon repo. As of `openccu-loom-types==0.1.24`, all push-event
 payloads needed by Home Assistant (`DataPointValueChanged`,
 `CustomDataPointStateChanged`, `CentralStateChanged`,
