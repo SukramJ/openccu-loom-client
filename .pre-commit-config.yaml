@@ -1,6 +1,6 @@
 repos:
   - repo: https://github.com/charliermarsh/ruff-pre-commit
-    rev: v0.16.1
+    rev: v0.16.2
     hooks:
       - id: ruff
         args:
@@ -16,9 +16,7 @@ repos:
           - --skip="./.*,*.csv,*.json"
           - --quiet-level=2
         exclude_types: [csv, json]
-        # architecture-review.md is a German-language internal review; codespell
-        # is English-only and would flag every German word.
-        exclude: ^(tests/fixtures/|docs/architecture-review\.md$)
+        exclude: ^tests/fixtures/
   - repo: https://github.com/PyCQA/bandit
     rev: 1.9.4
     hooks:
