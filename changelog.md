@@ -1,3 +1,29 @@
+# Version 2026.8.8 (2026-08-08)
+
+Types 0.3.6 (daemon API 5.9.0). No behaviour change in this package; the
+pin raises the daemon this client will connect to.
+
+## What's Changed
+
+### Changed
+
+- **openccu-loom-types 0.3.6** (daemon API 5.9.0), pinned identically in
+  `pyproject.toml` and `requirements.txt`. The regeneration adds two fields
+  to the surface-profile payload — `SurfacesResponse.centrals` and
+  `SurfaceInfo.multi_central_visible`, which let a Config UI explain why a
+  shipped default differs on a daemon serving several CCUs. This package
+  consumes neither: it speaks the device, hub and event surfaces, not the
+  Config UI's.
+
+### Compatibility
+
+- **This release requires a daemon on API 5.9.0 or newer (openccu-loom
+  0.55.1+).** `_check_api_version` raises on a lower minor of the same
+  major, so `connect()` fails cleanly rather than half-initializing — the
+  pin is what makes that check strict, not a new rule. Consumers that must
+  support older daemons stay on 2026.8.7 / types 0.3.5 until they can
+  require the newer daemon.
+
 # Version 2026.8.7 (2026-08-08)
 
 Types 0.3.5 (daemon API 5.8.0). No behaviour change: the working documents
