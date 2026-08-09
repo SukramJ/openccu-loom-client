@@ -1087,6 +1087,25 @@ class LoomCentralAdapter:
         return self._client.config.http_base_url
 
     @property
+    def config_ui_url(self) -> str:
+        """
+        Return the browser-reachable Config-UI address, or ``""``.
+
+        Distinct from :attr:`url`, and the distinction is the whole point.
+        :attr:`url` is how THIS process reaches the daemon — a container
+        address, a LAN host behind a reverse proxy — which a browser on
+        someone's desk may not be able to follow. This is the address the
+        operator declared for people, via ``north.rest.public_url``.
+
+        Empty when unconfigured, or against a daemon older than API
+        5.14.0. Callers that need a link either fall back to deriving one
+        from :attr:`url` or offer none; guessing here would override a
+        caller that knows its own network better.
+        """
+        info = self._client.info
+        return getattr(info, "config_ui_url", "") or ""
+
+    @property
     def state(self) -> CentralState:
         """Return the current central lifecycle state."""
         return self._state

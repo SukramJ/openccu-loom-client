@@ -65,6 +65,7 @@ _INFO = {
     "uptime": "PT60S",
     "capabilities": ["rest.v1"],
     "schema_digest": "sha256:test",
+    "config_ui_url": "",
 }
 
 
@@ -134,6 +135,42 @@ async def connected(mock_daemon: MockDaemon):
     await central._client.connect()
     yield central, mock_daemon
     await central._client.close()
+
+
+class TestConfigUIURL:
+    """
+    The browser-reachable Config-UI address, distinct from ``url``.
+
+    ``url`` is how THIS process reaches the daemon; a consumer that linked
+    a person there would send them at a container address no browser can
+    follow. These pin that the two stay separate and that an unconfigured
+    daemon yields no guess.
+    """
+
+    async def test_comes_from_the_daemon_when_configured(self, mock_daemon: MockDaemon) -> None:
+        mock_daemon.get(
+            f"{_BASE}/info",
+            payload={**_INFO, "config_ui_url": "https://loom.example.de/app/"},
+        )
+        central = await _make_config(mock_daemon=mock_daemon).create_central()
+        await central._client.connect()
+        try:
+            assert central.config_ui_url == "https://loom.example.de/app/"
+            # The connection address answers a different question and must
+            # not have been displaced by the public one.
+            assert central.url != central.config_ui_url
+        finally:
+            await central._client.close()
+
+    async def test_is_empty_when_the_daemon_has_no_public_url(self, connected) -> None:
+        central, _ = connected
+        assert central.config_ui_url == ""
+
+    async def test_is_empty_before_connect(self, mock_daemon: MockDaemon) -> None:
+        # No handshake yet, so no payload to read. Callers get "" rather
+        # than an exception: this is a link, not a precondition.
+        central = await _make_config(mock_daemon=mock_daemon).create_central()
+        assert central.config_ui_url == ""
 
 
 class TestSystemInformation:

@@ -148,9 +148,16 @@ class HttpTransport:
 
         try:
             info_payload = await self.request(method="GET", path="/info")
+            # BEFORE model validation, deliberately. The types package
+            # mirrors one daemon API version, and a payload field this
+            # release requires is simply absent on an older daemon —
+            # validating first turns "your daemon is too old" into a
+            # pydantic error naming whichever field happened to be added
+            # last, which sends the reader after the wrong thing.
+            self._check_api_version(
+                api_version=info_payload.get("api_version", "") if isinstance(info_payload, dict) else "",
+            )
             self._info = Info.model_validate(info_payload)
-
-            self._check_api_version()
 
             missing = [c for c in required_capabilities if c not in (self._info.capabilities or [])]
             if missing:
@@ -209,7 +216,7 @@ class HttpTransport:
                 self._info.api_version if self._info else "?",
             )
 
-    def _check_api_version(self) -> None:
+    def _check_api_version(self, *, api_version: str) -> None:
         """
         Fail fast when the daemon's API version is incompatible with the types.
 
@@ -225,19 +232,20 @@ class HttpTransport:
         failures and event storms). Skipped when either version is absent or
         unparsable (old daemon or unstamped types package); the digest
         handshake still warns on build drift within a compatible API line.
+
+        Takes the raw ``api_version`` string rather than reading the parsed
+        model, because it runs before that model exists — see connect().
         """
-        if self._info is None:
-            return
         expected = getattr(openccu_loom_types, "DAEMON_API_VERSION", "")
         expected_mm = self._parse_major_minor(expected)
-        daemon_mm = self._parse_major_minor(self._info.api_version)
+        daemon_mm = self._parse_major_minor(api_version)
         if expected_mm is None or daemon_mm is None:
             return
         exp_major, exp_minor = expected_mm
         got_major, got_minor = daemon_mm
         if got_major != exp_major or got_minor < exp_minor:
             msg = (
-                f"daemon at {self._config.host} reports incompatible API version {self._info.api_version!r}: "
+                f"daemon at {self._config.host} reports incompatible API version {api_version!r}: "
                 f"installed openccu-loom-types expects {expected!r} (same major, minor ≥ {exp_minor}). "
                 f"Update the daemon or install an openccu-loom-types release matching it."
             )

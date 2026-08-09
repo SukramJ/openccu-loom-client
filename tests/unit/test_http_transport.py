@@ -41,6 +41,7 @@ _INFO_RESPONSE = {
     # Required field since daemon 0.2.0; empty skips the digest handshake
     # so unrelated tests stay quiet. Digest tests override it explicitly.
     "schema_digest": "",
+    "config_ui_url": "",
 }
 
 
@@ -179,6 +180,20 @@ class TestApiVersionGuard:
         mock_daemon.get("/api/v1/info", payload={**_INFO_RESPONSE, "api_version": "experimental"})
         await transport.connect()
         await transport.close()
+
+    async def test_old_daemon_reports_the_version_not_a_missing_field(
+        self, mock_daemon: MockDaemon, transport: HttpTransport
+    ) -> None:
+        # An older daemon is missing whichever payload field this types
+        # release added last. Validating the model first would surface that
+        # as a pydantic error naming the field — technically true, and it
+        # sends the reader after the wrong thing. The version guard runs
+        # first, so the diagnosis names the actual cause.
+        major, minor = self._expected_major_minor()
+        old = {k: v for k, v in _INFO_RESPONSE.items() if k != "config_ui_url"}
+        mock_daemon.get("/api/v1/info", payload={**old, "api_version": f"{major}.{minor - 1}.0"})
+        with pytest.raises(LoomTransportError, match="incompatible API version"):
+            await transport.connect()
 
 
 class TestRequest:
