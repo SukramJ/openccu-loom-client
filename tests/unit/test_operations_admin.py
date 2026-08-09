@@ -46,6 +46,7 @@ _INFO = {
     "uptime": "PT60S",
     "capabilities": ["rest.v1"],
     "schema_digest": "sha256:test",
+    "config_ui_url": "",
 }
 
 # The minimal ``SystemCCUEntry`` the daemon always fills in — everything a

@@ -531,6 +531,7 @@ _INFO = {
     "uptime": "PT60S",
     "capabilities": ["rest.v1", "ws.broadcasts.v1", "alarm.v1"],
     "schema_digest": "sha256:test",
+    "config_ui_url": "",
 }
 
 # A daemon whose alarm subsystem is off: no ``alarm.v1`` token.

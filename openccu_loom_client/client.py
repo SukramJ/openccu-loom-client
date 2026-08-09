@@ -80,7 +80,7 @@ from openccu_loom_client.transport import HttpTransport, WsTransport
 if TYPE_CHECKING:
     from types import TracebackType
 
-    from openccu_loom_types.rest import DataPointSummary, DeviceChannel
+    from openccu_loom_types.rest import DataPointSummary, DeviceChannel, Info
 
     from openccu_loom_client.config import LoomConfig
 
@@ -218,6 +218,18 @@ class LoomClient:
     def config(self) -> LoomConfig:
         """Return the connection configuration for this client."""
         return self._config
+
+    @property
+    def info(self) -> Info | None:
+        """
+        Return the daemon's ``/info`` payload, or ``None`` before connect.
+
+        The handshake already validates and caches it. Without a public
+        accessor a consumer that wants one field from it either re-requests
+        ``/info`` or reaches into the transport — both worse than exposing
+        what is already held.
+        """
+        return self._http.info
 
     # ---- async context manager ----
 

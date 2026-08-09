@@ -32,6 +32,7 @@ _INFO = {
     "uptime": "PT60S",
     "capabilities": ["rest.v1"],
     "schema_digest": "sha256:test",
+    "config_ui_url": "",
 }
 
 

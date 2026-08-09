@@ -1,3 +1,48 @@
+# Version 2026.8.9 (2026-08-09)
+
+Types 0.3.10 (daemon API 5.14.0). Adds a public accessor for the daemon's
+`/info` payload and, on the aiohomematic-compat central, the
+browser-reachable Config-UI address the daemon now reports.
+
+## What's Changed
+
+### Added
+
+- **`LoomClient.info`** — the `/info` payload the handshake already
+  validates and caches. Without a public accessor, a consumer that wants
+  one field from it either re-requests `/info` or reaches into the
+  transport; both are worse than exposing what is already held.
+
+- **`LoomCentralAdapter.config_ui_url`** — the address a browser can use
+  to reach the daemon's Config UI, from the daemon's
+  `north.rest.public_url` (empty when unconfigured or against a daemon
+  below API 5.14.0).
+
+  Deliberately distinct from `url`, and the distinction is the point:
+  `url` is how _this process_ reaches the daemon — a container address, a
+  LAN host behind a reverse proxy — which a browser on someone's desk may
+  not be able to follow. A consumer that linked a person at `url` would
+  send them somewhere unreachable.
+
+  Empty stays empty. The fallback belongs to the caller, which knows its
+  own network better than this package does.
+
+### Fixed
+
+- **An old daemon now reports its version rather than a missing field.**
+  The API-version guard runs _before_ `Info` is validated. The types
+  package mirrors one daemon API version, so a payload field a types
+  release requires is simply absent on an older daemon — validating first
+  turned "your daemon is too old" into a pydantic error naming whichever
+  field happened to be added last, which sends the reader after the wrong
+  thing. Surfaced by `config_ui_url` being a required field in 0.3.10;
+  the same trap would have opened on any future addition.
+
+### Changed
+
+- **openccu-loom-types 0.3.10** (daemon API 5.14.0), pinned identically in
+  `pyproject.toml` and `requirements.txt`.
+
 # Version 2026.8.8 (2026-08-08)
 
 Types 0.3.6 (daemon API 5.9.0). No behaviour change in this package; the
