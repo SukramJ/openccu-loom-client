@@ -434,6 +434,62 @@ class TestAlarmWriteBack:
         assert transport.calls == [("POST", "/alarm/silence-all", None)]
 
 
+class _ResetTransport:
+    """Records every call and answers it with the daemon's counter body."""
+
+    def __init__(self, *, reset: int = 0, failed: int = 0) -> None:
+        self.calls: list[dict[str, Any]] = []
+        self._result: dict[str, Any] = {"reset": reset, "failed": failed, "sensors": []}
+
+    async def request(self, **kwargs: Any) -> Any:
+        self.calls.append(kwargs)
+        return self._result
+
+
+class TestMotionResetVerbs:
+    """``AlarmPanel.reset_motion`` → store → transport (daemon ≥ 0.58.1)."""
+
+    async def test_zone_panel_resets_its_own_zone(self) -> None:
+        transport = _ResetTransport(reset=2, failed=1)
+        store = _store_with_panels(_panel_entity(zone_id="eg"), transport=transport)
+        panel = store.get_alarm_panel_by_zone(zone_id="eg")
+        assert panel is not None
+        result = await panel.reset_motion()
+        assert transport.calls[0]["path"] == "/alarm/zones/eg/reset-motion"
+        assert transport.calls[0]["allow_retry"] is False
+        # There is no ``alarm.*`` broadcast for a reset pass, so these
+        # counters are the only report the caller ever gets.
+        assert (result.reset, result.failed) == (2, 1)
+
+    async def test_master_uses_the_aggregate_route(self) -> None:
+        """
+        One daemon-side pass, not a loop over the zones.
+
+        A detector enrolled in two zones would otherwise be written
+        twice, and the operator would get two partial counter sets to
+        reconcile instead of one.
+        """
+        transport = _ResetTransport()
+        store = _store_with_panels(
+            _panel_entity(zone_id="eg"),
+            _panel_entity(zone_id="og"),
+            _panel_entity(zone_id="master", master=True, supported_modes=[]),
+            transport=transport,
+        )
+        master = store.get_alarm_panel_by_zone(zone_id="master")
+        assert master is not None
+        await master.reset_motion()
+        assert [(c["method"], c["path"]) for c in transport.calls] == [("POST", "/alarm/reset-motion")]
+
+    async def test_zone_id_is_percent_encoded(self) -> None:
+        transport = _ResetTransport()
+        store = _store_with_panels(_panel_entity(zone_id="a|b:c"), transport=transport)
+        panel = store.get_alarm_panel_by_zone(zone_id="a|b:c")
+        assert panel is not None
+        await panel.reset_motion()
+        assert transport.calls[0]["path"] == "/alarm/zones/a%7Cb%3Ac/reset-motion"
+
+
 # ---- events: dispatch ----
 
 
@@ -684,6 +740,116 @@ class TestAlarmOperations:
         readiness = await AlarmOperations(transport=http).get_zone_readiness(zone_id="eg")
         assert readiness["full"].ready is False
         assert readiness["full"].blockers == ["sensor.window"]
+
+
+# ---- motion reset ----
+
+_TRIGGERED_MOTION = {
+    "sensor_id": "home|00091BE9965DEB:1|MOTION",
+    "zone_id": "eg",
+    "name": "Bewegung Flur",
+    "channel_address": "00091BE9965DEB:1",
+    "parameter": "MOTION",
+}
+
+
+class TestMotionReset:
+    """
+    ``GET /alarm/triggered-motion`` + the two reset verbs (daemon ≥ 0.58.1).
+
+    A detector holds its ``MOTION`` flag until its own blocking time
+    expires, and reads as open until then — which blocks an arm with no
+    recourse but waiting. These three routes are what a reset control
+    needs.
+    """
+
+    async def test_list_triggered_motion_unfiltered(self, mock_daemon: MockDaemon, http: HttpTransport) -> None:
+        mock_daemon.get("/api/v1/alarm/triggered-motion", payload=[_TRIGGERED_MOTION])
+        sensors = await AlarmOperations(transport=http).list_triggered_motion()
+        assert len(sensors) == 1
+        assert sensors[0].channel_address == "00091BE9965DEB:1"
+        # ``parameter`` is the sensor's own state parameter, never the
+        # reset one — a caller that writes it back would re-arm the latch.
+        assert sensors[0].parameter == "MOTION"
+        assert mock_daemon.requests[-1].query == {}
+
+    async def test_list_triggered_motion_filters_by_zone(self, mock_daemon: MockDaemon, http: HttpTransport) -> None:
+        mock_daemon.get("/api/v1/alarm/triggered-motion", payload=[])
+        await AlarmOperations(transport=http).list_triggered_motion(zone_id="eg")
+        assert mock_daemon.requests[-1].query == {"zone_id": "eg"}
+
+    async def test_list_triggered_motion_covers_presence_detectors(
+        self, mock_daemon: MockDaemon, http: HttpTransport
+    ) -> None:
+        """An HmIP-SPI latches ``PRESENCE_DETECTION_STATE``, not ``MOTION``."""
+        mock_daemon.get(
+            "/api/v1/alarm/triggered-motion",
+            payload=[{**_TRIGGERED_MOTION, "parameter": "PRESENCE_DETECTION_STATE", "name": None}],
+        )
+        sensors = await AlarmOperations(transport=http).list_triggered_motion()
+        assert sensors[0].parameter == "PRESENCE_DETECTION_STATE"
+        assert sensors[0].name is None
+
+    async def test_reset_zone_motion_parses_counters(self, mock_daemon: MockDaemon, http: HttpTransport) -> None:
+        mock_daemon.post(
+            "/api/v1/alarm/zones/eg/reset-motion",
+            payload={"reset": 2, "failed": 1, "sensors": [_TRIGGERED_MOTION]},
+        )
+        result = await AlarmOperations(transport=http).reset_zone_motion(zone_id="eg")
+        # ``failed`` arrives in the body, not as an HTTP error: the verb
+        # ran and a partial result is actionable.
+        assert (result.reset, result.failed) == (2, 1)
+        assert result.sensors[0].zone_id == "eg"
+        assert mock_daemon.requests[-1].json() is None
+
+    async def test_nothing_latched_differs_from_a_failed_write(
+        self, mock_daemon: MockDaemon, http: HttpTransport
+    ) -> None:
+        """
+        ``reset == 0 and failed == 0`` is a different outcome from ``failed > 0``.
+
+        Collapsing the two would tell an operator "nothing to do" when a
+        detector in fact did not answer — the case where the latch stays
+        and the zone still refuses to arm.
+        """
+        ops = AlarmOperations(transport=http)
+        mock_daemon.post("/api/v1/alarm/reset-motion", payload={"reset": 0, "failed": 0, "sensors": []})
+        mock_daemon.post("/api/v1/alarm/reset-motion", payload={"reset": 0, "failed": 3, "sensors": []})
+        quiet = await ops.reset_all_motion()
+        unreachable = await ops.reset_all_motion()
+        assert (quiet.reset, quiet.failed) == (0, 0)
+        assert (unreachable.reset, unreachable.failed) == (0, 3)
+
+    async def test_zone_id_is_percent_encoded(self) -> None:
+        calls: list[dict[str, Any]] = []
+
+        class _Transport:
+            async def request(self, **kwargs: Any) -> Any:
+                calls.append(kwargs)
+                return {"reset": 0, "failed": 0, "sensors": []}
+
+        await AlarmOperations(transport=_Transport()).reset_zone_motion(zone_id="a|b:c")  # type: ignore[arg-type]
+        assert calls[0]["path"] == "/alarm/zones/a%7Cb%3Ac/reset-motion"
+
+    async def test_resets_are_never_retried_but_the_read_is(self) -> None:
+        """
+        The verbs write to devices, so a blind replay is real radio traffic.
+
+        The listing is a plain read and keeps the transport's idempotent
+        default (``allow_retry=None`` → retried because it is a ``GET``).
+        """
+        calls: list[dict[str, Any]] = []
+
+        class _Transport:
+            async def request(self, **kwargs: Any) -> Any:
+                calls.append(kwargs)
+                return [] if kwargs["method"] == "GET" else {"reset": 0, "failed": 0, "sensors": []}
+
+        ops = AlarmOperations(transport=_Transport())  # type: ignore[arg-type]
+        await ops.reset_zone_motion(zone_id="eg")
+        await ops.reset_all_motion()
+        await ops.list_triggered_motion()
+        assert [c["allow_retry"] for c in calls] == [False, False, None]
 
 
 # ---- bootstrap feature detection ----

@@ -1,3 +1,84 @@
+# Version 2026.8.10 (2026-08-12)
+
+Types 0.3.14 (daemon API 5.20.0). Adds the alarm system's motion-reset
+surface, on all three layers a consumer reaches it through.
+
+## What's Changed
+
+### Added
+
+- **Latched motion detectors can be listed and reset.** A motion
+  detector holds its `MOTION` flag until the device's own blocking time
+  expires or the reset parameter is written. Until then the sensor reads
+  as open, which blocks an arm or forces an auto-bypass — and there was
+  no way to clear it from this client short of waiting. The daemon has
+  offered the routes since 0.58.0; nothing here bound them.
+
+  Three REST methods on `LoomClient.alarm`:
+
+  | Method                                | Wire                                  |
+  | ------------------------------------- | ------------------------------------- |
+  | `list_triggered_motion(zone_id=None)` | `GET /alarm/triggered-motion`         |
+  | `reset_zone_motion(zone_id=…)`        | `POST /alarm/zones/{id}/reset-motion` |
+  | `reset_all_motion()`                  | `POST /alarm/reset-motion`            |
+
+  The verbs are also on the store (`reset_alarm_zone_motion`,
+  `reset_all_alarm_motion`) and on the domain wrapper
+  (`AlarmPanel.reset_motion`), which is the layer an HA entity actually
+  reaches — the compat `LoomDpAlarmControlPanel` inherits it. The master
+  panel delegates to the daemon's aggregate route rather than looping the
+  zones, mirroring `silence`: a detector enrolled in two zones is then
+  written once, and the caller gets one set of counters instead of
+  several partial ones to reconcile.
+
+  `reset_motion` takes no code. It clears a blocker without changing the
+  armed state, so it is not an authorization-bearing verb.
+
+  Coverage follows the daemon's own predicate — currently active _and_
+  the channel exposes a writable reset parameter — so a count shown to an
+  operator can never name a detector the reset would skip. Motion
+  detectors (`MOTION` → `RESET_MOTION`) and presence detectors
+  (`PRESENCE_DETECTION_STATE` → `RESET_PRESENCE`) are covered; door
+  contacts fall out by construction.
+
+  Unlike the other alarm verbs these return the daemon's result rather
+  than `None`. There is no `alarm.*` broadcast for a reset pass, so the
+  counters are the only report there is — and `reset == 0 and failed == 0`
+  ("nothing was latched") has to stay distinguishable from `failed > 0`
+  ("detectors did not answer"). Collapsing the two would tell an operator
+  "nothing to do" in exactly the case where the latch survives and the
+  zone still refuses to arm. The daemon reports a failed write in the body
+  rather than as an HTTP error: the verb ran, and a partial result is
+  actionable.
+
+  Neither reset is retried — they write to devices, so a blind replay is
+  real radio traffic.
+
+  Requested in [#88](https://github.com/SukramJ/openccu-loom-client/issues/88).
+  The Home Assistant side of that issue (a reset button and a counter
+  entity per zone) and all of
+  [#89](https://github.com/SukramJ/openccu-loom-client/issues/89) (a
+  device-registry object of their own) belong to `homematicip_local` and
+  are not part of this release.
+
+### Changed
+
+- **openccu-loom-types 0.3.14** (daemon API 5.20.0), pinned identically in
+  `pyproject.toml` and `requirements.txt`. The motion-reset models
+  (`AlarmTriggeredMotionSensor`, `AlarmMotionResetResult`) arrived in
+  0.3.12, so the bump is a prerequisite for the above and not a routine
+  regeneration.
+
+  **This release refuses to connect to a daemon below openccu-loom
+  0.58.3** — the existing `_check_api_version` floor, not a new rule.
+  Motion reset additionally wants ≥ 0.58.1: 0.58.0 shipped the routes but
+  a type assertion made them inert on real hardware, so a client tested
+  against exactly that release sees the calls succeed and report nothing.
+
+- **aiohomematic 2026.8.2** in `requirements.txt`. The compat drift-guard
+  (`tests/compat/test_aiohomematic_protocol_parity.py`) passes unchanged
+  against it.
+
 # Version 2026.8.9 (2026-08-09)
 
 Types 0.3.10 (daemon API 5.14.0). Adds a public accessor for the daemon's
