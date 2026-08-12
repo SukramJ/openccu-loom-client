@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Final
 
 if TYPE_CHECKING:
     from openccu_loom_types.rest import AlarmModeReadiness, AlarmMotionResetResult, AlarmPanelEntity, AlarmZoneStatus
@@ -15,6 +15,15 @@ if TYPE_CHECKING:
 # The daemon's pseudo-zone id of the aggregate master panel
 # (``alarmpanel.MasterZoneID``, wire-stable).
 MASTER_ZONE_ID = "master"
+
+# Catalogue keys naming the two entities a consumer builds *beside* a
+# panel, and the separator the daemon joins them to the panel name with.
+# All three mirror ``internal/north/mqtt/alarm_discovery.go``, so the
+# same zone reads identically whether Home Assistant learned it from
+# this client or from the daemon's own MQTT discovery.
+_RESET_MOTION_NAME_KEY: Final = "discovery.alarm_reset_motion"
+_TRIGGERED_MOTION_NAME_KEY: Final = "discovery.alarm_triggered_motion"
+_COMPANION_NAME_SEPARATOR: Final = " — "
 
 
 def _token(*, value: Any) -> str | None:
@@ -201,6 +210,38 @@ class AlarmPanel:
         re-reading ``GET /alarm/triggered-motion``, never pushed.
         """
         return self._triggered_motion_count
+
+    # ---- companion entity names ----
+
+    @property
+    def reset_motion_name(self) -> str | None:
+        """
+        The daemon's name for this panel's motion-reset button, or ``None``.
+
+        A consumer that gives the reset its own entity gets the name
+        from here rather than wording it again: the daemon is the single
+        naming authority (ADR 0046) and has carried these words in its
+        i18n catalogue all along — they simply never left the MQTT
+        discovery plane, so the second consumer of the same surface kept
+        a second copy that drifted on the first edit to either.
+
+        ``None`` when the catalogue has not been read, or has been read
+        from a daemon that does not carry the key. Both mean the same
+        thing to a caller: fall back to your own wording.
+        """
+        return self._companion_name(key=_RESET_MOTION_NAME_KEY)
+
+    @property
+    def triggered_motion_name(self) -> str | None:
+        """The daemon's name for this panel's latched-detector counter, or ``None``."""
+        return self._companion_name(key=_TRIGGERED_MOTION_NAME_KEY)
+
+    def _companion_name(self, *, key: str) -> str | None:
+        """Compose ``<panel name> — <catalogue label>`` for one companion entity."""
+        label = self._store.entity_names.get(key)
+        if not label:
+            return None
+        return f"{self.name}{_COMPANION_NAME_SEPARATOR}{label}"
 
     # ---- write-back ----
 

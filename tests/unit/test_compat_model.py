@@ -1727,6 +1727,24 @@ class TestEntityNamesFromTheDaemon:
         await coord._ensure_singletons()
 
         assert all(dp.resolved_name is None for dp in coord.get_hub_data_points())
+        # Nothing reached the store either, so a panel names its
+        # companions the same way a singleton names itself: not at all.
+        assert coord._client.store.entity_names == {}
+
+    async def test_the_catalogue_reaches_the_store(self) -> None:
+        """
+        Not every reader of these names is a singleton.
+
+        An alarm panel is rebuilt by a catalogue reconcile and seeded
+        from a bare push, so pushing names onto the instance would have
+        to be repeated on both paths. The store holds the catalogue and
+        the panel reads it back — see the alarm-panel tests for what it
+        composes out of it.
+        """
+        coord, _, _, _, _ = self._coordinator(i18n=_FakeI18nOps(entries=_ENTITY_NAMES_DE))
+        await coord._ensure_singletons()
+
+        assert coord._client.store.entity_names["discovery.alarm_messages"] == "Alarmmeldungen"
 
     async def test_a_key_the_catalogue_omits_leaves_that_name_unset(self) -> None:
         coord, _, _, _, _ = self._coordinator(i18n=_FakeI18nOps(entries={"discovery.inbox": "Posteingang"}))
