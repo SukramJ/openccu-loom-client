@@ -36,6 +36,7 @@ from urllib.parse import quote
 from openccu_loom_types.rest import (
     AlarmMotionResetResult,
     AlarmPanelEntity,
+    AlarmTriggeredMotionSensor,
     CalculatedDPSummary,
     ChannelSummary,
     CustomDPSummary,
@@ -589,6 +590,26 @@ class LoomStore:
                 self._alarm_panel_by_zone[entity.zone_id] = existing
                 continue
             self._register_alarm_panel(panel=self._build_alarm_panel(summary=entity))
+
+    def apply_triggered_motion(self, *, sensors: list[AlarmTriggeredMotionSensor]) -> None:
+        """
+        Seed the per-panel latched-detector counts (``GET /alarm/triggered-motion``).
+
+        Pure mutation, no I/O: the caller does the read. Every panel is
+        written, so a zone that dropped to zero is cleared rather than
+        keeping a stale count, and the master panel receives the total
+        — which is the same scope the daemon's aggregate reset covers.
+
+        There is no ``alarm.*`` broadcast for a latch, so this is the
+        only way the counts move. :meth:`LoomClient.refresh_triggered_motion`
+        owns the read and the cadence.
+        """
+        per_zone: dict[str, int] = {}
+        for sensor in sensors:
+            per_zone[sensor.zone_id] = per_zone.get(sensor.zone_id, 0) + 1
+        for panel in self._alarm_panels.values():
+            count = len(sensors) if panel.is_master else per_zone.get(panel.zone_id, 0)
+            panel._set_triggered_motion_count(count=count)
 
     def attach_alarm_zone_statuses(self, *, statuses: list[AlarmZoneStatus]) -> None:
         """

@@ -18,7 +18,13 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from openccu_loom_types import DAEMON_API_VERSION
-from openccu_loom_types.rest import AlarmOutput, AlarmPanelEntity, AlarmZoneStatus, Kind1 as Kind
+from openccu_loom_types.rest import (
+    AlarmOutput,
+    AlarmPanelEntity,
+    AlarmTriggeredMotionSensor,
+    AlarmZoneStatus,
+    Kind1 as Kind,
+)
 from openccu_loom_types.ws import (
     AlarmCountdownPayload,
     AlarmHealthChangedPayload,
@@ -490,6 +496,58 @@ class TestMotionResetVerbs:
         assert transport.calls[0]["path"] == "/alarm/zones/a%7Cb%3Ac/reset-motion"
 
 
+class TestTriggeredMotionCounts:
+    """``LoomStore.apply_triggered_motion`` — the counts behind the HA sensor."""
+
+    @staticmethod
+    def _sensor(*, zone_id: str, sensor_id: str) -> AlarmTriggeredMotionSensor:
+        return AlarmTriggeredMotionSensor.model_validate(
+            {
+                "sensor_id": sensor_id,
+                "zone_id": zone_id,
+                "channel_address": f"{sensor_id}:1",
+                "parameter": "MOTION",
+            }
+        )
+
+    def test_counts_land_per_zone_and_total_on_the_master(self) -> None:
+        store = _store_with_panels(
+            _panel_entity(zone_id="eg"),
+            _panel_entity(zone_id="og"),
+            _panel_entity(zone_id="master", master=True, supported_modes=[]),
+        )
+        store.apply_triggered_motion(
+            sensors=[
+                self._sensor(zone_id="eg", sensor_id="s1"),
+                self._sensor(zone_id="eg", sensor_id="s2"),
+                self._sensor(zone_id="og", sensor_id="s3"),
+            ]
+        )
+        counts = {p.zone_id: p.triggered_motion_count for p in store.alarm_panels}
+        # The master's total is the scope its aggregate reset covers.
+        assert counts == {"eg": 2, "og": 1, "master": 3}
+
+    def test_a_zone_dropping_to_zero_is_cleared(self) -> None:
+        """
+        Every panel is written, not just the ones named in the answer.
+
+        Skipping the absent ones would leave a cleared zone showing its
+        last non-zero count forever — the endpoint reports what *is*
+        latched, never what stopped being.
+        """
+        store = _store_with_panels(_panel_entity(zone_id="eg"), _panel_entity(zone_id="og"))
+        store.apply_triggered_motion(sensors=[self._sensor(zone_id="eg", sensor_id="s1")])
+        store.apply_triggered_motion(sensors=[self._sensor(zone_id="og", sensor_id="s2")])
+        counts = {p.zone_id: p.triggered_motion_count for p in store.alarm_panels}
+        assert counts == {"eg": 0, "og": 1}
+
+    def test_count_starts_at_zero(self) -> None:
+        store = _store_with_panels(_panel_entity(zone_id="eg"))
+        panel = store.get_alarm_panel_by_zone(zone_id="eg")
+        assert panel is not None
+        assert panel.triggered_motion_count == 0
+
+
 # ---- events: dispatch ----
 
 
@@ -909,5 +967,51 @@ class TestBootstrapAlarm:
             await client.bootstrap()
             assert list(client.store.alarm_panels) == []
             assert not any(r.path.startswith("/api/v1/alarm") for r in mock_daemon.requests)
+        finally:
+            await client.close()
+
+    async def test_bootstrap_seeds_the_triggered_motion_counts(self, mock_daemon: MockDaemon) -> None:
+        """
+        Without the cold-start read the count sits at 0 until an alarm event lands.
+
+        Nothing pushes a latch, so "no event yet" would otherwise be
+        indistinguishable from "nothing latched" for as long as the alarm
+        stays quiet — which is exactly when someone looks at the count to
+        find out why a zone will not arm.
+        """
+        mock_daemon.get("/api/v1/info", payload=_INFO)
+        mock_daemon.get("/api/v1/snapshot", payload=_EMPTY_SNAPSHOT)
+        mock_daemon.get("/api/v1/alarm/panels", payload=[_panel_entity(zone_id="eg").model_dump(mode="json")])
+        mock_daemon.get("/api/v1/alarm/state", payload={"zones": []})
+        mock_daemon.get("/api/v1/alarm/triggered-motion", payload=[_TRIGGERED_MOTION])
+        client = LoomClient(config=mock_daemon.config)
+        try:
+            await client.connect()
+            await client.bootstrap()
+            panel = client.store.get_alarm_panel_by_zone(zone_id="eg")
+            assert panel is not None
+            assert panel.triggered_motion_count == 1
+        finally:
+            await client.close()
+
+    async def test_bootstrap_survives_a_daemon_without_the_route(self, mock_daemon: MockDaemon) -> None:
+        """
+        The route only exists from daemon 0.58.0 — a 404 must not fail setup.
+
+        The same guard protects the event-driven refresh: a failing read
+        there would propagate out of a background task.
+        """
+        mock_daemon.get("/api/v1/info", payload=_INFO)
+        mock_daemon.get("/api/v1/snapshot", payload=_EMPTY_SNAPSHOT)
+        mock_daemon.get("/api/v1/alarm/panels", payload=[_panel_entity(zone_id="eg").model_dump(mode="json")])
+        mock_daemon.get("/api/v1/alarm/state", payload={"zones": []})
+        # No stub for /alarm/triggered-motion — the mock answers 404.
+        client = LoomClient(config=mock_daemon.config)
+        try:
+            await client.connect()
+            await client.bootstrap()
+            panel = client.store.get_alarm_panel_by_zone(zone_id="eg")
+            assert panel is not None
+            assert panel.triggered_motion_count == 0
         finally:
             await client.close()

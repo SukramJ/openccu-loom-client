@@ -1,3 +1,55 @@
+# Version 2026.8.11 (2026-08-12)
+
+Completes the motion-reset surface from 2026.8.10 with the count that
+belongs beside it. No types change.
+
+## What's Changed
+
+### Added
+
+- **`AlarmPanel.triggered_motion_count`** — how many detectors a reset
+  would clear, per zone, with the total on the master panel. It answers
+  "why will this zone not arm" without a REST call of the consumer's own,
+  and it is the state behind the counter entity `homematicip_local` puts
+  next to the reset button
+  ([#88](https://github.com/SukramJ/openccu-loom-client/issues/88)).
+
+  Kept fresh by re-reading, not by a push, because there is no latch
+  broadcast to subscribe to — `assets/wsapi.json` carries nine `alarm.*`
+  events and none for this. `LoomClient.refresh_triggered_motion()` owns
+  the read; `LoomStore.apply_triggered_motion()` is pure mutation, so the
+  store stays I/O-free like every other `apply_*`.
+
+  Bootstrap seeds the counts once. Without that, "no event yet" and
+  "nothing latched" would be indistinguishable for as long as the alarm
+  stayed quiet — which is exactly when someone consults the count.
+
+  Every panel is written on each refresh, not just the ones the answer
+  names: the endpoint reports what _is_ latched, never what stopped
+  being, so skipping the absent ones would leave a cleared zone showing
+  its last non-zero count forever.
+
+- **The compat adapter schedules that re-read off the alarm events.**
+  Subscribed to the three that can plausibly move a latch —
+  `alarm.readiness_changed`, `alarm.triggered`, `alarm.panel_changed` —
+  and deliberately not the countdown tick, which fires every second and
+  never changes the latch set.
+
+  It runs as one coalesced background task. The wire bus fans out
+  sequentially, so awaiting a REST round-trip inside a handler would
+  stall every later subscriber, and an arm sequence emits several of
+  these events back to back; while a refresh is in flight further events
+  are dropped rather than queued, since they would all read the same
+  endpoint and write the same answer. The task is cancelled in `stop()`
+  alongside the reconcile loop.
+
+  A reset needs no special casing: clearing the latches produces the
+  readiness change that triggers the next refresh.
+
+  A refresh never raises. The route only exists from daemon 0.58.0, and a
+  missing optional surface must neither fail a bootstrap nor escape a
+  background task; the counts then keep their previous value.
+
 # Version 2026.8.10 (2026-08-12)
 
 Types 0.3.14 (daemon API 5.20.0). Adds the alarm system's motion-reset
