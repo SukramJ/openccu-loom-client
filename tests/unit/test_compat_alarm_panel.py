@@ -133,6 +133,98 @@ class TestLoomDpAlarmControlPanel:
         assert panel.additional_information == attrs
 
 
+class TestCompanionEntityNames:
+    """
+    The names of the two entities a consumer builds beside a panel.
+
+    Home Assistant puts a motion-reset button and a latched-detector
+    counter next to each panel, all on one alarm device — so each name
+    has to carry its zone or the lists read alike. The words come from
+    the daemon, which has named the same two entities on its MQTT plane
+    all along; a second wording here is a second wording to drift.
+    """
+
+    def test_composition_matches_the_mqtt_plane(self) -> None:
+        # Byte-identical to alarm_discovery.go: `zoneName + " — " + label`.
+        store = _store_with_compat_panels(_panel_entity())
+        store.set_entity_names(
+            entries={
+                "discovery.alarm_reset_motion": "Bewegung zurücksetzen",
+                "discovery.alarm_triggered_motion": "Ausgelöste Bewegungsmelder",
+            }
+        )
+        panel = store.get_alarm_panel_by_zone(zone_id="eg")
+        assert panel is not None
+        assert panel.reset_motion_name == "EG — Bewegung zurücksetzen"
+        assert panel.triggered_motion_name == "EG — Ausgelöste Bewegungsmelder"
+
+    def test_no_catalogue_means_no_name(self) -> None:
+        """
+        A daemon too old to serve ``/i18n/entities`` answers 404.
+
+        ``None`` is not a failure — it tells the consumer to fall back to
+        its own wording, which is the same state as a catalogue that
+        simply lacks the key.
+        """
+        store = _store_with_compat_panels(_panel_entity())
+        panel = store.get_alarm_panel_by_zone(zone_id="eg")
+        assert panel is not None
+        assert panel.reset_motion_name is None
+        assert panel.triggered_motion_name is None
+
+    def test_a_partial_catalogue_names_what_it_carries(self) -> None:
+        store = _store_with_compat_panels(_panel_entity())
+        store.set_entity_names(entries={"discovery.alarm_reset_motion": "Reset motion"})
+        panel = store.get_alarm_panel_by_zone(zone_id="eg")
+        assert panel is not None
+        assert panel.reset_motion_name == "EG — Reset motion"
+        assert panel.triggered_motion_name is None
+
+    def test_a_panel_built_after_the_catalogue_is_named_too(self) -> None:
+        """
+        The catalogue lives in the store, not on the panel instance.
+
+        A zone created at runtime arrives as an ``alarm.panel_changed``
+        push and is built from a bare stub; a catalogue reconcile rebuilds
+        nothing but re-seeds everything. Neither path re-delivers names,
+        so reading them back is what keeps a late zone named like the
+        rest.
+        """
+        store = _store_with_compat_panels(_panel_entity())
+        store.set_entity_names(entries={"discovery.alarm_reset_motion": "Reset motion"})
+        store.apply_alarm_panel_changed(
+            payload=AlarmPanelChangedPayload.model_validate(
+                {
+                    "unique_id": "openccu-loom_alarm_og",
+                    "zone_id": "og",
+                    "name": "OG",
+                    "state": "disarmed",
+                    "available": True,
+                    "code_arm_required": False,
+                    "code_disarm_required": False,
+                }
+            )
+        )
+        late = store.get_alarm_panel_by_zone(zone_id="og")
+        assert late is not None
+        assert late.reset_motion_name == "OG — Reset motion"
+
+    def test_the_name_follows_a_renamed_zone(self) -> None:
+        """
+        Composed on read, so a renamed zone renames its companions.
+
+        A frozen string would leave the button pointing at the old zone
+        name until the next restart.
+        """
+        store = _store_with_compat_panels(_panel_entity())
+        store.set_entity_names(entries={"discovery.alarm_reset_motion": "Reset motion"})
+        panel = store.get_alarm_panel_by_zone(zone_id="eg")
+        assert panel is not None
+        assert panel.reset_motion_name == "EG — Reset motion"
+        store.attach_alarm_panels(panels=[_panel_entity().model_copy(update={"name": "Erdgeschoss"})])
+        assert panel.reset_motion_name == "Erdgeschoss — Reset motion"
+
+
 class TestCategoryForType:
     def test_maps_aiohomematic_screaming_case_by_value(self) -> None:
         # homematicip_local passes aiohomematic's enum (SCREAMING_CASE

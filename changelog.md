@@ -1,3 +1,40 @@
+# Version 2026.8.12 (2026-08-12)
+
+Names the two entities a consumer builds beside an alarm panel out of
+the daemon's catalogue instead of its own. No types change.
+
+## What's Changed
+
+### Added
+
+- **`AlarmPanel.reset_motion_name` / `AlarmPanel.triggered_motion_name`** —
+  the daemon's names for the motion-reset button and the latched-detector
+  counter a consumer puts next to a panel, composed as
+  `<zone> — <label>` exactly like `alarm_discovery.go` composes them for
+  MQTT discovery. `None` when the catalogue was never read or does not
+  carry the key, which tells the caller to fall back to its own wording.
+
+  The words were in the daemon's i18n catalogue all along
+  (`discovery.alarm_reset_motion`, `discovery.alarm_triggered_motion`)
+  and `GET /i18n/entities` has served them since api 5.2.0 — but only
+  the hub singletons read that route, so `homematicip_local` worded the
+  same two entities a second time in its `strings.json`. That is the
+  copy ADR 0046 exists to remove.
+
+- **`LoomStore.entity_names` / `set_entity_names`** — the catalogue now
+  lands in the store, not only on the singleton instances. Panels come
+  and go: a catalogue reconcile re-seeds every one of them and an
+  `alarm.panel_changed` push builds a zone created at runtime from a bare
+  stub. Pushing names onto the instance would have to be repeated on both
+  paths, so the panel reads them back instead — which also means a
+  renamed zone renames its companions without a restart.
+
+  `_HubCoordinator._apply_entity_names` fills it on the same read that
+  names the singletons, one REST call for both, and still before
+  `LoomCentralAdapter.start` announces the panels — the deadline that
+  matters, since Home Assistant records an entity's name when the entity
+  is added.
+
 # Version 2026.8.11 (2026-08-12)
 
 Completes the motion-reset surface from 2026.8.10 with the count that

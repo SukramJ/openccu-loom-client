@@ -476,9 +476,22 @@ class _HubCoordinator:
         its English token as ``name`` because Home Assistant matches its
         entity descriptions against it.
 
+        The catalogue also lands in the store, for readers that are not
+        singletons: an alarm panel is rebuilt by a catalogue reconcile
+        and seeded from a bare push, so pushing names onto the instance
+        would have to be repeated on both paths. Reading them back
+        keeps a zone created at runtime named like the rest.
+
         Best-effort: a daemon older than api 5.2.0 answers 404, and an
         entity whose key the catalogue does not carry keeps its own
         rendering. Neither is an error — both land on the same fallback.
+
+        Runs before the singletons are marked built and, in
+        :meth:`LoomCentralAdapter.start`, before
+        ``_emit_data_points_created`` announces the panels — which is
+        the deadline that matters: Home Assistant records an entity's
+        name in its registry the moment the entity is added, so a name
+        arriving afterwards is a name nobody sees.
         """
         try:
             # The store carries Home Assistant's own UI language (set from
@@ -494,6 +507,7 @@ class _HubCoordinator:
         if not entries:
             return
         self._entity_names = dict(entries)
+        self._client.store.set_entity_names(entries=entries)
         for dp in self._hub_singletons_unfiltered():
             dp.apply_entity_names(entries=entries)
 
