@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING, Any, Final, Protocol, runtime_checkable
 from urllib.parse import quote
 
 from openccu_loom_types.rest import (
+    AlarmMotionResetResult,
     AlarmPanelEntity,
     CalculatedDPSummary,
     ChannelSummary,
@@ -766,6 +767,38 @@ class LoomStore:
         """Silence every sounding output (break-glass). Wire: ``POST /alarm/silence-all``."""
         transport = self._require_transport()
         await transport.request(method="POST", path="/alarm/silence-all", allow_retry=False)
+
+    async def reset_alarm_zone_motion(self, *, zone_id: str) -> AlarmMotionResetResult:
+        """
+        Clear one zone's latched motion/presence detectors.
+
+        Wire: ``POST /alarm/zones/{id}/reset-motion`` (daemon ≥ 0.58.1).
+        Not retried — the reset writes to devices, so a blind replay is
+        real radio traffic.
+
+        Unlike the other alarm verbs this returns the daemon's result
+        instead of ``None``: the counters distinguish "nothing was
+        latched" (``reset == 0 and failed == 0``) from "detectors did
+        not answer" (``failed > 0``), and only the caller can decide
+        what that means for the user. There is no ``alarm.*`` broadcast
+        for a reset pass, so the return value is the only report.
+        """
+        transport = self._require_transport()
+        payload = await transport.request(
+            method="POST", path=f"/alarm/zones/{quote(zone_id, safe='')}/reset-motion", allow_retry=False
+        )
+        return AlarmMotionResetResult.model_validate(payload)
+
+    async def reset_all_alarm_motion(self) -> AlarmMotionResetResult:
+        """
+        Clear every latched motion/presence detector across all zones.
+
+        Wire: ``POST /alarm/reset-motion`` (daemon ≥ 0.58.1). Not
+        retried. Same counter semantics as :meth:`reset_alarm_zone_motion`.
+        """
+        transport = self._require_transport()
+        payload = await transport.request(method="POST", path="/alarm/reset-motion", allow_retry=False)
+        return AlarmMotionResetResult.model_validate(payload)
 
     # ---- CDP attach ----
 

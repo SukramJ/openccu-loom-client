@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from openccu_loom_types.rest import AlarmModeReadiness, AlarmPanelEntity, AlarmZoneStatus
+    from openccu_loom_types.rest import AlarmModeReadiness, AlarmMotionResetResult, AlarmPanelEntity, AlarmZoneStatus
 
     from openccu_loom_client.store import LoomStore
 
@@ -237,6 +237,21 @@ class AlarmPanel:
     async def acknowledge(self, *, code: str | None = None) -> None:
         """Acknowledge this zone's ended incident (clears the latch)."""
         await self._store.acknowledge_alarm_zone(zone_id=self.zone_id, code=code)
+
+    async def reset_motion(self) -> AlarmMotionResetResult:
+        """
+        Clear latched motion/presence detectors (master: daemon-side reset-all).
+
+        The master delegates to the daemon's aggregate route rather than
+        looping the zones, mirroring :meth:`silence` — one pass, one set
+        of counters, and detectors shared between zones are written once.
+
+        Takes no code: the reset clears a *blocker*, it does not change
+        the armed state, so it is not an authorization-bearing verb.
+        """
+        if self.is_master:
+            return await self._store.reset_all_alarm_motion()
+        return await self._store.reset_alarm_zone_motion(zone_id=self.zone_id)
 
     # ---- store-facing mutation (never rebuild) ----
 

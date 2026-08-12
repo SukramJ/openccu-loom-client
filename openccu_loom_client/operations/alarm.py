@@ -5,8 +5,9 @@
 Alarm-system REST operations (daemon ≥ 0.49.2, api 3.0.0).
 
 Thin façade over the daemon's ``/alarm`` namespace: zone config +
-verbs (arm/disarm/silence/acknowledge), panel entities, readiness,
-journal, walk test, output test fire and PIN-code administration.
+verbs (arm/disarm/silence/acknowledge/reset-motion), panel entities,
+readiness, journal, walk test, output test fire and PIN-code
+administration.
 
 The daemon leaves every ``/alarm`` route unmounted when the alarm
 subsystem is disabled. Since daemon 0.43.1 the ``/info`` capability
@@ -33,12 +34,14 @@ from openccu_loom_types.rest import (
     AlarmIncident,
     AlarmJournalEntry,
     AlarmModeReadiness,
+    AlarmMotionResetResult,
     AlarmOutput,
     AlarmOutputCandidate,
     AlarmPanelEntity,
     AlarmRemoteKeyCandidate,
     AlarmSensor,
     AlarmSensorCandidate,
+    AlarmTriggeredMotionSensor,
     AlarmWalkTestStatus,
     AlarmZone,
     AlarmZoneStatus,
@@ -331,6 +334,76 @@ class AlarmOperations(_OperationsBase):
         Wire: ``POST /alarm/silence-all``. Not retried.
         """
         await self._transport.request(method="POST", path="/alarm/silence-all", allow_retry=False)
+
+    # ---- motion reset ----
+
+    async def list_triggered_motion(self, *, zone_id: str | None = None) -> list[AlarmTriggeredMotionSensor]:
+        """
+        Return the latched detectors a motion reset would clear.
+
+        Wire: ``GET /alarm/triggered-motion`` (daemon ≥ 0.58.1, api
+        5.17.0). ``zone_id`` restricts the answer to one zone; omit it
+        for every zone.
+
+        A motion detector holds its ``MOTION`` flag until the device's
+        own blocking time expires or the reset parameter is written.
+        While it does, the sensor reads as open and blocks an arm or
+        forces an auto-bypass.
+
+        The daemon derives this list from the same predicate the reset
+        verbs use — currently active *and* the channel exposes a
+        writable reset parameter — so a count shown to an operator can
+        never name a detector the reset would skip. Motion detectors
+        (``MOTION`` → ``RESET_MOTION``) and, since daemon 0.58.1,
+        presence detectors (``PRESENCE_DETECTION_STATE`` →
+        ``RESET_PRESENCE``) are covered; door contacts fall out by
+        construction. ``parameter`` names the sensor's own state
+        parameter, not the reset one.
+
+        Daemon 0.58.0 shipped the route but a type assertion made it
+        inert on real hardware, so a client tested against exactly that
+        release sees the call succeed and report nothing.
+        """
+        params = {"zone_id": zone_id} if zone_id is not None else None
+        return await self._request_list(
+            method="GET", path="/alarm/triggered-motion", params=params, model=AlarmTriggeredMotionSensor
+        )
+
+    async def reset_zone_motion(self, *, zone_id: str) -> AlarmMotionResetResult:
+        """
+        Clear one zone's latched motion/presence detectors.
+
+        Wire: ``POST /alarm/zones/{id}/reset-motion`` (daemon ≥ 0.58.1,
+        api 5.17.0). Not retried.
+
+        The counters are why this returns a result rather than ``None``:
+        ``reset == 0 and failed == 0`` ("nothing was latched") is a
+        different outcome from ``failed > 0`` ("individual detectors did
+        not answer"), and only the caller can decide what to tell the
+        user. The daemon reports a failing write in the body rather than
+        as an HTTP error — the verb ran, and a partial result is
+        actionable. Detectors that are not triggered are never written
+        to, so a routine call adds no radio traffic.
+        """
+        payload = await self._transport.request(
+            method="POST", path=f"/alarm/zones/{quote(zone_id, safe='')}/reset-motion", allow_retry=False
+        )
+        return AlarmMotionResetResult.model_validate(payload)
+
+    async def reset_all_motion(self) -> AlarmMotionResetResult:
+        """
+        Clear every latched motion/presence detector across all zones.
+
+        Wire: ``POST /alarm/reset-motion`` (daemon ≥ 0.58.1, api
+        5.17.0). Not retried. Same counter semantics as
+        :meth:`reset_zone_motion`.
+
+        Arming already runs this pass for the zone it arms, so the
+        explicit verb is for the operator who wants the blockers cleared
+        *before* deciding to arm.
+        """
+        payload = await self._transport.request(method="POST", path="/alarm/reset-motion", allow_retry=False)
+        return AlarmMotionResetResult.model_validate(payload)
 
     # ---- journal ----
 
