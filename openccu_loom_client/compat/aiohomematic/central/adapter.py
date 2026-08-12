@@ -55,6 +55,7 @@ from openccu_loom_client.compat.aiohomematic._upstream import (
     ClientState as AioClientState,
     DataPointCategory as AioDataPointCategory,
     DataPointsCreatedEvent as AioDataPointsCreatedEvent,
+    DataPointStateChangedEvent as AioDataPointStateChangedEvent,
     DeviceLink,
     EventBus as AioEventBus,
     InboxDeviceData,
@@ -89,7 +90,11 @@ from openccu_loom_client.compat.aiohomematic.model.week_profile import (
     ScheduleChannelSwitch,
     WeekProfileDp,
 )
-from openccu_loom_client.events import AlarmPanelChangedEvent as LoomAlarmPanelChangedEvent
+from openccu_loom_client.events import (
+    AlarmPanelChangedEvent as LoomAlarmPanelChangedEvent,
+    AlarmReadinessChangedEvent as LoomAlarmReadinessChangedEvent,
+    AlarmTriggeredEvent as LoomAlarmTriggeredEvent,
+)
 from openccu_loom_client.exceptions import BaseLoomException, LoomHttpError, LoomNotFoundError
 
 if TYPE_CHECKING:
@@ -1037,6 +1042,12 @@ class LoomCentralAdapter:
         # panel outside this set means a new zone appeared at runtime and its
         # entity must be spawned (mirrors the device.created reconcile).
         self._announced_alarm_panel_ids: set[str] = set()
+        # In-flight triggered-motion refresh. The daemon broadcasts no latch
+        # event, so the counts have to be re-read — but the wire bus fans out
+        # sequentially, so awaiting a REST call inside a handler would stall
+        # every later subscriber. One coalesced background task instead: a
+        # burst of alarm events produces a single re-read.
+        self._triggered_motion_task: asyncio.Task[None] | None = None
         # HA entities subscribe on aiohomematic's *own* event bus and match
         # events by ``type(event)``/``.key``. The adapter therefore exposes a
         # real aiohomematic EventBus (not the loom wire bus) as ``event_bus``
@@ -1205,6 +1216,17 @@ class LoomCentralAdapter:
             # wire bridge seeded the store stub before this handler runs —
             # subscription groups fan out in registration order.
             self._refresh_group.subscribe(event_type=LoomAlarmPanelChangedEvent, handler=self._on_alarm_panel_changed)
+            # Latched-detector counts. Subscribed to the three events that can
+            # plausibly move a latch — readiness (a detector blocking an arm is
+            # exactly the case), a trigger, and a panel change. Deliberately
+            # *not* the countdown tick, which fires every second and never
+            # changes the latch set.
+            for latch_event in (
+                LoomAlarmReadinessChangedEvent,
+                LoomAlarmTriggeredEvent,
+                LoomAlarmPanelChangedEvent,
+            ):
+                self._refresh_group.subscribe(event_type=latch_event, handler=self._on_possible_latch_change)
             # Announce every data point (generic + custom) in one batch *after*
             # the custom DPs are attached, so HA's platforms spawn entities for
             # them too. Published on the real aiohomematic bus as the real
@@ -1222,6 +1244,39 @@ class LoomCentralAdapter:
             # idempotent and None-safe, so it cleans up whatever was created.
             await self.stop()
             raise
+
+    async def _on_possible_latch_change(self, event: Any, /) -> None:
+        """
+        Schedule a latched-detector re-read, coalescing bursts into one.
+
+        Returns immediately — the wire bus fans out sequentially, so a
+        REST round-trip here would delay every later subscriber, and an
+        arm sequence emits several of these events back to back. While a
+        refresh is in flight further events are dropped rather than
+        queued: they would all read the same endpoint and write the same
+        answer.
+        """
+        if self._triggered_motion_task is not None and not self._triggered_motion_task.done():
+            return
+        self._triggered_motion_task = asyncio.create_task(
+            self._refresh_triggered_motion(), name="loom-triggered-motion"
+        )
+
+    async def _refresh_triggered_motion(self) -> None:
+        """
+        Re-read the counts, then ping the panels so HA re-renders them.
+
+        The ping is the second half of the job: the refresh bridge
+        already pinged on the originating event, but that ran *before*
+        this read finished, so without a second one the new count would
+        sit in the store until the next unrelated alarm event.
+        """
+        await self._client.refresh_triggered_motion()
+        now = datetime.now(tz=UTC)
+        for panel in self._client.store.alarm_panels:
+            await self._ha_bus.publish(
+                event=AioDataPointStateChangedEvent(timestamp=now, unique_id=panel.unique_id, new_value=panel.state)
+            )
 
     async def _on_alarm_panel_changed(self, event: LoomAlarmPanelChangedEvent, /) -> None:
         """Announce a net-new alarm panel to HA (entity spawn at runtime)."""
@@ -1499,6 +1554,11 @@ class LoomCentralAdapter:
             with contextlib.suppress(asyncio.CancelledError):
                 await self._hub_reconcile_task
             self._hub_reconcile_task = None
+        if self._triggered_motion_task is not None:
+            self._triggered_motion_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._triggered_motion_task
+            self._triggered_motion_task = None
         if self._refresh_group is not None:
             self._refresh_group.cancel()
             self._refresh_group = None

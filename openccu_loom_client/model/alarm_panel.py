@@ -55,6 +55,7 @@ class AlarmPanel:
         "_readiness",
         "_store",
         "_summary",
+        "_triggered_motion_count",
         "_walktest_active",
     )
 
@@ -72,6 +73,7 @@ class AlarmPanel:
         self._last_incident_id: int | None = None
         self._last_incident_cause: str | None = None
         self._last_incident_sensor: str | None = None
+        self._triggered_motion_count = 0
 
     @property
     def summary(self) -> AlarmPanelEntity:
@@ -188,6 +190,18 @@ class AlarmPanel:
         """The sensor name behind the most recent trigger, if any."""
         return self._last_incident_sensor
 
+    @property
+    def triggered_motion_count(self) -> int:
+        """
+        How many latched detectors a :meth:`reset_motion` would clear.
+
+        The master panel carries the total across all zones. Zero until
+        :meth:`LoomStore.apply_triggered_motion` has run once — the
+        daemon broadcasts no latch event, so this is refreshed by
+        re-reading ``GET /alarm/triggered-motion``, never pushed.
+        """
+        return self._triggered_motion_count
+
     # ---- write-back ----
 
     async def arm(
@@ -290,6 +304,9 @@ class AlarmPanel:
 
     def _set_walktest_active(self, *, active: bool) -> None:
         self._walktest_active = active
+
+    def _set_triggered_motion_count(self, *, count: int) -> None:
+        self._triggered_motion_count = count
 
     def _record_incident(self, *, incident_id: int, cause: str, sensor_name: str | None) -> None:
         self._last_incident_id = incident_id

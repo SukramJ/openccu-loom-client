@@ -51,7 +51,7 @@ from openccu_loom_client.events import (
     event_from_envelope,
     new_data_points_created_event,
 )
-from openccu_loom_client.exceptions import LoomNotFoundError
+from openccu_loom_client.exceptions import BaseLoomException, LoomNotFoundError
 from openccu_loom_client.operations import (
     AlarmOperations,
     AuthOperations,
@@ -354,6 +354,28 @@ class LoomClient:
             return
         statuses = await self.alarm.get_zone_statuses()
         self._store.attach_alarm_zone_statuses(statuses=statuses)
+        await self.refresh_triggered_motion()
+
+    async def refresh_triggered_motion(self) -> None:
+        """
+        Re-read the latched motion detectors and update the panel counts.
+
+        The daemon broadcasts no latch event, so the counts cannot ride
+        the ``alarm.*`` pushes like the rest of the panel state — they
+        are refreshed by re-reading ``GET /alarm/triggered-motion``.
+        Callers pick the cadence; the compat adapter schedules this off
+        the alarm events that plausibly move a latch.
+
+        Never raises: a daemon below 0.58.0 has no such route, and a
+        failed refresh must not take down whatever event handling
+        triggered it. The counts then simply keep their previous value.
+        """
+        try:
+            sensors = await self.alarm.list_triggered_motion()
+        except BaseLoomException as err:
+            _LOGGER.debug("triggered-motion refresh failed (counts keep their previous value): %s", err)
+            return
+        self._store.apply_triggered_motion(sensors=sensors)
 
     async def start_events(
         self,
