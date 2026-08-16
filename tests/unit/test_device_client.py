@@ -233,10 +233,13 @@ class TestDeviceClientLinks:
         assert put.json() == {"SHORT_ON_TIME": 9}
         # Without the edit token the daemon rejects a LINK write with 423 Locked.
         assert put.headers.get("X-Edit-Token") == "tok-abc"
-        # The lock is opened on the peer's key and released again.
+        # The lock is opened on the peer's key and released again — the
+        # release names the lock and proves ownership (api 6.0.0).
         opened = _find_call(mock, "POST")
         assert opened.json() == {"key": "channel:VCU1:1:LINK:VCU2:3"}
-        assert _find_call(mock, "DELETE").path == "/api/v1/sessions/edit"
+        released = _find_call(mock, "DELETE")
+        assert released.path == "/api/v1/sessions/edit"
+        assert released.json() == {"key": "channel:VCU1:1:LINK:VCU2:3", "token": "tok-abc"}
 
     async def test_put_paramset_accepts_the_handlers_link_address_kwarg(self, http) -> None:
         """ws_put_link_paramset spells the selector `paramset_key_or_link_address`."""

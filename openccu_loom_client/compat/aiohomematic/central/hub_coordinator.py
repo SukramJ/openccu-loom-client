@@ -369,7 +369,7 @@ class _HubCoordinator:
             self._connectivity_dps[state.id] = ConnectivityDpType(
                 interface_id=state.id,
                 interface=state.interface,
-                sensor=InterfaceConnectivityDp(store=store, interface_id=state.id),
+                sensor=InterfaceConnectivityDp(store=store, interface_id=state.id, interface=state.interface),
             )
             if state.interface in INSTALL_MODE_TOKEN_BY_INTERFACE:
                 sensor = InstallModeDpSensor(store=store, interface=state.interface)

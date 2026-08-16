@@ -1,9 +1,10 @@
 # Version 2026.8.13 (2026-08-16)
 
-Syncs the client to daemon 0.60.0 / api 5.34.0 (`openccu-loom-types`
-0.3.17): the availability push reaches HA, the Matter diagnostics
-surface is wrapped, and the classify opt-in is available on the
-transport.
+Syncs the client to daemon 0.61.1 / api 6.1.0 (`openccu-loom-types`
+0.4.0): the availability push reaches HA, the Matter diagnostics
+surface is wrapped, the classify opt-in is available on the transport,
+and the edit-lock and startup-capture calls follow the contract the
+6.0.0 breaking bump finally declares.
 
 ## What's Changed
 
@@ -45,17 +46,48 @@ transport.
 
 ### Changed
 
-- **`openccu-loom-types` 0.3.17 / aiohomematic 2026.8.3.** The
-  regenerated types shift the auto-numbered enum aliases: the
-  `WsEnvelope` kind enum is now `Kind2` (`Kind1` names the new Matter
+- **`SessionsOperations.release` / `.heartbeat` take `key` + `token`**
+  (BREAKING for direct callers). `DELETE /sessions/edit` and
+  `POST /sessions/edit/heartbeat` have always demanded both — api 6.0.0
+  finally declares it, and the client now sends them. The edit-lock
+  release inside `put_link_paramset` names its lock and proves ownership
+  on the same call; without a token there is nothing to prove, so the
+  lock is left to its 5-minute TTL instead of sending a release the
+  daemon would refuse.
+
+- **`SystemOperations.set_startup_capture` takes
+  `StartupCaptureConfigWrite`** (BREAKING for direct callers). Api 6.0.0
+  splits the startup-capture schema into an honest read shape (responses
+  always carry the effective `anonymise`) and a write shape (an omitted
+  `anonymise` means _true_, the privacy-preserving default).
+
+- **Connectivity keys on the wire id, labels on the bare name.** Daemon
+  0.61.1 fixes its side of the per-interface connectivity plane: the
+  REST snapshot and the `connectivity.changed` push now carry the wire
+  id `<central>-<interface>` — the form `GET /interfaces` reports and
+  this client has always keyed its sensors by, so the lookup that never
+  matched against pre-0.61.1 daemons matches now (no client code
+  change; the test fixtures now pin the documented id form). The
+  sensor's _display_ name switches to the bare interface name
+  (`Konnektivität HmIP-RF`), matching the daemon's own MQTT discovery
+  labels; the `parameter_slug` → unique_id keeps building from the wire
+  id, so entity-registry ids stay put.
+
+- **`openccu-loom-types` 0.4.0 / aiohomematic 2026.8.3.** The 0.3.17
+  regeneration shifts the auto-numbered enum aliases: the `WsEnvelope`
+  kind enum is now `Kind2` (`Kind1` names the new Matter
   diagnostic-event kind), so every `Kind1 as Kind` import moved to
   `Kind2 as Kind`. `MatterFabric` gains the daemon-resolved
   `vendor_name`, `InboxDevice` the `pending_creation` marker (api
   5.28.0 — the already-wrapped `DevicesOperations.accept_device`
   materialises such a device), the alarm-journal class enum gains
   `maintenance`, and `AlarmTriggeredPayload.mode` can now be `disarmed`
-  for always-on triggers — all consumed through the types with no code
-  change.
+  for always-on triggers. 0.4.0 (api 6.1.0) adds the exact 64-bit
+  `fabric_id_hex` / `node_id_hex` on `MatterFabric` (a JSON number
+  carries 53 bits, so the numeric ids round for real controllers —
+  render the hex fields) and documents that `CentralRow`'s connection
+  fields are masked below the admin role — all consumed through the
+  types with no code change.
 
 # Version 2026.8.12 (2026-08-12)
 

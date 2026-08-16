@@ -17,6 +17,7 @@ from openccu_loom_types.rest import (
     InterfaceState,
     Snapshot,
     StartupCaptureConfig,
+    StartupCaptureConfigWrite,
     SystemCCUEntry,
     SystemUpdateEntry,
 )
@@ -320,11 +321,14 @@ class SystemOperations(_OperationsBase):
         payload = await self._transport.request(method="GET", path="/system/startup-capture")
         return StartupCaptureConfig.model_validate(payload)
 
-    async def set_startup_capture(self, *, config: StartupCaptureConfig) -> StartupCaptureConfig:
+    async def set_startup_capture(self, *, config: StartupCaptureConfigWrite) -> StartupCaptureConfig:
         """
         Persist the startup-capture toggle (admin).
 
-        Wire: ``PUT /system/startup-capture``.
+        Wire: ``PUT /system/startup-capture``. Read and write shapes split
+        with api 6.0.0: the write's ``anonymise`` may be omitted and then
+        means *true* (the privacy-preserving default), while the response
+        always reports the effective value.
         """
         payload = await self._transport.request(
             method="PUT",

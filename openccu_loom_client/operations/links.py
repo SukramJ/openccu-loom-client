@@ -117,7 +117,8 @@ class LinksOperations(_OperationsBase):
         released again — even if the write fails.
         """
         sessions = SessionsOperations(transport=self._transport)
-        session = await sessions.acquire(key=f"channel:{address}:LINK:{peer}")
+        lock_key = f"channel:{address}:LINK:{peer}"
+        session = await sessions.acquire(key=lock_key)
         token = session.get("token")
         try:
             await self._transport.request(
@@ -128,9 +129,13 @@ class LinksOperations(_OperationsBase):
                 allow_retry=True,
             )
         finally:
-            # Never let a release failure mask the write's own outcome.
-            with contextlib.suppress(BaseLoomException):
-                await sessions.release()
+            # Never let a release failure mask the write's own outcome. The
+            # release must name the lock and prove ownership (api 6.0.0);
+            # without a token there is nothing to prove, so the lock is left
+            # to its 5-minute TTL.
+            if token:
+                with contextlib.suppress(BaseLoomException):
+                    await sessions.release(key=lock_key, token=token)
 
     async def linkable_channels(
         self,

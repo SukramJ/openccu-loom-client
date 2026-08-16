@@ -16,7 +16,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 
 from openccu_loom_types import DAEMON_API_VERSION
-from openccu_loom_types.rest import TokenCreate, UserCreate
+from openccu_loom_types.rest import StartupCaptureConfigWrite, TokenCreate, UserCreate
 import pytest
 
 from openccu_loom_client.exceptions import LoomValidationError
@@ -291,6 +291,21 @@ class TestSessionsOperations:
         result = await SessionsOperations(transport=t).acquire(key="cfg:north")
         assert result["held"] is True
 
+    async def test_release_names_the_lock_and_proves_ownership(self, http) -> None:
+        # DELETE /sessions/edit has always demanded key + token; api 6.0.0
+        # finally declares it — pin that the client sends both.
+        t, mock = http
+        mock.delete("/api/v1/sessions/edit", status=204)
+        await SessionsOperations(transport=t).release(key="cfg:north", token="tok-abc")
+        assert mock.requests[-1].json() == {"key": "cfg:north", "token": "tok-abc"}
+
+    async def test_heartbeat_carries_the_same_body(self, http) -> None:
+        t, mock = http
+        mock.post("/api/v1/sessions/edit/heartbeat", payload={"key": "cfg:north", "token": "tok-abc"})
+        result = await SessionsOperations(transport=t).heartbeat(key="cfg:north", token="tok-abc")
+        assert result["key"] == "cfg:north"
+        assert mock.requests[-1].json() == {"key": "cfg:north", "token": "tok-abc"}
+
 
 class TestMatterOperations:
     async def test_get_status(self, http) -> None:
@@ -452,6 +467,24 @@ class TestSystemAdminExtensions:
         mock.post("/api/v1/system/restart", payload={"status": "restarting"})
         result = await SystemOperations(transport=t).restart()
         assert result["status"] == "restarting"
+
+    async def test_set_startup_capture_uses_the_write_shape(self, http) -> None:
+        # api 6.0.0 splits read and write: an omitted ``anonymise`` on the
+        # write means *true* (the privacy-preserving default), while the
+        # response always carries the effective value.
+        t, mock = http
+        mock.put(
+            "/api/v1/system/startup-capture",
+            payload={"enabled": True, "duration_seconds": 300, "anonymise": True},
+        )
+        result = await SystemOperations(transport=t).set_startup_capture(
+            config=StartupCaptureConfigWrite(enabled=True, duration_seconds=300)
+        )
+        # The client serialises the write shape's default explicitly
+        # (``anonymise: true`` — the same meaning as omitting it), and the
+        # read shape reports the effective value back.
+        assert mock.requests[-1].json() == {"enabled": True, "duration_seconds": 300, "anonymise": True}
+        assert result.anonymise is True
 
     async def test_list_system_ccus_unwraps_entries_envelope(self, http) -> None:
         # The daemon returns {"entries": [...]}, not a bare list.
