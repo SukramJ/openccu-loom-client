@@ -19,7 +19,7 @@ from typing import Any
 from aiohomematic.async_support import Looper
 from aiohomematic.central.events import DataPointStateChangedEvent, EventBus as AioEventBus
 from openccu_loom_types.enums import DataPointCategory
-from openccu_loom_types.rest import AlarmPanelEntity, Kind1 as Kind
+from openccu_loom_types.rest import AlarmPanelEntity, Kind2 as Kind
 from openccu_loom_types.ws import AlarmCountdownPayload, AlarmPanelChangedPayload
 import pytest
 

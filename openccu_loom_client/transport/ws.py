@@ -152,9 +152,21 @@ class WsTransport:
         on_replay_lost: ReplayLostHandler | None = None,
         on_auth_failed: AuthFailedHandler | None = None,
         session: aiohttp.ClientSession | None = None,
+        classify: bool = False,
     ) -> None:
-        """Configure the transport; the connection opens on :meth:`start`."""
+        """
+        Configure the transport; the connection opens on :meth:`start`.
+
+        ``classify`` opts into the daemon's inline classification (api ≥
+        5.34.0): every ``subscribe`` frame carries ``classify: true``, and
+        ``datapoint.value_changed`` payloads then include ``category`` and
+        ``data_point_type``. Default off — this client classifies through
+        the store's data-point factories, so the extra fields are only for
+        consumers that read the wire payloads directly. An older daemon
+        ignores the unknown field.
+        """
         self._config: Final = config
+        self._classify: Final = classify
         self._external_session: Final = session
         self._session: aiohttp.ClientSession | None = session
         self._ws: aiohttp.ClientWebSocketResponse | None = None
@@ -262,7 +274,10 @@ class WsTransport:
             return
         self._subscriptions.update(new)
         if self._ws is not None and not self._ws.closed:
-            await self._send(frame={"op": "subscribe", "topics": new})
+            frame: dict[str, object] = {"op": "subscribe", "topics": new}
+            if self._classify:
+                frame["classify"] = True
+            await self._send(frame=frame)
 
     async def unsubscribe(self, *, topics: list[str]) -> None:
         """Drop topic patterns from the subscription set."""
@@ -397,6 +412,8 @@ class WsTransport:
             "op": "subscribe",
             "topics": sorted(self._subscriptions),
         }
+        if self._classify:
+            frame["classify"] = True
         if self._last_seq is not None:
             frame["since"] = self._last_seq
         await self._send(frame=frame)

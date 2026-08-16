@@ -128,6 +128,25 @@ class TestSubscribeAndReceive:
         assert len(subs) == 1
         assert sorted(subs[0]["topics"]) == ["device.*", "hub.*"]
         assert "since" not in subs[0]
+        # Default off — a client that never asked for inline classification
+        # must not opt the whole connection in.
+        assert "classify" not in subs[0]
+
+    async def test_classify_opt_in_rides_every_subscribe_frame(self, fake_daemon) -> None:
+        async def script(ws: web.WebSocketResponse, _rx: list[dict]) -> None:
+            await asyncio.sleep(0.4)
+
+        cfg, rx = await fake_daemon(script)
+        async with WsTransport(config=cfg, initial_subscriptions=["device.*"], classify=True) as ws:
+            await asyncio.sleep(0.1)
+            await ws.subscribe(topics=["hub.*"])
+            await asyncio.sleep(0.15)
+
+        subs = [f for f in rx if f.get("op") == "subscribe"]
+        # Initial + incremental — both carry the opt-in (daemon api ≥ 5.34.0
+        # sends category/data_point_type on value payloads in return).
+        assert len(subs) == 2
+        assert all(f.get("classify") is True for f in subs)
 
     async def test_envelope_arrives_and_seq_is_tracked(self, fake_daemon) -> None:
         envelope = {

@@ -16,7 +16,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from openccu_loom_types import DAEMON_API_VERSION
-from openccu_loom_types.rest import Kind1 as Kind, SecuritySourceOverride
+from openccu_loom_types.rest import Kind2 as Kind, SecuritySourceOverride
 from openccu_loom_types.ws import WsEnvelope
 import pytest
 

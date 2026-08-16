@@ -27,6 +27,7 @@ from openccu_loom_types.rest import (
 from openccu_loom_types.ws import (
     CustomDataPointStateChangedPayload,
     DataPointValueChangedPayload,
+    DeviceAvailabilityChangedPayload,
     DeviceCreatedPayload,
     DeviceRemovedPayload,
 )
@@ -382,6 +383,36 @@ class TestLiveUpdates:
             )
         )
         assert store.get_device(address="VCU0001") is not None
+
+    def test_apply_device_availability_changed_flips_the_summary_flag(self, populated: LoomStore) -> None:
+        payload = DeviceAvailabilityChangedPayload.model_validate(
+            {
+                "central": "home",
+                "interface_id": "home:HmIP-RF",
+                "device_address": "VCU0001",
+                "available": False,
+            }
+        )
+        populated.apply_device_availability_changed(payload=payload)
+        assert populated.get_device(address="VCU0001").available is False
+        # And back — both transition directions are announced by the daemon.
+        populated.apply_device_availability_changed(
+            payload=payload.model_copy(update={"available": True}),
+        )
+        assert populated.get_device(address="VCU0001").available is True
+
+    def test_apply_device_availability_changed_ignores_unknown_device(self, populated: LoomStore) -> None:
+        payload = DeviceAvailabilityChangedPayload.model_validate(
+            {
+                "central": "home",
+                "interface_id": "home:HmIP-RF",
+                "device_address": "VCU9999",
+                "available": False,
+            }
+        )
+        # No crash, no auto-creation — bootstrap owns catalogue parity.
+        populated.apply_device_availability_changed(payload=payload)
+        assert populated.get_device(address="VCU9999") is None
 
     def test_apply_device_removed_clears_device_and_children(self, populated: LoomStore) -> None:
         payload = DeviceRemovedPayload.model_validate(

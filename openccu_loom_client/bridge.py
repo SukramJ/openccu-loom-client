@@ -30,6 +30,7 @@ from openccu_loom_client.events import (
     AlarmTriggeredEvent,
     CustomDataPointStateChangedEvent,
     DataPointValueChangedEvent,
+    DeviceAvailabilityChangedEvent,
     DeviceCreatedEvent,
     DeviceRemovedEvent,
     ProgramChangedEvent,
@@ -58,6 +59,8 @@ def bind_ws_events_to_store(
       ``store.apply_custom_data_point_state_changed``
     - ``DeviceCreatedEvent`` → ``store.apply_device_created``
     - ``DeviceRemovedEvent`` → ``store.apply_device_removed``
+    - ``DeviceAvailabilityChangedEvent`` →
+      ``store.apply_device_availability_changed``
     - ``SysvarChangedEvent`` → ``store.apply_sysvar_changed``
     - ``ProgramExecutedEvent`` → ``store.apply_program_executed``
     - ``ProgramChangedEvent`` → ``store.apply_program_changed``
@@ -88,6 +91,9 @@ def bind_ws_events_to_store(
 
     async def on_removed(event: DeviceRemovedEvent) -> None:
         store.apply_device_removed(payload=event.payload)
+
+    async def on_availability(event: DeviceAvailabilityChangedEvent) -> None:
+        store.apply_device_availability_changed(payload=event.payload)
 
     async def on_sysvar(event: SysvarChangedEvent) -> None:
         store.apply_sysvar_changed(payload=event.payload)
@@ -120,6 +126,7 @@ def bind_ws_events_to_store(
     group.subscribe(event_type=CustomDataPointStateChangedEvent, handler=on_cdp_state)
     group.subscribe(event_type=DeviceCreatedEvent, handler=on_created)
     group.subscribe(event_type=DeviceRemovedEvent, handler=on_removed)
+    group.subscribe(event_type=DeviceAvailabilityChangedEvent, handler=on_availability)
     group.subscribe(event_type=SysvarChangedEvent, handler=on_sysvar)
     group.subscribe(event_type=ProgramExecutedEvent, handler=on_program)
     group.subscribe(event_type=ProgramChangedEvent, handler=on_program_changed)

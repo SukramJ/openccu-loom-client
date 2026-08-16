@@ -32,7 +32,7 @@ from openccu_loom_types.rest import (
     DataPointSummary,
     DeviceDetail,
     HubDataPoints,
-    Kind1 as Kind,
+    Kind2 as Kind,
     ProgramSummary,
     SecuritySnapshot,
     Snapshot,
@@ -41,6 +41,7 @@ from openccu_loom_types.ws import (
     CentralStateChangedPayload,
     CustomDataPointStateChangedPayload,
     DataPointValueChangedPayload,
+    DeviceAvailabilityChangedPayload,
     DeviceCreatedPayload,
     DeviceRemovedPayload,
     DeviceTriggerPayload,
@@ -81,6 +82,7 @@ from openccu_loom_client.events import (
     CentralStateChangedEvent as LoomCentralStateChangedEvent,
     CustomDataPointStateChangedEvent,
     DataPointValueChangedEvent,
+    DeviceAvailabilityChangedEvent,
     DeviceCreatedEvent,
     DeviceRemovedEvent,
     EventBus,
@@ -1146,6 +1148,95 @@ class TestRefreshBridge:
         assert ev.rolled_back_value == 0.8
         assert ev.restored_value == 0.5
         assert ev.reason == "timeout"
+
+    async def test_availability_change_pings_every_entity_of_the_device(self) -> None:
+        # An availability flip carries no per-DP value push, so the bridge
+        # must fan it out itself: one keyed state-changed ping per generic
+        # DP and per custom DP of the device (each re-reads ``available``
+        # off the store). Mirrors aiohomematic's
+        # ``publish_device_updated_event(notify_data_points=True)``.
+        bus = EventBus()
+        group = bus.create_subscription_group(name="t")
+        store = LoomStore()
+        store.load_snapshot(
+            snapshot=Snapshot.model_validate(
+                {
+                    "generated_at": "2026-05-24T08:00:00Z",
+                    "devices": [
+                        {
+                            "address": "VCU1",
+                            "interface": "home:HmIP-RF",
+                            "model": "HmIP-BROLL",
+                            "name": "Shutter",
+                            "available": True,
+                            "channels_count": 1,
+                            "interface_id": "home:HmIP-RF",
+                            "updatable": False,
+                            "update_available": False,
+                            "master_pushes_config_pending": False,
+                            "has_sub_devices": False,
+                        }
+                    ],
+                }
+            )
+        )
+        detail = store.get_device(address="VCU1").summary.model_dump()
+        store.attach_device_detail(
+            detail=DeviceDetail.model_validate(
+                {
+                    **detail,
+                    "firmware": {},
+                    "availability": {},
+                    "channels": [
+                        {
+                            "number": 1,
+                            "address": "VCU1:1",
+                            "paramset_key": "VALUES",
+                            "data_points_count": 1,
+                        }
+                    ],
+                }
+            )
+        )
+        store.attach_channel_data_points(
+            device_address="VCU1",
+            channel_number=1,
+            data_points=[
+                DataPointSummary.model_validate(
+                    {
+                        "parameter": "LEVEL",
+                        "type": "FLOAT",
+                        "value": 0.0,
+                        "observed": True,
+                        "operations": {"read": True, "write": True, "event": True},
+                        "unique_id": "loom_vcu1_1_level",
+                    }
+                )
+            ],
+        )
+        store.attach_custom_data_points(
+            device_address="VCU1",
+            cdps=[_cdp(name="cover", category="cover", kind="cover_blind", unique_id="loom_vcu1_1")],
+        )
+        looper, ha_bus, seen = self._ha_setup()
+        install_refresh_bridge(group=group, store=store, ha_bus=ha_bus, central_name="home")
+        await bus.publish(
+            event=DeviceAvailabilityChangedEvent(
+                seq=9,
+                kind=Kind.change,
+                ts="2026-05-24T08:00:00Z",
+                payload=DeviceAvailabilityChangedPayload.model_validate(
+                    {
+                        "central": "home",
+                        "interface_id": "home:HmIP-RF",
+                        "device_address": "VCU1",
+                        "available": False,
+                    }
+                ),
+            )
+        )
+        await looper.block_till_done()
+        assert sorted(seen) == ["loom_vcu1_1", "loom_vcu1_1_level"]
 
 
 class TestEventBridge:
