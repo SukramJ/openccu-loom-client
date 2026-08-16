@@ -690,7 +690,10 @@ class _FakeHubClient:
 
 
 def _iface(*, ident: str = "HmIP-RF", central_id: str = "home", connected: bool = True) -> SimpleNamespace:
-    return SimpleNamespace(id=ident, interface=ident, central_id=central_id, connected=connected)
+    # ``id`` is the wire id ``<central>-<interface>`` — the form
+    # GET /interfaces reports and (since api 6.1.0) the connectivity
+    # snapshot + push carry, so the fixtures pin the documented contract.
+    return SimpleNamespace(id=f"{central_id}-{ident}", interface=ident, central_id=central_id, connected=connected)
 
 
 def _addon_status(**overrides: Any) -> AddonUpdateStatus:
@@ -786,12 +789,12 @@ class TestHubPushRouting:
                 kind=Kind.change,
                 ts="2026-06-21T08:00:00Z",
                 payload=HubConnectivityChangedPayload(
-                    central="home", interface_id="HmIP-RF", reachable=False, latency_ms=None
+                    central="home", interface_id="home-HmIP-RF", reachable=False, latency_ms=None
                 ),
             )
         )
         await looper.block_till_done()
-        entry = coord._connectivity_dps["HmIP-RF"]
+        entry = coord._connectivity_dps["home-HmIP-RF"]
         assert entry.sensor.value is False
         assert seen == [entry.sensor.unique_id]
 
@@ -917,7 +920,7 @@ class TestHubPushRouting:
             )
         )
         await looper.block_till_done()
-        pair = coord._install_pair_for(interface_id="HmIP-RF")
+        pair = coord._install_pair_for(interface_id="home-HmIP-RF")
         assert pair is not None
         assert pair.sensor.value == 45
         assert seen == [pair.sensor.unique_id]
@@ -935,8 +938,10 @@ class TestHubAggregateFetch:
                 "inbox": {"legacy_name": "inbox", "value": 2},
                 "update": {"legacy_name": "system_update", "update_available": False, "in_progress": False},
                 "metrics": [{"legacy_name": "system_health", "value": 95, "unit": "%"}],
-                "connectivity": [{"interface_id": "HmIP-RF", "reachable": True}],
-                "install_mode": [{"interface_id": "HmIP-RF", "enabled": True, "remaining_s": 30, "observed": True}],
+                "connectivity": [{"interface_id": "home-HmIP-RF", "reachable": True}],
+                "install_mode": [
+                    {"interface_id": "home-HmIP-RF", "enabled": True, "remaining_s": 30, "observed": True}
+                ],
             }
         )
 
@@ -949,8 +954,8 @@ class TestHubAggregateFetch:
 
         assert coord._inbox_dp.value == 2
         assert coord._metrics_dps.system_health.value == 95
-        assert coord._connectivity_dps["HmIP-RF"].sensor.value is True
-        install = coord._install_pair_for(interface_id="HmIP-RF")
+        assert coord._connectivity_dps["home-HmIP-RF"].sensor.value is True
+        install = coord._install_pair_for(interface_id="home-HmIP-RF")
         assert install is not None
         assert install.sensor.value == 30
         # The per-endpoint fan-out collapsed to a single aggregate call.

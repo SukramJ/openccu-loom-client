@@ -390,16 +390,27 @@ class InterfaceConnectivityDp(HubSingletonDp):
     _category: ClassVar[DataPointCategory] = DataPointCategory.HubBinarySensor
     _data_type: ClassVar[str | None] = "LOGIC"
 
-    def __init__(self, *, store: LoomStore, interface_id: str) -> None:
-        """Bind the connectivity singleton to its interface."""
+    def __init__(self, *, store: LoomStore, interface_id: str, interface: str | None = None) -> None:
+        """
+        Bind the connectivity singleton to its interface.
+
+        ``interface_id`` is the wire id ``<central>-<interface>`` — the key
+        the connectivity snapshot and push carry (api 6.1.0) and the value
+        the ``parameter_slug`` (→ unique_id) is built from, so existing
+        entity-registry ids stay put. ``interface`` is the bare name the
+        CCU reports (``HmIP-RF``); it feeds the *display* name only,
+        matching how the daemon's own MQTT discovery labels the sensor.
+        """
+        display = interface or interface_id
         super().__init__(
             store=store,
-            name=f"Connectivity {interface_id}",
+            name=f"Connectivity {display}",
             parameter_slug=f"connectivity-{slugify(interface_id)}",
             translation_key="interface_connectivity",
             name_key="discovery.connectivity",
         )
         self._interface_id: Final = interface_id
+        self._interface: Final = display
 
     @property
     def interface_id(self) -> str:
@@ -408,8 +419,8 @@ class InterfaceConnectivityDp(HubSingletonDp):
 
     @property
     def name_args(self) -> dict[str, str]:
-        """Fill the catalogue template's `{iface}` with the interface id."""
-        return {"iface": self._interface_id}
+        """Fill the catalogue template's `{iface}` with the bare interface name."""
+        return {"iface": self._interface}
 
     @property
     def available(self) -> bool:
