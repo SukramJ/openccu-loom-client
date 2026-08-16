@@ -15,11 +15,11 @@ dependencies = [
     # stable public API), so cap the calendar-versioned minor until a new
     # series is validated against the drift-guard test
     # (tests/compat/test_aiohomematic_protocol_parity.py) — bump both together.
-    "aiohomematic>=2026.8.1",
+    "aiohomematic>=2026.8.3",
     # Floors match the CI-pinned versions in requirements.txt so a fresh
     # `pip install` resolves a tested-compatible set, not an ancient one.
     "aiohttp>=3.12.0",
-    "openccu-loom-types==0.3.14",
+    "openccu-loom-types==0.3.17",
     "pydantic>=2.12.0",
     "python-slugify>=8.0.0",
 ]

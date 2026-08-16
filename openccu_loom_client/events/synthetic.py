@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from openccu_loom_types.rest import Kind1 as Kind
+from openccu_loom_types.rest import Kind2 as Kind
 
 from openccu_loom_client.events.types import LoomEvent
 

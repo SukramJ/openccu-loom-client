@@ -1,3 +1,62 @@
+# Version 2026.8.13 (2026-08-16)
+
+Syncs the client to daemon 0.60.0 / api 5.34.0 (`openccu-loom-types`
+0.3.17): the availability push reaches HA, the Matter diagnostics
+surface is wrapped, and the classify opt-in is available on the
+transport.
+
+## What's Changed
+
+### Added
+
+- **`DeviceAvailabilityChangedEvent`** — the daemon's
+  `device.availability_changed` broadcast (api 5.27.0, riding the
+  existing `device.{address}.lifecycle` topic) is bound end-to-end. The
+  wire→store bridge flips the device summary's `available` flag
+  (`LoomStore.apply_device_availability_changed`), and the compat
+  refresh bridge fans one keyed `DataPointStateChangedEvent` out per
+  generic and custom data point of the device — mirroring
+  aiohomematic's `publish_device_updated_event(notify_data_points=True)`,
+  since entities read `available` live off the store but only re-render
+  on their own keyed ping. Until now a device that dropped out (or an
+  interface that lost its CCU) kept its bootstrap availability until the
+  next reconcile.
+
+- **Matter diagnostics + maintenance operations** — the daemon's
+  0.59.x/0.60.0 diagnostics build-out, wrapped 1:1 on
+  `MatterOperations`: `list_sessions` (secure sessions + id-space
+  occupancy, api 5.21.0/5.29.0), `list_endpoints` (the topology as a
+  controller sees it), `get_mdns_diagnostics` (what mDNS announces and
+  what would keep a controller from finding it), `get_compatibility`
+  (fabric→ecosystem classification + findings; all api 5.22.0),
+  `list_diagnostic_events` (the bounded pairing/session/discovery trace,
+  api 5.33.0), `force_sync` (rebuild endpoints without touching a
+  pairing) and `factory_reset` (api 5.31.0). `factory_reset` requires
+  the caller to pass `confirm="remove-all-fabrics"` explicitly —
+  deliberately not defaulted, matching the daemon's own guard against a
+  replayed generic confirmation.
+
+- **`WsTransport(classify=True)`** — opt into the daemon's inline
+  classification (api 5.34.0): every subscribe frame carries
+  `classify: true` and `datapoint.value_changed` payloads then include
+  `category` / `data_point_type`. Default off; this client classifies
+  through the store's data-point factories, so the flag exists for
+  consumers reading the wire payloads directly.
+
+### Changed
+
+- **`openccu-loom-types` 0.3.17 / aiohomematic 2026.8.3.** The
+  regenerated types shift the auto-numbered enum aliases: the
+  `WsEnvelope` kind enum is now `Kind2` (`Kind1` names the new Matter
+  diagnostic-event kind), so every `Kind1 as Kind` import moved to
+  `Kind2 as Kind`. `MatterFabric` gains the daemon-resolved
+  `vendor_name`, `InboxDevice` the `pending_creation` marker (api
+  5.28.0 — the already-wrapped `DevicesOperations.accept_device`
+  materialises such a device), the alarm-journal class enum gains
+  `maintenance`, and `AlarmTriggeredPayload.mode` can now be `disarmed`
+  for always-on triggers — all consumed through the types with no code
+  change.
+
 # Version 2026.8.12 (2026-08-12)
 
 Names the two entities a consumer builds beside an alarm panel out of

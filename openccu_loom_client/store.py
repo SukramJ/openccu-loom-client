@@ -73,6 +73,7 @@ if TYPE_CHECKING:
         AlarmTriggeredPayload,
         CustomDataPointStateChangedPayload,
         DataPointValueChangedPayload,
+        DeviceAvailabilityChangedPayload,
         DeviceCreatedPayload,
         DeviceRemovedPayload,
         ProgramChangedPayload,
@@ -1093,6 +1094,28 @@ class LoomStore:
             has_sub_devices=False,
         )
         self._devices[payload.device_address] = Device(summary=stub, store=self)
+
+    def apply_device_availability_changed(self, *, payload: DeviceAvailabilityChangedPayload) -> None:
+        """
+        Flip a device's ``available`` flag from a ``device.availability_changed`` push.
+
+        The payload's ``available`` matches the ``available`` field of the
+        device's REST summary, so the summary is the single place it lands;
+        every reader (:attr:`Device.available`, the compat twins' per-entity
+        ``available``) resolves it live from there. A push for an unknown
+        device is logged + ignored (same rationale as
+        :meth:`apply_value_changed` — the bootstrap owns catalogue parity).
+        """
+        device = self._devices.get(payload.device_address)
+        if device is None:
+            _LOGGER.debug(
+                "availability_changed for unknown device %s — ignoring (catalogue out of sync)",
+                payload.device_address,
+            )
+            return
+        if device.summary.available == payload.available:
+            return
+        device._update_summary(summary=device.summary.model_copy(update={"available": payload.available}))
 
     def apply_device_removed(self, *, payload: DeviceRemovedPayload) -> None:
         """Drop a device and everything that hung off it."""

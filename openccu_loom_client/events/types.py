@@ -23,7 +23,7 @@ from dataclasses import dataclass
 import logging
 from typing import Any, ClassVar, Final
 
-from openccu_loom_types.rest import Kind1 as Kind
+from openccu_loom_types.rest import Kind2 as Kind
 from openccu_loom_types.ws import (
     AddonUpdateStatus,
     AlarmCountdownPayload,
@@ -40,6 +40,7 @@ from openccu_loom_types.ws import (
     CentralStateChangedPayload,
     CustomDataPointStateChangedPayload,
     DataPointValueChangedPayload,
+    DeviceAvailabilityChangedPayload,
     DeviceCreatedPayload,
     DeviceRemovedPayload,
     DeviceTriggerPayload,
@@ -402,6 +403,28 @@ class DeviceRemovedEvent(LoomEvent):
 
     payload: DeviceRemovedPayload
     type_id: ClassVar[str] = "device.removed"
+
+    def __post_init__(self) -> None:
+        """Default the routing key to the payload's central name."""
+        if self.event_key is None:
+            self.event_key = self.payload.central
+
+
+@dataclass(slots=True, kw_only=True)
+class DeviceAvailabilityChangedEvent(LoomEvent):
+    """
+    A device's effective reachability flipped (daemon api ≥ 5.27.0).
+
+    Rides the same ``device.{address}.lifecycle`` topic as
+    ``device.created`` — subscribers route by the envelope ``type``.
+    Fires for both causes: an interface that lost its CCU connection,
+    and a device reporting UNREACH / STICKY_UNREACH on its own.
+    ``available`` carries the post-transition state and matches the
+    ``available`` field of the device's REST summary.
+    """
+
+    payload: DeviceAvailabilityChangedPayload
+    type_id: ClassVar[str] = "device.availability_changed"
 
     def __post_init__(self) -> None:
         """Default the routing key to the payload's central name."""
@@ -792,6 +815,10 @@ _EVENT_REGISTRY: Final[dict[str, tuple[Callable[..., LoomEvent], type[BaseModel]
     AddonUpdateStateChangedEvent.type_id: (AddonUpdateStateChangedEvent, AddonUpdateStatus),
     DeviceCreatedEvent.type_id: (DeviceCreatedEvent, DeviceCreatedPayload),
     DeviceRemovedEvent.type_id: (DeviceRemovedEvent, DeviceRemovedPayload),
+    DeviceAvailabilityChangedEvent.type_id: (
+        DeviceAvailabilityChangedEvent,
+        DeviceAvailabilityChangedPayload,
+    ),
     DeviceTriggerEvent.type_id: (DeviceTriggerEvent, DeviceTriggerPayload),
     DataPointOptimisticRolledBackEvent.type_id: (
         DataPointOptimisticRolledBackEvent,

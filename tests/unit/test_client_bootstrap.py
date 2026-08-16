@@ -17,13 +17,18 @@ import asyncio
 from datetime import UTC, datetime
 
 from openccu_loom_types import DAEMON_API_VERSION
-from openccu_loom_types.rest import Kind1 as Kind
-from openccu_loom_types.ws import DataPointValueChangedPayload, DeviceCreatedPayload
+from openccu_loom_types.rest import Kind2 as Kind
+from openccu_loom_types.ws import DataPointValueChangedPayload, DeviceAvailabilityChangedPayload, DeviceCreatedPayload
 import pytest
 
 from openccu_loom_client import LoomClient
 from openccu_loom_client.bridge import bind_ws_events_to_store
-from openccu_loom_client.events import DataPointsCreatedEvent, DataPointValueChangedEvent, DeviceCreatedEvent
+from openccu_loom_client.events import (
+    DataPointsCreatedEvent,
+    DataPointValueChangedEvent,
+    DeviceAvailabilityChangedEvent,
+    DeviceCreatedEvent,
+)
 from tests.helpers import MockDaemon
 
 _INFO = {
@@ -267,6 +272,35 @@ class TestWsBridge:
             dp_after = client.store.get_data_point(address="VCU0001", channel=1, parameter="LEVEL")
             assert dp_after is not None
             assert dp_after.value == 0.75
+            group.cancel()
+
+    async def test_availability_changed_event_updates_store(self, mock_daemon: MockDaemon) -> None:
+        """The bridge forwards ``device.availability_changed`` to the store."""
+        _wire_endpoints(mock_daemon)
+        async with LoomClient(config=mock_daemon.config) as client:
+            await client.bootstrap()
+            group = client.events.create_subscription_group(name="test-bridge")
+            bind_ws_events_to_store(bus=client.events, store=client.store, group=group)
+
+            assert client.store.get_device(address="VCU0001").available is True
+            await client.events.publish(
+                event=DeviceAvailabilityChangedEvent(
+                    seq=2,
+                    kind=Kind.change,
+                    ts=datetime(2026, 8, 16, 10, 0, 0, tzinfo=UTC),
+                    topic="device.VCU0001.lifecycle",
+                    type="device.availability_changed",
+                    payload=DeviceAvailabilityChangedPayload.model_validate(
+                        {
+                            "central": "home",
+                            "interface_id": "home:HmIP-RF",
+                            "device_address": "VCU0001",
+                            "available": False,
+                        }
+                    ),
+                )
+            )
+            assert client.store.get_device(address="VCU0001").available is False
             group.cancel()
 
 

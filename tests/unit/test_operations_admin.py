@@ -310,6 +310,133 @@ class TestMatterOperations:
         status = await MatterOperations(transport=t).get_status()
         assert status.endpoint_count == 5
 
+    async def test_list_sessions_carries_occupancy(self, http) -> None:
+        t, mock = http
+        mock.get(
+            "/api/v1/matter/sessions",
+            payload={
+                "sessions": [
+                    {
+                        "session_id": 42,
+                        "fabric_index": 1,
+                        "peer_node_id": "0x000000000001B669",
+                        "local_node_id": "0x0000000000000001",
+                        "is_pase": False,
+                        "subscriptions": 2,
+                        "last_activity": "2026-08-16T10:00:00Z",
+                        "last_peer_activity": "2026-08-16T09:59:00Z",
+                        "idle_seconds": 5,
+                        "peer_idle_seconds": 65,
+                    }
+                ],
+                "occupancy": {"live": 1, "reserved": 0, "capacity": 65534, "free": 65533},
+            },
+        )
+        result = await MatterOperations(transport=t).list_sessions()
+        assert result.sessions[0].peer_idle_seconds == 65
+        assert result.occupancy.free == 65533
+
+    async def test_list_endpoints(self, http) -> None:
+        t, mock = http
+        mock.get(
+            "/api/v1/matter/endpoints",
+            payload={
+                "endpoints": [
+                    {
+                        "endpoint_id": 2,
+                        "parent_endpoint_id": 1,
+                        "device_type": 256,
+                        "device_type_name": "On/Off Light",
+                        "reachable": True,
+                        "friendly_name": "Flur",
+                        "device_address": "ABC0000001",
+                        "channel_address": "ABC0000001:3",
+                        "clusters": [{"id": 6, "name": "OnOff", "revision": 6}],
+                    }
+                ]
+            },
+        )
+        result = await MatterOperations(transport=t).list_endpoints()
+        assert result.endpoints[0].clusters[0].name == "OnOff"
+
+    async def test_get_mdns_diagnostics(self, http) -> None:
+        t, mock = http
+        mock.get(
+            "/api/v1/matter/mdns",
+            payload={
+                "advertising": True,
+                "services": [
+                    {
+                        "service_type": "_matterc._udp",
+                        "instance_name": "A1B2C3D4E5F60708",
+                        "host_name": "loom.local",
+                        "port": 5540,
+                        "addresses": ["192.0.2.10"],
+                        "subtypes": ["_L840", "_CM"],
+                        "txt": {"D": "840"},
+                    }
+                ],
+                "findings": [{"severity": "warning", "code": "no-ipv6", "message": "announcement without IPv6"}],
+            },
+        )
+        result = await MatterOperations(transport=t).get_mdns_diagnostics()
+        assert result.advertising is True
+        assert result.findings[0].code == "no-ipv6"
+
+    async def test_get_compatibility(self, http) -> None:
+        t, mock = http
+        mock.get(
+            "/api/v1/matter/compatibility",
+            payload={
+                "ecosystems": [{"ecosystem": "apple", "vendor_id": 4937, "fabric_index": 1, "label": "Apple Home"}],
+                "endpoint_count": 12,
+                "findings": [
+                    {
+                        "ecosystem": "google",
+                        "code": "device-type-hidden",
+                        "message": "valve will not appear in Google Home",
+                        "device_type": 66,
+                    }
+                ],
+            },
+        )
+        result = await MatterOperations(transport=t).get_compatibility()
+        assert result.ecosystems[0].ecosystem.value == "apple"
+        assert result.findings[0].device_type == 66
+
+    async def test_list_diagnostic_events(self, http) -> None:
+        t, mock = http
+        mock.get(
+            "/api/v1/matter/events",
+            payload={
+                "events": [
+                    {
+                        "at": "2026-08-16T10:00:00Z",
+                        "kind": "pairing",
+                        "severity": "warning",
+                        "message": "commissioner refused: another was already mid-handshake",
+                        "detail": {"peer": "192.0.2.20"},
+                    }
+                ]
+            },
+        )
+        result = await MatterOperations(transport=t).list_diagnostic_events()
+        assert result.events[0].kind.value == "pairing"
+
+    async def test_force_sync(self, http) -> None:
+        t, mock = http
+        mock.post("/api/v1/matter/force-sync", status=204)
+        await MatterOperations(transport=t).force_sync()
+        assert mock.requests[-1].path == "/api/v1/matter/force-sync"
+
+    async def test_factory_reset_names_the_action(self, http) -> None:
+        # The daemon refuses a reset that does not carry the literal
+        # confirm token — pin that the client sends it verbatim.
+        t, mock = http
+        mock.post("/api/v1/matter/factory-reset", status=204)
+        await MatterOperations(transport=t).factory_reset(confirm="remove-all-fabrics")
+        assert mock.requests[-1].json() == {"confirm": "remove-all-fabrics"}
+
 
 class TestVisibilityOperations:
     async def test_get_unignore(self, http) -> None:

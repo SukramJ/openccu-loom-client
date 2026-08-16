@@ -23,7 +23,7 @@ from openccu_loom_types.rest import (
     AlarmPanelEntity,
     AlarmTriggeredMotionSensor,
     AlarmZoneStatus,
-    Kind1 as Kind,
+    Kind2 as Kind,
 )
 from openccu_loom_types.ws import (
     AlarmCountdownPayload,

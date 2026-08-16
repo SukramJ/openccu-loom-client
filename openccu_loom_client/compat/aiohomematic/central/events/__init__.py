@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, ClassVar, Final
 
-from openccu_loom_types.rest import Kind1 as Kind
+from openccu_loom_types.rest import Kind2 as Kind
 
 from openccu_loom_client.events import (
     CentralStateChangedEvent,

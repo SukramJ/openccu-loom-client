@@ -60,6 +60,7 @@ from openccu_loom_client.events import (
     CentralStateChangedEvent as LoomCentralStateChangedEvent,
     CustomDataPointStateChangedEvent,
     DataPointValueChangedEvent,
+    DeviceAvailabilityChangedEvent as LoomDeviceAvailabilityChangedEvent,
     DeviceCreatedEvent as LoomDeviceCreatedEvent,
     DeviceRemovedEvent as LoomDeviceRemovedEvent,
     ProgramChangedEvent,
@@ -100,6 +101,7 @@ def install_refresh_bridge(
     _wire_value_events(group=group, store=store, ha_bus=ha_bus)
     _wire_trigger_and_rollback(group=group, store=store, ha_bus=ha_bus, event_group_resolver=event_group_resolver)
     _wire_central_and_lifecycle(group=group, ha_bus=ha_bus, central_name=central_name)
+    _wire_availability(group=group, store=store, ha_bus=ha_bus)
     _wire_alarm_events(group=group, store=store, ha_bus=ha_bus)
 
 
@@ -268,6 +270,36 @@ def _wire_trigger_and_rollback(
 
     group.subscribe(event_type=LoomDeviceTriggerEvent, handler=on_trigger)
     group.subscribe(event_type=DataPointOptimisticRolledBackEvent, handler=on_rollback)
+
+
+def _wire_availability(*, group: SubscriptionGroup, store: LoomStore, ha_bus: AioEventBus) -> None:
+    """
+    Fan a ``device.availability_changed`` push out to the device's entities.
+
+    HA entities read ``available`` live off the store (twin → device
+    summary), but they only re-render on a keyed
+    :class:`DataPointStateChangedEvent` — availability carries no per-DP
+    value push, so nothing else reaches them. Mirror aiohomematic's
+    ``publish_device_updated_event(notify_data_points=True)``: ping every
+    generic data point and every custom data point of the device, keyed
+    by the daemon-supplied canonical ``unique_id`` each summary carries.
+    (The store flip itself rides the wire→store bridge; this fan-out is
+    ordering-independent because the pinged entities re-read the store.)
+    """
+
+    async def on_availability(event: LoomDeviceAvailabilityChangedEvent) -> None:
+        address = event.payload.device_address
+        for channel in store.channels_of(address=address):
+            for dp in store.data_points_of(address=address, channel=channel.number):
+                await ha_bus.publish(
+                    event=DataPointStateChangedEvent(timestamp=event.ts, unique_id=dp.summary.unique_id, new_value=None)
+                )
+        for cdp in store.custom_data_points_of(address=address):
+            await ha_bus.publish(
+                event=DataPointStateChangedEvent(timestamp=event.ts, unique_id=cdp.summary.unique_id, new_value=None)
+            )
+
+    group.subscribe(event_type=LoomDeviceAvailabilityChangedEvent, handler=on_availability)
 
 
 def _wire_alarm_events(*, group: SubscriptionGroup, store: LoomStore, ha_bus: AioEventBus) -> None:
