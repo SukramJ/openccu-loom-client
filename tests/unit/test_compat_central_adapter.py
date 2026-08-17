@@ -25,7 +25,7 @@ from openccu_loom_types.rest import AlarmMessage, DataPointSummary, Link, Servic
 import pytest
 
 from openccu_loom_client import BasicAuth, BearerAuth
-from openccu_loom_client.compat.aiohomematic._upstream import ParamsetKey
+from openccu_loom_client.compat.aiohomematic._upstream import BackupData, ParamsetKey
 from openccu_loom_client.compat.aiohomematic.central import CentralConfig, check_config
 from openccu_loom_client.compat.aiohomematic.central.adapter import (
     _ClientCoordinator,
@@ -1105,3 +1105,41 @@ class TestIntegrationDashboardSurface:
         store.clear_incidents()
         await asyncio.sleep(0)
         assert calls == ["DELETE /incidents"]
+
+
+class TestCreateBackupAndDownload:
+    """
+    #579: the compat backup surface returns a ``BackupData``.
+
+    HA's "create backup" button (and the backup agent, the update entity and
+    the WS API) read ``.filename`` / ``.content`` off the result, exactly as
+    they do for aiohomematic's ``CentralUnit.create_backup_and_download``.
+    Returning the daemon's raw trigger dict raised ``AttributeError`` on every
+    press; this pins the aiohomematic-shaped return.
+    """
+
+    async def test_returns_backup_data_with_filename_and_content(self, connected) -> None:
+        central, mock_daemon = connected
+        # POST /backups is async: it returns a job id; the archive then appears
+        # in GET /backups, and is fetched by id.
+        mock_daemon.post(f"{_BASE}/backups", payload={"id": "bk-1"}, status=202)
+        mock_daemon.get(
+            f"{_BASE}/backups",
+            payload=[{"id": "bk-1", "central": "home", "bytes": 11, "created_at": "2026-08-17T00:00:00Z"}],
+        )
+        mock_daemon.get(
+            f"{_BASE}/backups/bk-1/download",
+            body=b"SBK-ARCHIVE",
+            content_type="application/octet-stream",
+        )
+
+        result = await central.create_backup_and_download()
+
+        assert isinstance(result, BackupData)
+        assert result.content == b"SBK-ARCHIVE"
+        assert result.filename.endswith(".sbk")
+
+    async def test_returns_none_when_the_trigger_yields_no_id(self, connected) -> None:
+        central, mock_daemon = connected
+        mock_daemon.post(f"{_BASE}/backups", payload={}, status=202)
+        assert await central.create_backup_and_download() is None

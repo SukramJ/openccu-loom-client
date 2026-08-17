@@ -223,6 +223,21 @@ class TestDiagnosticsOperations:
 
 
 class TestBackupOperations:
+    async def test_list_backups_returns_entries(self, http) -> None:
+        # GET /backups is a JSON array of BackupEntry — the body is a list, not
+        # an object, so it must parse into a list of models.
+        t, mock = http
+        mock.get(
+            "/api/v1/backups",
+            payload=[
+                {"id": "bk-1", "central": "home", "bytes": 2048, "created_at": "2026-08-17T00:00:00Z"},
+                {"id": "bk-2", "central": "home", "bytes": 4096, "created_at": "2026-08-17T01:00:00Z"},
+            ],
+        )
+        entries = await BackupOperations(transport=t).list_backups()
+        assert [e.id for e in entries] == ["bk-1", "bk-2"]
+        assert entries[0].bytes == 2048
+
     async def test_download_backup_returns_bytes(self, http) -> None:
         t, mock = http
         mock.get(

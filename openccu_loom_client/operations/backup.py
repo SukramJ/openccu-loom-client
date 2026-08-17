@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from openccu_loom_types.rest import BackupEntry
+
 from openccu_loom_client.operations._base import _OperationsBase
 
 
@@ -25,10 +27,10 @@ class BackupOperations(_OperationsBase):
         payload = await self._transport.request(method="POST", path="/backups", allow_retry=False)
         return dict(payload or {})
 
-    async def list_backups(self) -> dict[str, Any]:
-        """List locally stored backups. Wire: ``GET /backups``."""
+    async def list_backups(self) -> list[BackupEntry]:
+        """List locally stored backups (``GET /backups`` returns a JSON array of ``BackupEntry``)."""
         payload = await self._transport.request(method="GET", path="/backups")
-        return dict(payload or {})
+        return [BackupEntry.model_validate(item) for item in (payload or [])]
 
     async def download_backup(self, *, backup_id: str) -> bytes:
         """Stream a backup ``.sbk`` file. Wire: ``GET /backups/{id}/download``."""

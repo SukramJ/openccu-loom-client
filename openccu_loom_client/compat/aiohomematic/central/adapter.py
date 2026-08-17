@@ -50,6 +50,7 @@ from openccu_loom_types.enums import CentralState, DataPointCategory
 
 from openccu_loom_client.compat.aiohomematic._upstream import (
     AlarmMessageData,
+    BackupData,
     CentralHealth,
     CentralState as AioCentralState,
     ClientState as AioClientState,
@@ -105,6 +106,13 @@ if TYPE_CHECKING:
     from openccu_loom_client.model import Device
 
 _LOGGER: Final = logging.getLogger(__name__)
+
+# create_backup_and_download poll window: the daemon's POST /backups is async
+# (returns a job id; the archive appears in GET /backups once the CCU produces
+# it). Poll at this cadence up to this many times before giving up — a CCU
+# backup usually completes within a couple of minutes.
+_CREATE_BACKUP_POLL_INTERVAL_S: Final = 2.0
+_CREATE_BACKUP_POLL_ATTEMPTS: Final = 120
 
 # Slow reconcile cadence. Every hub singleton is now push-driven (see
 # _HubCoordinator.install_push_routing — system_update included since daemon
@@ -1583,15 +1591,59 @@ class LoomCentralAdapter:
             raise
         return self._system_information
 
-    async def create_backup_and_download(self) -> dict[str, Any]:
+    async def create_backup_and_download(self) -> BackupData | None:
         """
-        Trigger a CCU backup.
+        Create a CCU backup and download it.
 
-        Returns the daemon's trigger response. The downloadable archive
-        is fetched separately via ``client.backup.download_backup``
-        once the daemon reports the backup id.
+        Mirrors aiohomematic's ``CentralUnit.create_backup_and_download``: the
+        HA consumers (the "create backup" button, the HA backup agent, the
+        update entity and the WS API) read ``.filename`` / ``.content`` off the
+        result, so this returns a :class:`BackupData` — not the daemon's raw
+        trigger dict, which those consumers cannot read.
+
+        The daemon's ``POST /backups`` is asynchronous: it returns a job id and
+        the archive appears in ``GET /backups`` once the CCU has produced it.
+        This triggers the backup, waits for that id to surface, then downloads
+        the archive. Returns ``None`` if the backup could not be created,
+        did not complete within the poll window, or failed to download.
         """
-        return await self._client.backup.trigger_backup()
+        try:
+            trigger = await self._client.backup.trigger_backup()
+        except Exception:  # noqa: BLE001 — a failed trigger is reported as None, like aiohomematic
+            _LOGGER.warning("create_backup: trigger failed")
+            return None
+        backup_id = str(trigger.get("id", "")) if isinstance(trigger, dict) else ""
+        if not backup_id:
+            _LOGGER.warning("create_backup: daemon returned no backup id")
+            return None
+        for _ in range(_CREATE_BACKUP_POLL_ATTEMPTS):
+            try:
+                if any(entry.id == backup_id for entry in await self._client.backup.list_backups()):
+                    break
+            except Exception:  # noqa: BLE001 — a transient list failure just retries
+                _LOGGER.debug("create_backup: backup-list poll failed, retrying")
+            await asyncio.sleep(_CREATE_BACKUP_POLL_INTERVAL_S)
+        else:
+            _LOGGER.warning(
+                "create_backup: backup %s did not complete within %.0fs",
+                backup_id,
+                _CREATE_BACKUP_POLL_ATTEMPTS * _CREATE_BACKUP_POLL_INTERVAL_S,
+            )
+            return None
+        try:
+            content = await self._client.backup.download_backup(backup_id=backup_id)
+        except Exception:  # noqa: BLE001 — a failed download is reported as None
+            _LOGGER.warning("create_backup: download of %s failed", backup_id)
+            return None
+        return BackupData(filename=self._backup_filename(), content=content)
+
+    def _backup_filename(self) -> str:
+        """Backup filename, mirroring aiohomematic's ``hostname-version-timestamp.sbk``."""
+        info = self._system_information
+        hostname = info.hostname or info.serial or self._serial or self._name or "CCU"
+        version = info.version or "unknown"
+        timestamp = datetime.now(tz=UTC).strftime("%Y-%m-%d-%H%M")
+        return f"{hostname}-{version}-{timestamp}.sbk"
 
     # ---- internals ----
 

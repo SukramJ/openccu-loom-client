@@ -1,3 +1,39 @@
+# Version 2026.8.17 (2026-08-17)
+
+Syncs the client to daemon 0.61.3 / api 6.2.0 (`openccu-loom-types`
+0.4.1) and fixes the backup-download surface (#579). The 6.1.0 → 6.2.0
+bump is a set of backward-compatible additions (the new optional
+`SecuritySourceView.override_included` field, documented sysvar
+404/409 responses, WS `args`), so bumping the pinned types — whose
+`SCHEMA_DIGEST` the transport checks at connect — is the only change
+the contract itself requires.
+
+## What's Changed
+
+### Fixed
+
+- **`LoomCentralAdapter.create_backup_and_download` now returns a
+  `BackupData`** instead of the daemon's raw trigger dict (#579). HA's
+  "create backup" button — and the backup agent, the update entity and
+  the WS API — read `.filename` / `.content` off the result exactly as
+  they do for aiohomematic's `CentralUnit.create_backup_and_download`,
+  so the raw dict raised `AttributeError` on every press. The compat
+  method now mirrors aiohomematic: it triggers the backup, waits for the
+  archive to appear in `GET /backups`, downloads it, and returns
+  `BackupData(filename, content)` (or `None` on failure/timeout). The
+  filename follows aiohomematic's `hostname-version-timestamp.sbk` form.
+- **`BackupOperations.list_backups` parses the array it receives.**
+  `GET /backups` returns a JSON array of `BackupEntry`, but the method
+  built `dict(payload)` over it — which raises on a non-empty list. It
+  now returns `list[BackupEntry]`; the method had no callers, so the
+  latent break surfaced only now that the backup flow polls it.
+
+### Changed
+
+- Pinned `openccu-loom-types` to `0.4.1` (regenerated from daemon
+  0.61.3, api 6.2.0), so the connect-time `SCHEMA_DIGEST` check matches
+  the daemon build.
+
 # Version 2026.8.13 (2026-08-16)
 
 Syncs the client to daemon 0.61.1 / api 6.1.0 (`openccu-loom-types`
