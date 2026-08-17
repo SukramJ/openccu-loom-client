@@ -1,3 +1,29 @@
+# Version 2026.8.18 (2026-08-17)
+
+Syncs the client to daemon 0.61.4 / api 6.2.1 (`openccu-loom-types`
+0.4.2). The 6.2.0 → 6.2.1 bump is a backward-compatible value
+correction: `GET /hub/data-points` now reports
+`HubInstallModeDataPoint.interface_id` as the wire id
+`<central>-<interface>` (matching the sibling
+`HubConnectivityDataPoint.interface_id` and `GET /interfaces`) instead
+of the bare interface name. The client already keyed its install-mode
+index off `GET /interfaces` by that wire id, so this is the daemon side
+finally lining up with what the client expected — the install-mode
+sensors now seed on a cold start instead of staying blank until the
+first pairing window. No client code change is required; the type is
+unchanged (only its documentation) and the transport's major.minor
+compatibility check still matches (6.2). Bumping the pinned types —
+whose `SCHEMA_DIGEST` and `DAEMON_API_VERSION` the transport checks at
+connect — is the only change the contract requires.
+
+## What's Changed
+
+### Changed
+
+- **Pinned `openccu-loom-types` to 0.4.2** (daemon 0.61.4 / api 6.2.1).
+  Carries the corrected `HubInstallModeDataPoint.interface_id`
+  wire-id semantics + refreshed `SCHEMA_DIGEST` / `DAEMON_API_VERSION`.
+
 # Version 2026.8.17 (2026-08-17)
 
 Syncs the client to daemon 0.61.3 / api 6.2.0 (`openccu-loom-types`
