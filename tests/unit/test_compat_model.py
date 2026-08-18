@@ -569,6 +569,75 @@ class TestProtocolSurfacePresentation:
         assert dp.value_translations == {}
 
 
+class TestGenericMultiplier:
+    """
+    ``multiplier`` scales min/max/step/value for HA's number & sensor platforms.
+
+    types 0.5.0 adds ``DataPointSummary.multiplier`` and omits it when the
+    factor is the trivial 1, so absent must resolve to 1.0 — not 0.0 (which
+    would zero every scaled value) and not ``None`` (which HA would reject
+    as a multiplier).
+    """
+
+    def _dp(self, *, multiplier: float | None) -> DpSensor:
+        store = LoomStore(transport=_FakeTransport())  # type: ignore[arg-type]
+        store.set_data_point_factory(factory=make_generic_data_point)
+        store.attach_device_detail(
+            detail=DeviceDetail.model_validate(
+                {
+                    "address": "VCU1",
+                    "interface": "home:HmIP-RF",
+                    "interface_id": "home:HmIP-RF",
+                    "model": "HmIP-PSM",
+                    "name": "Lamp",
+                    "available": True,
+                    "channels_count": 1,
+                    "channels": [
+                        {
+                            "address": "VCU1:1",
+                            "number": 1,
+                            "paramset_key": "VALUES",
+                            "data_points_count": 1,
+                        }
+                    ],
+                    "updatable": False,
+                    "update_available": False,
+                    "master_pushes_config_pending": False,
+                    "has_sub_devices": False,
+                    "firmware": {},
+                    "availability": {},
+                }
+            )
+        )
+        dp: dict[str, Any] = {
+            "parameter": "LEVEL",
+            "type": "FLOAT",
+            "value": 0.42,
+            "observed": True,
+            # read-only FLOAT resolves to DpSensor (resolve_generic_class).
+            "operations": {"read": True, "write": False, "event": True},
+            "unique_id": "loom_test_level",
+        }
+        if multiplier is not None:
+            dp["multiplier"] = multiplier
+        store.attach_channel_data_points(
+            device_address="VCU1",
+            channel_number=1,
+            data_points=[DataPointSummary.model_validate(dp)],
+        )
+        result = store.get_data_point(address="VCU1", channel=1, parameter="LEVEL")
+        assert isinstance(result, DpSensor)
+        return result
+
+    def test_multiplier_from_summary(self) -> None:
+        dp = self._dp(multiplier=100.0)
+        assert dp.multiplier == 100.0
+
+    def test_multiplier_defaults_to_one_when_absent(self) -> None:
+        dp = self._dp(multiplier=None)
+        assert dp.multiplier == 1.0
+
+
 class _FakeHubOps:
     """Stand-in for ``client.hub`` recording how often the message lists are fetched."""
 

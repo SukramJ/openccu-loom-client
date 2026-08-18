@@ -159,7 +159,19 @@ class _GenericEntitySurface(_GenericProtocolSurface):
 
     @property
     def multiplier(self) -> float:
-        return 1.0
+        """
+        Factor converting the raw wire value into the unit it declares.
+
+        Home Assistant scales min, max, step and the value itself by this
+        (``number.py`` and ``sensor.py`` in the integration), so the
+        hard-coded 1.0 this used to return rendered every data point whose
+        CCU unit is ``100%`` at a hundredth of its real value: a level of
+        42 % showed as 0.42 %, and a written number went back unscaled.
+
+        The daemon reports the factor on the data-point summary and omits it
+        when it is the trivial 1, so absent means 1 rather than unknown.
+        """
+        return self.summary.multiplier or 1.0
 
     @property
     def modified_at(self) -> Any:

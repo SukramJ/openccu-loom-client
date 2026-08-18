@@ -44,6 +44,7 @@ from openccu_loom_types.rest import (
     AlarmTriggeredMotionSensor,
     AlarmWalkTestStatus,
     AlarmZone,
+    AlarmZoneCreate,
     AlarmZoneStatus,
 )
 
@@ -99,12 +100,18 @@ class AlarmOperations(_OperationsBase):
         payload = await self._transport.request(method="GET", path=f"/alarm/zones/{quote(zone_id, safe='')}")
         return AlarmZone.model_validate(payload)
 
-    async def create_zone(self, *, zone: AlarmZone) -> AlarmZone:
+    async def create_zone(self, *, zone: AlarmZone | AlarmZoneCreate) -> AlarmZone:
         """
         Create an alarm zone.
 
         Wire: ``POST /alarm/zones``. Not retried — creation is not
         idempotent (a retry surfaces as a duplicate-id error).
+
+        Since daemon api 7.1.0 the request body is ``AlarmZoneCreate``, which
+        omits ``id``: the server mints its own and ignores one sent in the
+        body. Prefer it — building an ``AlarmZone`` here means inventing an id
+        that is discarded. The full model stays accepted so existing callers
+        keep working.
         """
         payload = await self._transport.request(
             method="POST",

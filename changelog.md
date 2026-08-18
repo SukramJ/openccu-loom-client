@@ -1,3 +1,42 @@
+# Version 2026.8.19 (2026-08-18)
+
+Syncs the client to daemon 0.63.0 / api 7.1.0 (`openccu-loom-types`
+0.5.0). The api line moves 6.2.1 → 7.1.0, but the generated wire surface
+barely moved: the major step was a specification correction on the daemon
+side (`GET /diagnostics/capture` declared an object while it had always
+answered an array), which does not touch any model this client consumes.
+Four additions do.
+
+- **A data point reports its real multiplier.** The compat layer returned a
+  hard-coded `1.0`, so every data point whose CCU unit is `100%` rendered
+  at a hundredth of its value in Home Assistant — a level of 42 % showed as
+  0.42 %, and a written number went back unscaled. HA scales min, max, step
+  and the value itself by this factor. The daemon now reports it on the
+  data-point summary, and the compat layer passes it through; absent still
+  means 1.
+- **A CCU backup is named by the daemon.** `create_backup_and_download`
+  takes the archive name from the backup entry when the daemon recorded
+  one. That name is built from the CCU's hostname and firmware version at
+  the moment the backup was taken, which is what the name is supposed to
+  state; rebuilding it here reads the _current_ system information, so an
+  archive downloaded after a firmware update claimed the new version. The
+  local construction stays as the fallback for an older daemon.
+- **`create_zone` accepts `AlarmZoneCreate`.** The daemon declares it as
+  the `POST /alarm/zones` body: it omits `id`, which the server mints
+  itself and ignores when sent. The full `AlarmZone` stays accepted.
+- `MatterExposure` carries `device_type_label` and `EditSessionRequest`
+  makes `token` optional — both flow through the models untouched.
+
+### Fixed
+
+- **The CCU's firmware version is no longer the daemon's build version.**
+  `SystemInformation.version` was filled from `GET /info`, which reports
+  the OpenCCU-Loom build, instead of the CCU entry on `GET /system/ccu`.
+  Home Assistant showed that as the CCU device's `sw_version`, and the
+  backup filename carried it too — `Otto-0.61.4-…` where
+  `Otto-3.87.6.20260404-…` belongs. It now reads the CCU entry and falls
+  back to the daemon's value only before the first successful CCU connect.
+
 # Version 2026.8.18 (2026-08-17)
 
 Syncs the client to daemon 0.61.4 / api 6.2.1 (`openccu-loom-types`
