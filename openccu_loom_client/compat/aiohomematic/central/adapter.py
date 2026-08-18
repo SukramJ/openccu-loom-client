@@ -47,6 +47,7 @@ import logging
 from typing import TYPE_CHECKING, Any, Final, cast
 
 from openccu_loom_types.enums import CentralState, DataPointCategory
+from openccu_loom_types.rest import BackupEntry
 
 from openccu_loom_client.compat.aiohomematic._upstream import (
     AlarmMessageData,
@@ -1616,9 +1617,14 @@ class LoomCentralAdapter:
         if not backup_id:
             _LOGGER.warning("create_backup: daemon returned no backup id")
             return None
+        entry: BackupEntry | None = None
         for _ in range(_CREATE_BACKUP_POLL_ATTEMPTS):
             try:
-                if any(entry.id == backup_id for entry in await self._client.backup.list_backups()):
+                entry = next(
+                    (item for item in await self._client.backup.list_backups() if item.id == backup_id),
+                    None,
+                )
+                if entry is not None:
                     break
             except Exception:  # noqa: BLE001 — a transient list failure just retries
                 _LOGGER.debug("create_backup: backup-list poll failed, retrying")
@@ -1635,10 +1641,29 @@ class LoomCentralAdapter:
         except Exception:  # noqa: BLE001 — a failed download is reported as None
             _LOGGER.warning("create_backup: download of %s failed", backup_id)
             return None
-        return BackupData(filename=self._backup_filename(), content=content)
+        return BackupData(filename=self._archive_filename(entry=entry), content=content)
+
+    def _archive_filename(self, *, entry: BackupEntry | None) -> str:
+        """
+        Name the downloaded archive, preferring the daemon's own record.
+
+        Since daemon api 7.1.0 a backup entry carries the name the archive was
+        taken under, and that is the authoritative one: the daemon builds it
+        from the CCU's reported hostname and firmware version at the moment of
+        the backup, which is what the name is supposed to state. Rebuilding it
+        here reads the *current* system information instead, so an archive
+        downloaded after a firmware update would claim the new version.
+
+        The local construction stays as the fallback for an older daemon, and
+        for an archive the daemon could not name because the CCU had not
+        reported its system information yet.
+        """
+        if entry is not None and entry.filename:
+            return entry.filename
+        return self._backup_filename()
 
     def _backup_filename(self) -> str:
-        """Backup filename, mirroring aiohomematic's ``hostname-version-timestamp.sbk``."""
+        """Backup filename, mirroring the reference's ``hostname-version-timestamp.sbk``."""
         info = self._system_information
         hostname = info.hostname or info.serial or self._serial or self._name or "CCU"
         version = info.version or "unknown"
@@ -1681,9 +1706,16 @@ class LoomCentralAdapter:
             interfaces = tuple(i.id for i in await self._client.system.list_interfaces())
         except Exception:  # noqa: BLE001 — interfaces endpoint is optional
             _LOGGER.debug("interfaces unavailable during system-information refresh")
+        # `GET /info` reports the daemon's own build version — never the
+        # CCU's. aiohomematic's SystemInformation.version is documented (and
+        # consumed, e.g. _generate_backup_filename) as the CCU firmware
+        # version, so it must come from the /system/ccu entry instead. That
+        # field is only populated once the daemon has reached the CCU, so
+        # fall back to the daemon version rather than leaving it empty.
+        ccu_version = getattr(ccu_entry, "version", None) if ccu_entry is not None else None
         self._system_information = make_system_information(
             serial=serial,
-            version=info.version,
+            version=ccu_version or info.version,
             available_interfaces=interfaces,
             # The CCU dashboard renders these; the daemon reports them on the
             # /system/ccu entry. The two security flags describe the *CCU's

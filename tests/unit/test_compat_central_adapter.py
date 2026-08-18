@@ -186,6 +186,34 @@ class TestSystemInformation:
         assert info.available_interfaces == ("home:HmIP-RF",)
         assert central.version == "1.2.3"
 
+    async def test_version_comes_from_the_ccu_not_the_daemon(self, connected) -> None:
+        """
+        SystemInformation.version is the CCU firmware version.
+
+        ``GET /info`` reports the daemon's own build version — HA renders
+        ``central.version`` as the CCU device's sw_version, and the backup
+        filename embeds it too, so leaking the daemon build version here
+        makes both surfaces lie about which firmware runs.
+        """
+        central, mock = connected
+        mock.get(f"{_BASE}/system/ccu", payload=[{**_CCU_ENTRY, "version": "3.87.6.20260404"}])
+        mock.get(f"{_BASE}/interfaces", payload=[])
+        info = await central.validate_config_and_get_system_information()
+        assert info.version == "3.87.6.20260404"
+        assert central.version == "3.87.6.20260404"
+        # The daemon's own build version must not leak through.
+        assert info.version != "1.2.3"
+
+    async def test_version_falls_back_to_daemon_before_the_first_ccu_connect(self, connected) -> None:
+        # The /system/ccu entry carries no version yet (older daemon, or the
+        # daemon has never reached the CCU) — fall back rather than going empty.
+        central, mock = connected
+        mock.get(f"{_BASE}/system/ccu", payload=[_CCU_ENTRY])
+        mock.get(f"{_BASE}/interfaces", payload=[])
+        info = await central.validate_config_and_get_system_information()
+        assert info.version == "1.2.3"
+        assert central.version == "1.2.3"
+
     async def test_ccu_security_flags_come_from_the_daemon(self, connected) -> None:
         # api 3.5.0: the flags describe the *CCU's* posture, not this
         # client's auth — the dashboard would otherwise claim the CCU is
@@ -1137,6 +1165,102 @@ class TestCreateBackupAndDownload:
 
         assert isinstance(result, BackupData)
         assert result.content == b"SBK-ARCHIVE"
+        assert result.filename.endswith(".sbk")
+
+    async def test_backup_filename_carries_the_ccu_firmware_version(self, connected) -> None:
+        """
+        The filename mirrors aiohomematic's ``hostname-version-timestamp.sbk``.
+
+        ``version`` there is the CCU's own firmware version — a daemon build
+        version (e.g. "0.61.4") produces a filename HA users cannot match
+        back to the firmware their backup actually came from.
+        """
+        central, mock_daemon = connected
+        mock_daemon.get(
+            f"{_BASE}/system/ccu",
+            payload=[{**_CCU_ENTRY, "hostname": "Otto", "version": "3.87.6.20260404"}],
+        )
+        mock_daemon.get(f"{_BASE}/interfaces", payload=[])
+        await central.validate_config_and_get_system_information()
+
+        mock_daemon.post(f"{_BASE}/backups", payload={"id": "bk-2"}, status=202)
+        mock_daemon.get(
+            f"{_BASE}/backups",
+            payload=[{"id": "bk-2", "central": "home", "bytes": 11, "created_at": "2026-08-17T00:00:00Z"}],
+        )
+        mock_daemon.get(
+            f"{_BASE}/backups/bk-2/download",
+            body=b"SBK-ARCHIVE",
+            content_type="application/octet-stream",
+        )
+
+        result = await central.create_backup_and_download()
+
+        assert result is not None
+        assert result.filename.startswith("Otto-3.87.6.20260404-")
+        # The daemon's own build version (from the `connected` fixture's
+        # /info mock) must not leak into the backup filename.
+        assert "1.2.3" not in result.filename
+
+    async def test_filename_comes_from_the_backup_entry_when_the_daemon_recorded_one(self, connected) -> None:
+        """
+        The daemon's own recorded filename wins over the locally rebuilt one.
+
+        Since daemon api 7.1.0 a listed ``BackupEntry`` can carry
+        ``filename``, named from the CCU's hostname/firmware *at backup
+        time*. Rebuilding it here would read the *current* system
+        information instead, so an archive downloaded after a firmware
+        update would falsely claim the new version.
+        """
+        central, mock_daemon = connected
+        mock_daemon.post(f"{_BASE}/backups", payload={"id": "bk-3"}, status=202)
+        mock_daemon.get(
+            f"{_BASE}/backups",
+            payload=[
+                {
+                    "id": "bk-3",
+                    "central": "home",
+                    "bytes": 11,
+                    "created_at": "2026-08-17T00:00:00Z",
+                    "filename": "CCU3-3.71.7.20240304-20260817000000.sbk",
+                }
+            ],
+        )
+        mock_daemon.get(
+            f"{_BASE}/backups/bk-3/download",
+            body=b"SBK-ARCHIVE",
+            content_type="application/octet-stream",
+        )
+
+        result = await central.create_backup_and_download()
+
+        assert result is not None
+        # Exactly the daemon-recorded name — not the locally rebuilt one,
+        # which would read "home-unknown-…" off this fixture's unconfigured
+        # system information.
+        assert result.filename == "CCU3-3.71.7.20240304-20260817000000.sbk"
+
+    async def test_filename_falls_back_to_the_local_construction_when_the_entry_carries_none(self, connected) -> None:
+        """An older daemon lists no ``filename`` on the entry — rebuild it locally."""
+        central, mock_daemon = connected
+        mock_daemon.post(f"{_BASE}/backups", payload={"id": "bk-4"}, status=202)
+        mock_daemon.get(
+            f"{_BASE}/backups",
+            payload=[{"id": "bk-4", "central": "home", "bytes": 11, "created_at": "2026-08-17T00:00:00Z"}],
+        )
+        mock_daemon.get(
+            f"{_BASE}/backups/bk-4/download",
+            body=b"SBK-ARCHIVE",
+            content_type="application/octet-stream",
+        )
+
+        result = await central.create_backup_and_download()
+
+        assert result is not None
+        # The locally-rebuilt "<hostname>-<version>-<timestamp>.sbk" shape —
+        # not asserted via a second `_backup_filename()` call, which would
+        # race the minute-granularity timestamp against this one.
+        assert result.filename.startswith("home-unknown-")
         assert result.filename.endswith(".sbk")
 
     async def test_returns_none_when_the_trigger_yields_no_id(self, connected) -> None:
