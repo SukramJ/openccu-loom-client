@@ -22,6 +22,8 @@ from openccu_loom_types.rest import (
     AlarmOutput,
     AlarmPanelEntity,
     AlarmTriggeredMotionSensor,
+    AlarmZone,
+    AlarmZoneCreate,
     AlarmZoneStatus,
     Kind2 as Kind,
 )
@@ -798,6 +800,39 @@ class TestAlarmOperations:
         readiness = await AlarmOperations(transport=http).get_zone_readiness(zone_id="eg")
         assert readiness["full"].ready is False
         assert readiness["full"].blockers == ["sensor.window"]
+
+    async def test_create_zone_with_alarm_zone_create_omits_id(
+        self, mock_daemon: MockDaemon, http: HttpTransport
+    ) -> None:
+        """
+        The daemon mints the zone id itself, since api 7.1.0.
+
+        The POST body is ``AlarmZoneCreate``: the server mints the zone id
+        itself and ignores one sent in the body. Building an ``AlarmZone``
+        just to create one means inventing an id that is discarded;
+        ``AlarmZoneCreate`` has no ``id`` field at all, so the serialised
+        body carries no ``id`` key.
+        """
+        mock_daemon.post("/api/v1/alarm/zones", payload={"id": "eg", "name": "Erdgeschoss"})
+        zone = await AlarmOperations(transport=http).create_zone(
+            zone=AlarmZoneCreate.model_validate({"name": "Erdgeschoss"})
+        )
+        assert zone.id == "eg"
+        sent = mock_daemon.requests[-1].json()
+        assert "id" not in sent
+        assert sent == {"name": "Erdgeschoss"}
+
+    async def test_create_zone_still_accepts_a_full_alarm_zone(
+        self, mock_daemon: MockDaemon, http: HttpTransport
+    ) -> None:
+        """Existing callers that build a full ``AlarmZone`` (with an id) keep working."""
+        mock_daemon.post("/api/v1/alarm/zones", payload={"id": "eg", "name": "Erdgeschoss"})
+        zone = await AlarmOperations(transport=http).create_zone(
+            zone=AlarmZone.model_validate({"id": "eg", "name": "Erdgeschoss"})
+        )
+        assert zone.id == "eg"
+        sent = mock_daemon.requests[-1].json()
+        assert sent == {"id": "eg", "name": "Erdgeschoss"}
 
 
 # ---- motion reset ----
