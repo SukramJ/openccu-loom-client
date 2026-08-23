@@ -34,7 +34,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, cast
+import logging
+from typing import TYPE_CHECKING, Any, Final, cast
 
 from openccu_loom_client.compat.aiohomematic._upstream import (
     CentralState,
@@ -62,8 +63,10 @@ from openccu_loom_client.events import (
     DataPointValueChangedEvent,
     DeviceAvailabilityChangedEvent as LoomDeviceAvailabilityChangedEvent,
     DeviceCreatedEvent as LoomDeviceCreatedEvent,
+    DeviceMetadataChangedEvent as LoomDeviceMetadataChangedEvent,
     DeviceRemovedEvent as LoomDeviceRemovedEvent,
     ProgramChangedEvent,
+    ScheduleChangedEvent as LoomScheduleChangedEvent,
     SysvarChangedEvent,
 )
 from openccu_loom_client.events.types import (
@@ -76,6 +79,8 @@ if TYPE_CHECKING:
     from openccu_loom_client.compat.aiohomematic._upstream import EventBus as AioEventBus
     from openccu_loom_client.events import SubscriptionGroup
     from openccu_loom_client.store import LoomStore
+
+_LOGGER: Final = logging.getLogger(__name__)
 
 
 def install_refresh_bridge(
@@ -100,9 +105,10 @@ def install_refresh_bridge(
     """
     _wire_value_events(group=group, store=store, ha_bus=ha_bus)
     _wire_trigger_and_rollback(group=group, store=store, ha_bus=ha_bus, event_group_resolver=event_group_resolver)
-    _wire_central_and_lifecycle(group=group, ha_bus=ha_bus, central_name=central_name)
+    _wire_central_and_lifecycle(group=group, store=store, ha_bus=ha_bus, central_name=central_name)
     _wire_availability(group=group, store=store, ha_bus=ha_bus)
     _wire_alarm_events(group=group, store=store, ha_bus=ha_bus)
+    _wire_schedules(group=group, store=store, ha_bus=ha_bus)
 
 
 def _device_attrs(*, store: LoomStore, address: str) -> tuple[str, str, str | None]:
@@ -355,8 +361,43 @@ def _wire_alarm_events(*, group: SubscriptionGroup, store: LoomStore, ha_bus: Ai
     group.subscribe(event_type=AlarmTriggeredEvent, handler=on_triggered)
 
 
-def _wire_central_and_lifecycle(*, group: SubscriptionGroup, ha_bus: AioEventBus, central_name: str) -> None:
-    """Bridge central-state transitions and device create/remove to lifecycle events."""
+def _wire_schedules(*, group: SubscriptionGroup, store: LoomStore, ha_bus: AioEventBus) -> None:
+    """
+    Re-read a channel's week profile after a ``schedules.changed`` push.
+
+    The broadcast deliberately carries no profile body — a week profile is
+    large and a subscriber only needs to invalidate. The device's
+    :class:`WeekProfileDp` is the one object holding the cached schedule
+    (and the entry count HA renders), so it re-reads, and the entity is
+    pinged afterwards so the new count reaches HA.
+
+    A device without a schedule entity — most of them — is skipped
+    without a fetch. The push also fires for a profile this client wrote
+    itself, where the write path already refreshed the count; the re-read
+    then merely confirms it.
+    """
+
+    async def on_schedule_changed(event: LoomScheduleChangedEvent) -> None:
+        p = event.payload
+        wp_dp = store.get_week_profile_data_point(address=p.device_address)
+        if wp_dp is None or getattr(wp_dp, "channel_no", None) != p.channel:
+            return
+        try:
+            await wp_dp.reload_schedule()
+        except Exception:
+            _LOGGER.debug("schedule reload failed for %s:%s", p.device_address, p.channel, exc_info=True)
+            return
+        await ha_bus.publish(
+            event=DataPointStateChangedEvent(timestamp=event.ts, unique_id=wp_dp.unique_id, new_value=wp_dp.value)
+        )
+
+    group.subscribe(event_type=LoomScheduleChangedEvent, handler=on_schedule_changed)
+
+
+def _wire_central_and_lifecycle(
+    *, group: SubscriptionGroup, store: LoomStore, ha_bus: AioEventBus, central_name: str
+) -> None:
+    """Bridge central-state transitions and device create/remove/rename to lifecycle events."""
 
     async def on_central_state(event: LoomCentralStateChangedEvent) -> None:
         p = event.payload
@@ -394,6 +435,29 @@ def _wire_central_and_lifecycle(*, group: SubscriptionGroup, ha_bus: AioEventBus
             interface_id=event.payload.interface_id,
         )
 
+    async def on_device_metadata_changed(event: LoomDeviceMetadataChangedEvent) -> None:
+        """
+        Re-read a renamed / re-assigned device, then announce it as updated.
+
+        The payload names the device but inlines none of the new values, so
+        the store is refreshed first: the lifecycle event is what makes a
+        consumer read the device back, and reading it before the refresh
+        would hand out the old name. The address is always the DEVICE
+        address, even when a channel was renamed.
+        """
+        address = event.payload.device_address
+        try:
+            await store.refresh_device(address=address)
+        except Exception:
+            _LOGGER.debug("metadata re-read failed for %s", address, exc_info=True)
+            return
+        await _emit_lifecycle(
+            event_type=DeviceLifecycleEventType.UPDATED,
+            device_address=address,
+            interface_id=event.payload.interface_id,
+        )
+
     group.subscribe(event_type=LoomCentralStateChangedEvent, handler=on_central_state)
     group.subscribe(event_type=LoomDeviceCreatedEvent, handler=on_device_created)
     group.subscribe(event_type=LoomDeviceRemovedEvent, handler=on_device_removed)
+    group.subscribe(event_type=LoomDeviceMetadataChangedEvent, handler=on_device_metadata_changed)

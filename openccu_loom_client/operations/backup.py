@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from openccu_loom_types.rest import BackupEntry
+from openccu_loom_types.rest import BackupEntry, BackupStorageInfo
 
 from openccu_loom_client.operations._base import _OperationsBase
 
@@ -31,6 +31,22 @@ class BackupOperations(_OperationsBase):
         """List locally stored backups (``GET /backups`` returns a JSON array of ``BackupEntry``)."""
         payload = await self._transport.request(method="GET", path="/backups")
         return [BackupEntry.model_validate(item) for item in (payload or [])]
+
+    async def get_storage_info(self) -> BackupStorageInfo:
+        """
+        Report where the archives live, how many there are and their size.
+
+        Wire: ``GET /backups/storage`` (admin, daemon api ≥ 7.3.0). The
+        directory is not derivable by a client: ``backup.dir`` is empty in
+        the common case, and a CCU add-on install resolves it per start
+        from the CCU's own backup target.
+
+        ``available=False`` means the daemon could not create its archive
+        directory at all (read-only mount, missing permissions) — an empty
+        :meth:`list_backups` then says nothing about the CCU.
+        """
+        payload = await self._transport.request(method="GET", path="/backups/storage")
+        return BackupStorageInfo.model_validate(payload or {})
 
     async def download_backup(self, *, backup_id: str) -> bytes:
         """Stream a backup ``.sbk`` file. Wire: ``GET /backups/{id}/download``."""
@@ -78,6 +94,19 @@ class BackupOperations(_OperationsBase):
             total_timeout_seconds=total_timeout_seconds,
         )
         return dict(payload or {})
+
+    async def delete_backup(self, *, backup_id: str) -> None:
+        """
+        Delete one stored archive (admin, daemon api ≥ 7.3.0).
+
+        Wire: ``DELETE /backups/{id}`` (204). Unrecoverable — the archive
+        may be the only copy of that CCU's configuration the daemon holds,
+        so a caller confirms against the named archive rather than "this
+        backup". Deleting one that is not there succeeds: the caller asked
+        for it to be gone, and it is. Retried like the other idempotent
+        verbs for exactly that reason.
+        """
+        await self._transport.request(method="DELETE", path=f"/backups/{backup_id}")
 
     async def restore_backup(self, *, backup_id: str) -> None:
         """

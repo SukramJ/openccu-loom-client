@@ -88,6 +88,24 @@ Currently `xfail`. Each needs harness work rather than production code.
   aiohomematic's are sync and cached. `await` them on the loom path:
   `get_paramset_description`, `get_link_paramset_description`.
 - **`code_format` prompt UX** for the alarm panel.
+- **Entity description for the `daemon_connection` singleton** (daemon api
+  7.6.0). The client builds and announces the binary sensor, but HA matches
+  its entity descriptions against the stable English token
+  (`var_name_contains`), so without a description entry the entity renders
+  without icon, device class or category. Token: `daemon_connection`; the
+  daemon's own name comes from the catalogue key `discovery.daemon_status`
+  ("Daemon connection").
+- **The device-icon URL now needs authentication** (daemon api 7.6.0). A
+  handler that hands `create_central_url() + /api/v1/devices/{addr}/icon`
+  to the browser only still works where the browser carries a same-origin
+  session cookie; a bearer-only setup must fetch through
+  `client.devices.get_device_icon(address=…)` and serve the bytes itself.
+- **The config flow's token has to be an admin one.** `GET /system/ccu`
+  narrows the CCU serial and host away for a viewer/operator token since
+  api 7.6.0, and the serial becomes the entry's `unique_id` — an empty one
+  breaks every hub / internal / virtual-remote routing key. Worth saying so
+  in the flow rather than letting it present as "the daemon has not reached
+  the CCU yet".
 
 ## Decided, and deliberately not done
 

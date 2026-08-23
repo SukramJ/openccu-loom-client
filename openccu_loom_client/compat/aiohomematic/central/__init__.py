@@ -177,6 +177,12 @@ async def list_ccus(
     on bad token / unreachable host), reads ``GET /system/ccu`` and returns a
     plain-dict projection (``name``, ``serial``, ``host``, ``model``,
     ``available``) so the caller stays decoupled from the wire types.
+
+    ``serial`` and ``host`` are admin-only since daemon api 7.6.0 and read
+    as empty strings for a viewer or operator token. The config flow needs
+    the serial — it becomes the entry's ``unique_id`` and thereby the
+    central-id slot of every hub / internal / virtual-remote routing key —
+    so the token this step is given has to be an admin one.
     """
     config_kwargs: dict[str, Any] = {
         "host": host,

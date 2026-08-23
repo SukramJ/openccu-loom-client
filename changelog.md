@@ -1,3 +1,103 @@
+# Version 2026.8.20 (2026-08-23)
+
+Syncs the client to daemon 0.64.1 / api 7.7.0 (`openccu-loom-types`
+0.5.2). The 7.1.0 → 7.7.0 line is additive: three new broadcasts, two
+new backup endpoints, and four optional fields. The client binds all
+three broadcasts — a broadcast nobody consumes is indistinguishable
+from one the daemon never sends — and gains the daemon-liveness
+singleton the hub aggregate now declares.
+
+The 7.7.0 step was prompted by this sync: `display_value` turned out to
+be on the wire but not in the contract, so no generated client could read
+it. It was fixed on the daemon rather than patched around here.
+
+## What's Changed
+
+### Added
+
+- **The daemon's own liveness is an entity.** `GET /hub/data-points`
+  declares a `daemon_connection` singleton, so the binary sensor can be
+  built — and named — without hard-coding a name the daemon owns. It is
+  seeded true (a REST answer is itself proof the daemon runs) and flipped
+  false by the `daemon_status.changed` broadcast a stopping daemon sends
+  over the WebSocket, which is the distinction a WebSocket client
+  otherwise cannot draw: until now a stopping daemon and a dropped
+  connection looked identical. A killed daemon still cannot announce
+  itself — detecting that stays the consumer's own job — and the next
+  aggregate poll re-arms the sensor after a reconnect. Like the
+  connectivity sensors it carries no availability of its own.
+- **A renamed device is re-read live.** `device.metadata_changed` fires
+  when a device or one of its channels is renamed, or its room / function
+  assignment changes. The payload inlines no new values, so the bridge
+  re-reads the device detail first and only then publishes
+  aiohomematic's `DeviceLifecycleEvent(UPDATED)` — announcing before the
+  re-read would hand the consumer the old name.
+- **A week profile invalidates on change.** `schedules.changed` fires when
+  a channel's schedule is written through this daemon or observed on the
+  CCU. The device's `WeekProfileDp` reloads and the entity is pinged, so
+  an edit made in the CCU WebUI reaches Home Assistant instead of waiting
+  for the next read. Pushes for another channel, or for a device with no
+  schedule entity, cost no fetch.
+- **`get_storage_info()` and `delete_backup()`** on `backup`
+  (`GET /backups/storage`, `DELETE /backups/{id}`, both admin). The
+  archive directory is not derivable client-side: `backup.dir` is empty in
+  the common case and a CCU add-on install resolves it per start from the
+  CCU's own backup target. `available=False` says the daemon could not
+  create the directory at all — an empty backup list then says nothing
+  about the CCU.
+- **`devices.get_device_icon()`** returns the model artwork as bytes, or
+  `None` for a model that has none. `GET /devices/{addr}/icon` is
+  authenticated since api 7.6.0 — the artwork is not sensitive, but the
+  route answered differently for a known and an unknown address and was an
+  unauthenticated existence oracle for the whole inventory. A consumer that
+  handed the bare URL to a browser now needs either a same-origin session
+  cookie or this method.
+- **A stale classification index is visible.** The security severity
+  sensor carries `index_healthy: false` while the daemon reports the
+  snapshot was folded from an index it knows to be stale. Surfaced only
+  while degraded: an attribute that is always present and always true
+  stops being read. The zone/class pushes carry no verdict about the
+  index, so their silence never clears a degradation the snapshot
+  reported.
+
+### Fixed
+
+- **A pushed value no longer keeps the seeded `display_value`.** The
+  daemon puts `display_value` (`value × multiplier`) on the REST
+  data-point summary, so a summary carried forward with only the new
+  `value` announced the bootstrap projection for the rest of the session
+  — a dimmer stuck at "42 %" while the raw value moved on. The store now
+  takes the projection from the push, where the daemon puts it too.
+
+  That field was missing from the contract: the daemon had emitted it on
+  the `datapoint.value_changed` broadcast since api 7.2.0 but declared it
+  only on the REST half, so the generated payload type had no such field
+  and this client could not read it. Fixed daemon-side in 0.64.1 (api
+  7.7.0, SukramJ/openccu-loom#607) rather than worked around here — a
+  client recomputing the daemon's own arithmetic is a second opinion
+  waiting to disagree with it.
+
+  An absent value means `value` already is the displayable number — a
+  trivial multiplier, or a value no projection applies to — and is copied
+  through as such. A projection of `0.0` is a reading and not an absence,
+  so a dimmer at 0 % keeps rendering in percent. The raw `value` stays
+  untouched either way, because the write path sends it back unchanged.
+
+### Changed
+
+- **Pinned `openccu-loom-types` to 0.5.2** (daemon 0.64.1 / api 7.7.0),
+  carrying the refreshed `SCHEMA_DIGEST` / `DAEMON_API_VERSION` the
+  transport checks at connect. The version gate means this client now
+  requires a daemon at api ≥ 7.7.0, which is what lets it trust the
+  push's `display_value` without a local fallback.
+- The "no CCU serial" warning names both of its causes. Since api 7.6.0
+  the CCU's network coordinates on `GET /system/ccu` — the serial among
+  them — are admin-only, so a viewer/operator token reads them as empty
+  strings, which is indistinguishable from a CCU the daemon has not
+  reached yet. The serial is the central-id slot of every hub / internal
+  / virtual-remote routing key, so a credentials question that presents
+  as an outage costs the entity registry.
+
 # Version 2026.8.19 (2026-08-18)
 
 Syncs the client to daemon 0.63.0 / api 7.1.0 (`openccu-loom-types`

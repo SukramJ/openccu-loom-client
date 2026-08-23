@@ -186,6 +186,23 @@ class TestDevicesOperationsGaps:
         mock.post("/api/v1/devices/VCU1/firmware/update", status=202)
         await DevicesOperations(transport=t).update_firmware(address="VCU1")
 
+    async def test_device_icon_returns_the_png_bytes(self, http) -> None:
+        # api 7.6.0 put the icon route behind authentication, so a
+        # bearer-only consumer fetches the image through the client
+        # instead of handing the URL to a browser.
+        t, mock = http
+        mock.get("/api/v1/devices/VCU1/icon", body=b"\x89PNG\r\n", content_type="image/png")
+        assert await DevicesOperations(transport=t).get_device_icon(address="VCU1") == b"\x89PNG\r\n"
+
+    async def test_device_icon_without_artwork_is_none_not_an_error(self, http) -> None:
+        # 404 is the daemon's ordinary "no artwork for this model" answer;
+        # raising it would make every icon-less device an exception. The
+        # route answers with a bare http.NotFound — no problem document —
+        # so only the status can decide.
+        t, mock = http
+        mock.get("/api/v1/devices/VCU1/icon", status=404, body=b"404 page not found\n", content_type="text/plain")
+        assert await DevicesOperations(transport=t).get_device_icon(address="VCU1") is None
+
     async def test_list_calculated_data_points(self, http) -> None:
         t, mock = http
         mock.get(

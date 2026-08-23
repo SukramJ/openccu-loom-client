@@ -39,9 +39,11 @@ from openccu_loom_types.ws import (
     CentralReadinessChangedPayload,
     CentralStateChangedPayload,
     CustomDataPointStateChangedPayload,
+    DaemonStatusPayload,
     DataPointValueChangedPayload,
     DeviceAvailabilityChangedPayload,
     DeviceCreatedPayload,
+    DeviceMetadataChangedPayload,
     DeviceRemovedPayload,
     DeviceTriggerPayload,
     HubConnectivityChangedPayload,
@@ -58,6 +60,7 @@ from openccu_loom_types.ws import (
     OptimisticRollbackPayload,
     ProgramChangedPayload,
     ProgramExecutedPayload,
+    ScheduleChangedPayload,
     SecurityClassChangedPayload,
     SecurityFaultChangedPayload,
     SecurityNotificationPayload,
@@ -216,6 +219,25 @@ class SystemStatusChangedEvent(LoomEvent):
         """Default the routing key to the payload's central name."""
         if self.event_key is None:
             self.event_key = self.payload.central
+
+
+@dataclass(slots=True, kw_only=True)
+class DaemonStatusChangedEvent(LoomEvent):
+    """
+    The daemon announces that it is stopping (daemon api ≥ 7.6.0).
+
+    Rides the daemon-level topic ``system.daemon_status`` — not scoped to
+    a central, so it carries no routing key. It is the WebSocket
+    counterpart of the last will an MQTT broker retains: without it a
+    stopping daemon and a dropped connection look identical to a client.
+
+    Only a graceful stop can announce itself. A killed process never
+    sends it, so a consumer still has to treat a silent connection loss
+    as "gone" on its own.
+    """
+
+    payload: DaemonStatusPayload
+    type_id: ClassVar[str] = "daemon_status.changed"
 
 
 @dataclass(slots=True, kw_only=True)
@@ -425,6 +447,51 @@ class DeviceAvailabilityChangedEvent(LoomEvent):
 
     payload: DeviceAvailabilityChangedPayload
     type_id: ClassVar[str] = "device.availability_changed"
+
+    def __post_init__(self) -> None:
+        """Default the routing key to the payload's central name."""
+        if self.event_key is None:
+            self.event_key = self.payload.central
+
+
+@dataclass(slots=True, kw_only=True)
+class DeviceMetadataChangedEvent(LoomEvent):
+    """
+    A device was renamed or re-assigned (daemon api ≥ 7.6.0).
+
+    Fires for a device or one of its channels being renamed, and for a
+    changed room / function assignment.
+
+    Rides the same ``device.{address}.lifecycle`` topic as
+    ``device.created`` — subscribers route by the envelope ``type``.
+    ``device_address`` is always the DEVICE address even when a channel
+    changed, because a consumer materialises a device's name and area as
+    one unit. The new values are not inlined: the payload says *what* to
+    re-read, and the client re-reads the device detail.
+    """
+
+    payload: DeviceMetadataChangedPayload
+    type_id: ClassVar[str] = "device.metadata_changed"
+
+    def __post_init__(self) -> None:
+        """Default the routing key to the payload's central name."""
+        if self.event_key is None:
+            self.event_key = self.payload.central
+
+
+@dataclass(slots=True, kw_only=True)
+class ScheduleChangedEvent(LoomEvent):
+    """
+    A channel's week profile changed (daemon api ≥ 7.6.0).
+
+    Written through this daemon, or observed on the CCU. Rides the
+    ``device.{address}.lifecycle`` topic. The profile body is not
+    inlined — a week profile is large and a subscriber usually only
+    needs to invalidate and re-read the channel's schedule.
+    """
+
+    payload: ScheduleChangedPayload
+    type_id: ClassVar[str] = "schedules.changed"
 
     def __post_init__(self) -> None:
         """Default the routing key to the payload's central name."""
@@ -802,6 +869,7 @@ _EVENT_REGISTRY: Final[dict[str, tuple[Callable[..., LoomEvent], type[BaseModel]
     CentralStateChangedEvent.type_id: (CentralStateChangedEvent, CentralStateChangedPayload),
     CentralReadinessChangedEvent.type_id: (CentralReadinessChangedEvent, CentralReadinessChangedPayload),
     SystemStatusChangedEvent.type_id: (SystemStatusChangedEvent, SystemStatusChangedPayload),
+    DaemonStatusChangedEvent.type_id: (DaemonStatusChangedEvent, DaemonStatusPayload),
     SysvarChangedEvent.type_id: (SysvarChangedEvent, SysvarChangedPayload),
     ProgramExecutedEvent.type_id: (ProgramExecutedEvent, ProgramExecutedPayload),
     ProgramChangedEvent.type_id: (ProgramChangedEvent, ProgramChangedPayload),
@@ -819,6 +887,8 @@ _EVENT_REGISTRY: Final[dict[str, tuple[Callable[..., LoomEvent], type[BaseModel]
         DeviceAvailabilityChangedEvent,
         DeviceAvailabilityChangedPayload,
     ),
+    DeviceMetadataChangedEvent.type_id: (DeviceMetadataChangedEvent, DeviceMetadataChangedPayload),
+    ScheduleChangedEvent.type_id: (ScheduleChangedEvent, ScheduleChangedPayload),
     DeviceTriggerEvent.type_id: (DeviceTriggerEvent, DeviceTriggerPayload),
     DataPointOptimisticRolledBackEvent.type_id: (
         DataPointOptimisticRolledBackEvent,

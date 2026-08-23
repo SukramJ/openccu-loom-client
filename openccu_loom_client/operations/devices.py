@@ -11,6 +11,7 @@ the daemon's OpenAPI surface. Returns parsed Pydantic models from
 
 from __future__ import annotations
 
+from http import HTTPStatus
 from typing import Any
 
 from openccu_loom_types.rest import (
@@ -24,6 +25,7 @@ from openccu_loom_types.rest import (
     ExportedConfiguration,
 )
 
+from openccu_loom_client.exceptions import LoomHttpError
 from openccu_loom_client.operations._base import _OperationsBase
 
 
@@ -180,6 +182,32 @@ class DevicesOperations(_OperationsBase):
         ``export_device_definition`` writes).
         """
         return await self._transport.request_bytes(method="GET", path=f"/devices/{address}/export-definition")
+
+    async def get_device_icon(self, *, address: str) -> bytes | None:
+        """
+        Fetch the device's model artwork, or ``None`` when there is none.
+
+        Wire: ``GET /devices/{address}/icon`` — the PNG the daemon proxies
+        from the owning CCU's web server. Authenticated since daemon api
+        7.6.0: the artwork itself is not sensitive, but the route answers
+        differently for a known and an unknown address, which made it an
+        existence oracle for the whole device inventory. A consumer that
+        handed the bare URL to a browser therefore has to fetch the image
+        itself unless that browser carries a same-origin session cookie.
+
+        ``None`` is the ordinary answer for a model without artwork (the
+        daemon replies 404), not an error — a consumer falls back to a
+        generic glyph. The status is what decides here, not the exception
+        class: this route answers with a bare ``http.NotFound`` rather
+        than a problem document, and the typed subclasses are dispatched
+        on the problem's type URI.
+        """
+        try:
+            return await self._transport.request_bytes(method="GET", path=f"/devices/{address}/icon")
+        except LoomHttpError as exc:
+            if exc.status == HTTPStatus.NOT_FOUND:
+                return None
+            raise
 
     async def patch_device(self, *, address: str, name: str) -> None:
         """

@@ -40,9 +40,11 @@ from openccu_loom_types.rest import (
 from openccu_loom_types.ws import (
     CentralStateChangedPayload,
     CustomDataPointStateChangedPayload,
+    DaemonStatusPayload,
     DataPointValueChangedPayload,
     DeviceAvailabilityChangedPayload,
     DeviceCreatedPayload,
+    DeviceMetadataChangedPayload,
     DeviceRemovedPayload,
     DeviceTriggerPayload,
     HubConnectivityChangedPayload,
@@ -51,6 +53,7 @@ from openccu_loom_types.ws import (
     HubSystemUpdateChangedPayload,
     InstallModeChangedPayload,
     OptimisticRollbackPayload,
+    ScheduleChangedPayload,
     SecurityClassChangedPayload,
     SecurityFaultChangedPayload,
     SecurityNotificationPayload,
@@ -81,9 +84,11 @@ from openccu_loom_client.events import (
     AddonUpdateStateChangedEvent,
     CentralStateChangedEvent as LoomCentralStateChangedEvent,
     CustomDataPointStateChangedEvent,
+    DaemonStatusChangedEvent,
     DataPointValueChangedEvent,
     DeviceAvailabilityChangedEvent,
     DeviceCreatedEvent,
+    DeviceMetadataChangedEvent,
     DeviceRemovedEvent,
     EventBus,
     HubAlarmMessageCountChangedEvent,
@@ -92,6 +97,7 @@ from openccu_loom_client.events import (
     HubMetricsChangedEvent,
     HubSystemUpdateChangedEvent,
     InstallModeChangedEvent,
+    ScheduleChangedEvent,
     SecurityClassChangedEvent,
     SecurityFaultChangedEvent,
     SecurityNotificationEvent,
@@ -1006,6 +1012,7 @@ class TestHubAggregateFetch:
                 "service_messages": {"legacy_name": "service_messages", "value": 0},
                 "inbox": {"legacy_name": "inbox", "value": 2},
                 "update": {"legacy_name": "system_update", "update_available": False, "in_progress": False},
+                "daemon_connection": {"legacy_name": "daemon_connection", "connected": True},
                 "metrics": [{"legacy_name": "system_health", "value": 95, "unit": "%"}],
                 "connectivity": [{"interface_id": "home-HmIP-RF", "reachable": True}],
                 "install_mode": [
@@ -1027,8 +1034,43 @@ class TestHubAggregateFetch:
         install = coord._install_pair_for(interface_id="home-HmIP-RF")
         assert install is not None
         assert install.sensor.value == 30
+        assert coord.daemon_connection_dp is not None
+        assert coord.daemon_connection_dp.value is True
+        # …and it is announced, not merely built: an unlisted singleton
+        # spawns no entity at all.
+        assert "daemon_connection" in {dp.name for dp in coord.get_hub_data_points()}
         # The per-endpoint fan-out collapsed to a single aggregate call.
         assert coord._client.system.aggregate_calls == 1
+
+    async def test_shutdown_broadcast_flips_the_daemon_connection_sensor(self) -> None:
+        """A stopping daemon reaches the sensor; the next poll re-arms it."""
+        coord, loom_bus, group, looper, seen = TestHubPushRouting()._coordinator(
+            interfaces=[_iface()], aggregate=[self._aggregate()]
+        )
+        await coord.fetch_hub_singleton_data()
+        await looper.block_till_done()
+        coord.install_push_routing(group=group)
+        seen.clear()
+
+        await loom_bus.publish(
+            event=DaemonStatusChangedEvent(
+                seq=1,
+                kind=Kind.change,
+                ts="2026-06-21T08:00:00Z",
+                payload=DaemonStatusPayload.model_validate(
+                    {"status": "offline", "reason": "shutdown", "event_at": "2026-06-21T08:00:00Z"}
+                ),
+            )
+        )
+        await looper.block_till_done()
+        assert coord.daemon_connection_dp.value is False
+        assert seen == [coord.daemon_connection_dp.unique_id]
+
+        # The aggregate can only ever report connected — that is what makes
+        # the poll after a reconnect the re-arm path.
+        await coord.fetch_hub_singleton_data()
+        await looper.block_till_done()
+        assert coord.daemon_connection_dp.value is True
 
 
 class TestRefreshBridge:
@@ -1425,6 +1467,128 @@ class TestEventBridge:
             DeviceLifecycleEventType.REMOVED,
         ]
         assert seen[0].device_addresses == ("VCU1",)
+
+    async def test_metadata_change_refreshes_the_device_before_announcing_it(self) -> None:
+        """A rename re-reads the device, and the announce sees the new name."""
+
+        def _detail(*, name: str) -> dict[str, Any]:
+            return {
+                "address": "VCU1",
+                "interface": "home:HmIP-RF",
+                "interface_id": "home:HmIP-RF",
+                "model": "HmIP-PSM",
+                "name": name,
+                "available": True,
+                "channels_count": 0,
+                "channels": [],
+                "updatable": False,
+                "update_available": False,
+                "master_pushes_config_pending": False,
+                "has_sub_devices": False,
+                "firmware": {},
+                "availability": {},
+            }
+
+        class _Transport:
+            def __init__(self) -> None:
+                self.paths: list[str] = []
+
+            async def request(self, *, method: str, path: str, **_: Any) -> Any:
+                self.paths.append(f"{method} {path}")
+                return _detail(name="Stehlampe Flur")
+
+        store = LoomStore()
+        store.attach_device_detail(detail=DeviceDetail.model_validate(_detail(name="Lamp")))
+        transport = _Transport()
+        store.set_transport(transport=transport)  # type: ignore[arg-type]
+        bus = EventBus()
+        group = bus.create_subscription_group(name="t")
+        looper = Looper()
+        ha_bus = AioEventBus(task_scheduler=looper)
+        install_refresh_bridge(group=group, store=store, ha_bus=ha_bus, central_name="home")
+        # Record the name the store carried at announce time: an announce
+        # that raced the re-read would hand the consumer the old one.
+        seen: list[tuple[DeviceLifecycleEventType, str | None]] = []
+        ha_bus.create_subscription_group(name="x").subscribe(
+            event_type=DeviceLifecycleEvent,
+            event_key=None,
+            handler=lambda *, event: seen.append(
+                (event.event_type, getattr(store.get_device(address="VCU1"), "name", None))
+            ),
+        )
+
+        await bus.publish(
+            event=DeviceMetadataChangedEvent(
+                seq=1,
+                kind=Kind.change,
+                ts="2026-05-24T08:00:00Z",
+                payload=DeviceMetadataChangedPayload.model_validate(
+                    {"central": "home", "interface_id": "home:HmIP-RF", "device_address": "VCU1"}
+                ),
+            )
+        )
+        await looper.block_till_done()
+
+        assert transport.paths == ["GET /devices/VCU1"]
+        assert seen == [(DeviceLifecycleEventType.UPDATED, "Stehlampe Flur")]
+
+    async def test_schedule_change_reloads_the_week_profile_and_pings_it(self) -> None:
+        """``schedules.changed`` invalidates the cached profile; the entity re-renders."""
+
+        class _WeekProfileDp:
+            unique_id = "loom_vcu1_week_profile"
+            channel_no = 1
+
+            def __init__(self) -> None:
+                self.reloads = 0
+                self.value = 3
+
+            async def reload_schedule(self) -> None:
+                self.reloads += 1
+                self.value = 4
+
+        store = LoomStore()
+        wp_dp = _WeekProfileDp()
+        store.set_week_profile_data_point(address="VCU1", data_point=wp_dp)
+        bus = EventBus()
+        group = bus.create_subscription_group(name="t")
+        looper = Looper()
+        ha_bus = AioEventBus(task_scheduler=looper)
+        install_refresh_bridge(group=group, store=store, ha_bus=ha_bus, central_name="home")
+        seen: list[tuple[str, Any]] = []
+        ha_bus.create_subscription_group(name="x").subscribe(
+            event_type=DataPointStateChangedEvent,
+            event_key=None,
+            handler=lambda *, event: seen.append((event.unique_id, event.new_value)),
+        )
+
+        def _push(*, address: str, channel: int, seq: int) -> ScheduleChangedEvent:
+            return ScheduleChangedEvent(
+                seq=seq,
+                kind=Kind.change,
+                ts="2026-05-24T08:00:00Z",
+                payload=ScheduleChangedPayload.model_validate(
+                    {
+                        "central": "home",
+                        "interface_id": "home:HmIP-RF",
+                        "device_address": address,
+                        "channel": channel,
+                    }
+                ),
+            )
+
+        await bus.publish(event=_push(address="VCU1", channel=1, seq=1))
+        await looper.block_till_done()
+        assert wp_dp.reloads == 1
+        assert seen == [("loom_vcu1_week_profile", 4)]
+
+        # A push for another channel of the same device, and one for a device
+        # without a schedule entity, must not reach this profile.
+        await bus.publish(event=_push(address="VCU1", channel=2, seq=2))
+        await bus.publish(event=_push(address="VCU9", channel=1, seq=3))
+        await looper.block_till_done()
+        assert wp_dp.reloads == 1
+        assert len(seen) == 1
 
     async def test_data_points_created_groups_by_aiohomematic_category(self) -> None:
         # Regression: the loom DataPointCategory StrEnum's ``str()`` yields its
