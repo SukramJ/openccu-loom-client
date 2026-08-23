@@ -1694,11 +1694,21 @@ class LoomCentralAdapter:
         # key (hub / internal / virtual-remote); record it before bootstrap
         # so the categorised data-point layer builds matching unique_ids.
         if not serial:
+            # Since daemon api 7.6.0 the CCU's network coordinates on
+            # ``GET /system/ccu`` — serial and hostname among them — are
+            # admin-only: a viewer/operator token reads them as empty
+            # strings, which is indistinguishable here from a CCU the
+            # daemon has not reached yet. Naming both causes keeps the one
+            # that is a credentials question from being diagnosed as an
+            # outage.
             _LOGGER.warning(
                 "No CCU serial available (neither injected nor reported by the "
                 "daemon) — canonical unique_ids for hub / internal / "
                 "virtual-remote data points will carry an empty central-id "
-                "slot (loom__…) and break the HA registry contract"
+                "slot (loom__…) and break the HA registry contract. Either the "
+                "daemon has not connected to the CCU yet, or this client's "
+                "credentials are not admin, for which the daemon narrows the "
+                "CCU coordinates away"
             )
         self._client.store.set_serial(serial=serial)
         interfaces: tuple[str, ...] = ()

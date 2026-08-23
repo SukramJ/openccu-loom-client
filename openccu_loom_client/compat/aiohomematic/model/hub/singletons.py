@@ -428,6 +428,44 @@ class InterfaceConnectivityDp(HubSingletonDp):
         return True
 
 
+class DaemonConnectionDp(HubSingletonDp):
+    """
+    Binary sensor answering "is the daemon reachable at all" (api ≥ 7.6.0).
+
+    The counterpart of the MQTT binary sensor the daemon feeds from its
+    retained bridge status. ``GET /hub/data-points`` declares the
+    singleton — including the name the daemon owns — but can only ever
+    report it connected: a REST answer is itself proof the daemon runs.
+
+    The negative state has two sources, both outside that response: the
+    ``daemon_status.changed`` broadcast a stopping daemon sends over the
+    WebSocket, and this client's own connection state when the daemon
+    goes away without warning. Whichever arrives first writes it here.
+
+    Like the connectivity sensors it carries no availability of its own —
+    an entity that goes unavailable exactly when the thing it reports
+    happens reports nothing.
+    """
+
+    _category: ClassVar[DataPointCategory] = DataPointCategory.HubBinarySensor
+    _data_type: ClassVar[str | None] = "LOGIC"
+
+    def __init__(self, *, store: LoomStore) -> None:
+        """Bind the daemon-liveness singleton to the store."""
+        super().__init__(
+            store=store,
+            name="daemon_connection",
+            parameter_slug="daemon-connection",
+            translation_key="daemon_connection",
+            name_key="discovery.daemon_status",
+        )
+
+    @property
+    def available(self) -> bool:
+        """Return ``True`` — the sensor itself carries the connection state."""
+        return True
+
+
 # ---- system update ----
 
 
@@ -874,6 +912,9 @@ class SecuritySeveritySensor(HubSingletonDp):
             translation_key="security_severity",
             name_key="security.entity.state",
         )
+        # Tri-state on purpose: ``None`` is "the daemon has not said",
+        # which is not the same claim as "the index is fine".
+        self._index_healthy: bool | None = None
 
     @property
     def values(self) -> tuple[str, ...]:
@@ -885,9 +926,43 @@ class SecuritySeveritySensor(HubSingletonDp):
         """Return the severity vocabulary, ascending."""
         return SECURITY_SEVERITIES
 
-    def update_severity(self, *, severity: str, sources: Sequence[Any] | None = None) -> bool:
-        """Apply the folded severity plus the sources that produced it."""
-        return self.update_value(value=severity, attributes=sources_attribute(sources=sources))
+    @property
+    def attributes(self) -> dict[str, Any]:
+        """
+        Return the sources plus, when it is degraded, the index health.
+
+        A stale classification index means a source may be missing or
+        attributed to the wrong class, so a quiet ``ok`` on this sensor is
+        not evidence of quiet. The flag is surfaced only while it is
+        false: an attribute that is always there and always true reads as
+        noise and stops being looked at.
+        """
+        attrs = dict(self._attributes)
+        if self._index_healthy is False:
+            attrs["index_healthy"] = False
+        return attrs
+
+    @property
+    def additional_information(self) -> dict[str, Any]:
+        """Return the same attributes the consumer reads as extra state."""
+        return self.attributes
+
+    def update_severity(
+        self, *, severity: str, sources: Sequence[Any] | None = None, index_healthy: bool | None = None
+    ) -> bool:
+        """
+        Apply the folded severity plus the sources that produced it.
+
+        ``index_healthy=None`` leaves the recorded health untouched — the
+        zone/class pushes carry no verdict about the index, and treating
+        their silence as "healthy" would clear a degradation the snapshot
+        had reported.
+        """
+        moved = False
+        if index_healthy is not None and index_healthy != self._index_healthy:
+            self._index_healthy = index_healthy
+            moved = True
+        return self.update_value(value=severity, attributes=sources_attribute(sources=sources)) or moved
 
 
 class SecurityFaultsSensor(HubSingletonDp):
@@ -1090,6 +1165,7 @@ __all__ = [
     "AlarmMessagesSensor",
     "ConnectionLatencySensor",
     "ConnectivityDpType",
+    "DaemonConnectionDp",
     "HubSingletonDp",
     "InboxSensor",
     "InstallModeDpButton",

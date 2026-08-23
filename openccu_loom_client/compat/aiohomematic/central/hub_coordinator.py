@@ -32,6 +32,7 @@ from openccu_loom_client.compat.aiohomematic.model.hub.singletons import (
     AlarmMessagesSensor,
     ConnectionLatencySensor,
     ConnectivityDpType,
+    DaemonConnectionDp,
     InboxSensor,
     InstallModeDpButton,
     InstallModeDpSensor,
@@ -49,6 +50,7 @@ from openccu_loom_client.compat.aiohomematic.model.hub.singletons import (
 )
 from openccu_loom_client.events import (
     AddonUpdateStateChangedEvent,
+    DaemonStatusChangedEvent,
     HubAlarmMessageCountChangedEvent,
     HubConnectivityChangedEvent,
     HubInboxChangedEvent,
@@ -113,6 +115,7 @@ class _HubCoordinator:
         self._inbox_dp: InboxSensor | None = None
         self._update_dp: SystemUpdateDp | None = None
         self._addon_update_dp: AddonUpdateDp | None = None
+        self._daemon_connection_dp: DaemonConnectionDp | None = None
         self._metrics_dps: MetricsDpType | None = None
         self._connectivity_dps: dict[str, ConnectivityDpType] = {}
         self._install_mode_dps: dict[str, InstallModeDpType] = {}
@@ -307,6 +310,11 @@ class _HubCoordinator:
         return self._update_dp
 
     @property
+    def daemon_connection_dp(self) -> DaemonConnectionDp | None:
+        """Return the daemon-liveness singleton (``None`` before the first hub fetch)."""
+        return self._daemon_connection_dp
+
+    @property
     def addon_update_dp(self) -> AddonUpdateDp | None:
         """Return the add-on-update singleton (``None`` before bootstrap or when unsupported)."""
         return self._addon_update_dp
@@ -341,6 +349,10 @@ class _HubCoordinator:
         self._service_messages_dp = ServiceMessagesSensor(store=store)
         self._inbox_dp = InboxSensor(store=store)
         self._update_dp = SystemUpdateDp(store=store, system_ops=self._client.system)
+        # Seeded true: this coordinator only ever builds while the daemon is
+        # answering. The false state arrives over the WS shutdown broadcast.
+        self._daemon_connection_dp = DaemonConnectionDp(store=store)
+        self._daemon_connection_dp.update_value(value=True)
         # The add-on self-updater is capability-gated daemon-side: only
         # platforms with the firmware installer report supported=True, and
         # daemons older than api 3.3.0 answer 404 — both mean "no entity".
@@ -407,7 +419,9 @@ class _HubCoordinator:
             return
         self._security_severity_dp = SecuritySeveritySensor(store=store)
         self._security_severity_dp.update_severity(
-            severity=str(snapshot.severity), sources=_active_hazard_sources(snapshot=snapshot)
+            severity=str(snapshot.severity),
+            sources=_active_hazard_sources(snapshot=snapshot),
+            index_healthy=snapshot.index_healthy,
         )
         self._security_faults_dp = SecurityFaultsSensor(store=store)
         self._security_faults_dp.update_faults(faults=snapshot.faults or ())
@@ -448,6 +462,10 @@ class _HubCoordinator:
             return
         changed: list[Any] = []
         changed += self._apply_inbox_count(count=data.inbox.value)
+        # Always true in a response — the answer itself proves the daemon
+        # runs — so this is what re-arms the sensor after a reconnect that
+        # followed a shutdown broadcast.
+        changed += self._apply_daemon_connection(connected=data.daemon_connection.connected)
         changed += self._apply_metrics(metrics=data.metrics)
         changed += self._apply_connectivity(entries=data.connectivity)
         changed += self._apply_install_mode(entries=data.install_mode)
@@ -528,6 +546,7 @@ class _HubCoordinator:
                 self._inbox_dp,
                 self._update_dp,
                 self._addon_update_dp,
+                self._daemon_connection_dp,
                 self._security_severity_dp,
                 self._security_faults_dp,
                 self._security_alarm_report_dp,
@@ -561,7 +580,9 @@ class _HubCoordinator:
             return []
         changed: list[Any] = []
         if self._security_severity_dp.update_severity(
-            severity=str(snapshot.severity), sources=_active_hazard_sources(snapshot=snapshot)
+            severity=str(snapshot.severity),
+            sources=_active_hazard_sources(snapshot=snapshot),
+            index_healthy=snapshot.index_healthy,
         ):
             changed.append(self._security_severity_dp)
         if self._security_faults_dp is not None and self._security_faults_dp.update_faults(
@@ -665,6 +686,11 @@ class _HubCoordinator:
         """Apply the inbox count to its singleton; return it if it changed."""
         dp = self._inbox_dp
         return [dp] if dp is not None and dp.update_value(value=count) else []
+
+    def _apply_daemon_connection(self, *, connected: bool) -> list[Any]:
+        """Apply the daemon-liveness flag to its singleton; return it if it changed."""
+        dp = self._daemon_connection_dp
+        return [dp] if dp is not None and dp.update_value(value=connected) else []
 
     def _apply_metrics(self, *, metrics: list[Any] | None) -> list[Any]:
         """Apply metric values to the matching sensors, keyed by ``legacy_name``."""
@@ -771,6 +797,7 @@ class _HubCoordinator:
         group.subscribe(event_type=HubSystemUpdateChangedEvent, handler=self._on_system_update_push)
         group.subscribe(event_type=AddonUpdateStateChangedEvent, handler=self._on_addon_update_push)
         group.subscribe(event_type=InstallModeChangedEvent, handler=self._on_install_mode_push)
+        group.subscribe(event_type=DaemonStatusChangedEvent, handler=self._on_daemon_status_push)
         # The Security & Safety plane (daemon ≥ 0.54.0 / api 5.1.0). Before it
         # existed the domain had no push at all, so a smoke alarm reached a
         # consumer whenever it next happened to read GET /security.
@@ -794,6 +821,19 @@ class _HubCoordinator:
             "last_event_age": metrics.last_event_age,
             "last_event_age_seconds": metrics.last_event_age,
         }.get(metric)
+
+    async def _on_daemon_status_push(self, event: DaemonStatusChangedEvent, /) -> None:
+        """
+        Apply a ``daemon_status.changed`` shutdown announcement.
+
+        Daemon-level, not central-scoped, so it is not filtered by central:
+        every central this daemon serves loses it at once. Only a graceful
+        stop announces itself; a killed daemon leaves the sensor true until
+        the consumer's own connection state says otherwise.
+        """
+        connected = str(getattr(event.payload.status, "value", event.payload.status)) == "online"
+        for dp in self._apply_daemon_connection(connected=connected):
+            await self._publish_changed(dp=dp)
 
     async def _on_inbox_push(self, event: HubInboxChangedEvent, /) -> None:
         """Apply an ``hub.inbox_changed`` count push."""

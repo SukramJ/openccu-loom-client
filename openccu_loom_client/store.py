@@ -1054,6 +1054,15 @@ class LoomStore:
         new_summary = dp.summary.model_copy(
             update={
                 "value": payload.value,
+                # The daemon owns this projection and puts it on the push
+                # (api ≥ 7.7.0), so it is copied, never recomputed: an
+                # absent value means `value` already is the displayable
+                # number — a trivial multiplier, or a value no projection
+                # applies to — and rebuilding it here from the summary's
+                # multiplier would be a second opinion about the daemon's
+                # own arithmetic. `value` stays the raw CCU wire value
+                # because the write path sends it back unchanged.
+                "display_value": payload.display_value,
                 "observed": True,
                 "modified_at": payload.modified_at,
                 "last_changed_at": payload.modified_at,

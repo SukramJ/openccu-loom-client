@@ -291,6 +291,55 @@ class TestLiveUpdates:
         assert dp.value == 0.8
         assert dp.is_observed is True
 
+    def _level_push(self, *, value: Any, display_value: float | None = None) -> DataPointValueChangedPayload:
+        payload: dict[str, Any] = {
+            "central": "home",
+            "device_address": "VCU0001",
+            "channel": 1,
+            "parameter": "LEVEL",
+            "paramset_key": "VALUES",
+            "value": value,
+            "modified_at": "2026-05-24T08:42:13Z",
+            "unique_id": "loom_test_vcu0001_1_level",
+            "available": True,
+        }
+        if display_value is not None:
+            payload["display_value"] = display_value
+        return DataPointValueChangedPayload.model_validate(payload)
+
+    def test_apply_value_changed_takes_the_daemons_display_value(self, populated: LoomStore) -> None:
+        # The daemon owns the projection and puts it on the push (api ≥ 7.7.0).
+        # Carrying the seeded one forward instead would keep announcing the
+        # bootstrap reading forever — a dimmer stuck at "42 %" while the raw
+        # value moves on.
+        dp = populated.get_data_point(address="VCU0001", channel=1, parameter="LEVEL")
+        assert dp is not None
+        dp._replace_summary(summary=dp.summary.model_copy(update={"multiplier": 100.0, "display_value": 0.0}))
+        populated.apply_value_changed(payload=self._level_push(value=0.42, display_value=42.0))
+        assert dp.summary.value == 0.42  # the raw wire value the write path sends back
+        assert dp.summary.display_value == 42.0
+
+    def test_apply_value_changed_clears_a_display_value_the_push_omits(self, populated: LoomStore) -> None:
+        # Absent means `value` already is the displayable number — a trivial
+        # multiplier, or a value no projection applies to. The stale seeded
+        # projection must go with it rather than outliving the value it
+        # described.
+        dp = populated.get_data_point(address="VCU0001", channel=1, parameter="LEVEL")
+        assert dp is not None
+        dp._replace_summary(summary=dp.summary.model_copy(update={"display_value": 7.0}))
+        populated.apply_value_changed(payload=self._level_push(value=0.42))
+        assert dp.summary.display_value is None
+
+    def test_apply_value_changed_keeps_a_zero_display_value(self, populated: LoomStore) -> None:
+        # A dimmer at 0 % projects to 0.0, which is a reading and not an
+        # absence. Treating a falsy projection as "not sent" would drop the
+        # one value an operator most wants to see rendered in percent.
+        dp = populated.get_data_point(address="VCU0001", channel=1, parameter="LEVEL")
+        assert dp is not None
+        dp._replace_summary(summary=dp.summary.model_copy(update={"multiplier": 100.0, "display_value": 42.0}))
+        populated.apply_value_changed(payload=self._level_push(value=0.0, display_value=0.0))
+        assert dp.summary.display_value == 0.0
+
     def test_apply_value_changed_for_unknown_dp_is_noop(self, populated: LoomStore, caplog) -> None:
         payload = DataPointValueChangedPayload.model_validate(
             {

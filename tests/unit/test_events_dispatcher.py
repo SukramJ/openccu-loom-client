@@ -33,8 +33,10 @@ from openccu_loom_client.events import (
     AddonUpdateStateChangedEvent,
     CentralStateChangedEvent,
     CustomDataPointStateChangedEvent,
+    DaemonStatusChangedEvent,
     DataPointValueChangedEvent,
     DeviceCreatedEvent,
+    DeviceMetadataChangedEvent,
     DeviceRemovedEvent,
     HubAlarmMessageCountChangedEvent,
     HubConnectivityChangedEvent,
@@ -42,6 +44,7 @@ from openccu_loom_client.events import (
     HubMetricsChangedEvent,
     HubServiceMessageCountChangedEvent,
     ProgramExecutedEvent,
+    ScheduleChangedEvent,
     SystemStatusChangedEvent,
     SysvarChangedEvent,
     UnknownLoomEvent,
@@ -161,6 +164,48 @@ class TestDispatch:
         )
         ev = event_from_envelope(envelope=env)
         assert isinstance(ev, DeviceRemovedEvent)
+
+    def test_device_metadata_changed_payload_lands_typed(self) -> None:
+        env = self._envelope(
+            type_="device.metadata_changed",
+            payload={
+                "central": "home",
+                "interface_id": "home:HmIP-RF",
+                "device_address": "00010001",
+            },
+        )
+        ev = event_from_envelope(envelope=env)
+        assert isinstance(ev, DeviceMetadataChangedEvent)
+        # Shares the lifecycle topic with device.created: routed by `type`.
+        assert ev.payload.device_address == "00010001"
+        assert ev.event_key == "home"
+
+    def test_schedule_changed_payload_lands_typed(self) -> None:
+        env = self._envelope(
+            type_="schedules.changed",
+            payload={
+                "central": "home",
+                "interface_id": "home:HmIP-RF",
+                "device_address": "00010001",
+                "channel": 1,
+            },
+        )
+        ev = event_from_envelope(envelope=env)
+        assert isinstance(ev, ScheduleChangedEvent)
+        assert ev.payload.channel == 1
+        assert ev.event_key == "home"
+
+    def test_daemon_status_changed_payload_lands_typed(self) -> None:
+        env = self._envelope(
+            type_="daemon_status.changed",
+            payload={"status": "offline", "reason": "shutdown", "event_at": "2026-05-24T08:42:13Z"},
+        )
+        ev = event_from_envelope(envelope=env)
+        assert isinstance(ev, DaemonStatusChangedEvent)
+        assert ev.payload.status.value == "offline"
+        assert ev.payload.reason == "shutdown"
+        # Daemon-level, not central-scoped: no routing key to filter on.
+        assert ev.event_key is None
 
     def test_hub_count_pushes_land_typed_and_central_keyed(self) -> None:
         # alarm / service / inbox share HubCountChangedPayload but distinct types.

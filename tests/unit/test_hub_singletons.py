@@ -474,6 +474,27 @@ class TestSecurityEntityContext:
         assert dp.value == "alarm"
         assert dp.attributes["source_names"] == ["Bewegung Flur"]
 
+    def test_a_stale_classification_index_is_visible_on_the_severity_sensor(self) -> None:
+        """
+        A degraded classification index reaches the operator.
+
+        Daemon api 7.6.0: a quiet `ok` folded from a stale index is not
+        evidence of quiet — a source may be missing, or attributed to the
+        wrong class.
+        """
+        dp = SecuritySeveritySensor(store=_store())
+        dp.update_severity(severity="ok", index_healthy=True)
+        assert "index_healthy" not in dp.attributes  # healthy is the silent case
+
+        assert dp.update_severity(severity="ok", index_healthy=False) is True
+        assert dp.attributes["index_healthy"] is False
+        assert dp.additional_information["index_healthy"] is False
+
+        # The zone/class pushes carry no verdict about the index, so their
+        # silence must not clear a degradation the snapshot reported.
+        dp.update_severity(severity="alarm")
+        assert dp.attributes["index_healthy"] is False
+
     def test_fault_sensor_carries_the_sources_of_its_faults(self) -> None:
         dp = SecurityFaultsSensor(store=_store())
         fault = SimpleNamespace(

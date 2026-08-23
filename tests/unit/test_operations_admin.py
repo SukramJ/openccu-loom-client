@@ -253,6 +253,35 @@ class TestBackupOperations:
         mock.post("/api/v1/backups/b1/restore", status=202)
         await BackupOperations(transport=t).restore_backup(backup_id="b1")
 
+    async def test_storage_info_reports_the_archive_directory(self, http) -> None:
+        # api 7.3.0: the path is not derivable client-side — backup.dir is
+        # empty in the common case and a CCU add-on resolves it per start.
+        t, mock = http
+        mock.get(
+            "/api/v1/backups/storage",
+            payload={"dir": "/data/backups", "available": True, "count": 2, "bytes": 6144},
+        )
+        info = await BackupOperations(transport=t).get_storage_info()
+        assert info.dir == "/data/backups"
+        assert info.available is True
+        assert info.count == 2
+        assert info.bytes == 6144
+
+    async def test_storage_info_reports_an_unavailable_backend(self, http) -> None:
+        # No storage wired at all: the empty backup list then says nothing
+        # about the CCU, and the consumer must be able to tell the two apart.
+        t, mock = http
+        mock.get("/api/v1/backups/storage", payload={"available": False, "count": 0, "bytes": 0})
+        info = await BackupOperations(transport=t).get_storage_info()
+        assert info.available is False
+        assert info.dir is None
+
+    async def test_delete_backup(self, http) -> None:
+        t, mock = http
+        mock.delete("/api/v1/backups/b1", status=204)
+        await BackupOperations(transport=t).delete_backup(backup_id="b1")
+        assert (mock.requests[-1].method, mock.requests[-1].path) == ("DELETE", "/api/v1/backups/b1")
+
     async def test_upload_backup_sends_multipart_and_returns_archive_facts(self, http) -> None:
         # api 3.10.0: an externally produced .sbk is imported through a
         # multipart file part, and the daemon answers with the stored
