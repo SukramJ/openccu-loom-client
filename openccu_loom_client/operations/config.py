@@ -54,7 +54,22 @@ class ConfigOperations(_OperationsBase):
         Replace one config section (admin).
 
         Wire: ``PUT /config/sections/{section}``. Returns the daemon's
-        ack (section, version, updated_at, restart_required).
+        ack: ``section``, ``version``, ``updated_at``,
+        ``restart_required``, and — from daemon api 7.8.0 — ``applied``
+        plus an optional ``apply_error``.
+
+        ``applied`` is the answer to a question the ack could not
+        previously express: whether the running daemon *took* the change,
+        as opposed to merely storing it. False on its own is not a
+        failure — most sections have no subsystem that can rebuild itself
+        and the value simply takes effect at the next restart. It is
+        false with an ``apply_error`` when a subsystem that could have
+        taken it refused, and that is the case a caller must not report
+        as a plain success: the section is saved, the daemon is still
+        doing the old thing, and only this field says so.
+
+        Both keys are absent against a daemon older than 7.8.0. Treat a
+        missing ``applied`` as "unknown", not as False.
         """
         payload = await self._transport.request(
             method="PUT",

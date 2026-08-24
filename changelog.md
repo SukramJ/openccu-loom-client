@@ -1,3 +1,38 @@
+# Version 2026.8.24 (2026-08-24)
+
+Syncs the client to daemon 0.64.2 / api 7.9.0 (`openccu-loom-types`
+0.5.3). The 7.7.0 → 7.9.0 line is additive and small on the wire, but
+one of the two additions is a distinction the client could not make
+before.
+
+- **`config_admin.put_section` now documents `applied` and
+  `apply_error`.** The ack used to say only that a section was stored.
+  Storing and taking effect are two different facts, and until api 7.8.0
+  the response conflated them: a `north.mqtt` save returned success while
+  the running bridge kept the topic base and plane toggles it was built
+  with. `applied` says which happened. False on its own is not a failure
+  — most sections have no subsystem that can rebuild itself — but false
+  _with_ an `apply_error` is the case a caller must not report as a plain
+  success, because the daemon is still doing the old thing and only this
+  field says so. Both keys are absent against a daemon below 7.8.0: treat
+  a missing `applied` as unknown, not as False.
+
+- **`diagnostics.get_wiring()` binds `GET /diagnostics/wiring`**, the
+  seams a running daemon declared as it wired them. Each entry carries
+  the collaborator, the boot marks it must precede or follow, what stops
+  working when it is absent, and any ordering constraint that was
+  already broken when it attached. That last field is the one worth
+  having: the collaborator IS attached in the broken case, every other
+  surface reports healthy, and nothing else can tell you the attach came
+  too late. An empty list means the daemon wired none of them — a valid
+  answer, not an error. A daemon below 7.7.0 answers 404.
+
+Neither addition produced a generated model: both response schemas are
+written inline in the daemon's OpenAPI paths rather than as named
+components, and `openccu-loom-types` is generated from
+`components/schemas` alone. Both operations therefore return plain
+dicts, and the daemon-side gap is reported upstream.
+
 # Version 2026.8.20 (2026-08-23)
 
 Syncs the client to daemon 0.64.1 / api 7.7.0 (`openccu-loom-types`
