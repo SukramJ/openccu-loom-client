@@ -1,3 +1,45 @@
+# Version 2026.8.25 (2026-08-24)
+
+Syncs the client to daemon 0.65.0 / api 7.12.0 (`openccu-loom-types`
+0.5.4). Three daemon API bumps land at once — 7.10.0, 7.11.0 and 7.12.0 —
+and the generated types grew by 71 models, almost all of them request and
+response shapes that had been written inline in the daemon's OpenAPI paths
+and were therefore invisible to every generated client. Nothing here had to
+change for those: they were already reachable as plain dicts and are now
+also reachable as types.
+
+- **`Capability` names the daemon's capability tokens**, and
+  `LoomClient.has_capability()` answers whether one is advertised. The
+  tokens were bare strings before, in this package and in every caller.
+  That is the shape of mistake nothing catches: a token is only ever
+  compared, never parsed, so `required_capabilities=("alram.v1",)` raises
+  "daemon is missing required capabilities" against every daemon that will
+  ever exist, and reads like the daemon's fault. A name turns that into an
+  `AttributeError` at the call site.
+
+  The enum is a `StrEnum`, so a member and its wire string are
+  interchangeable and code already carrying strings keeps working. It is a
+  convenience for the tokens this client acts on, **not** an allowlist:
+  the daemon may advertise tokens this package does not know, and
+  `has_capability()` takes a raw string for exactly that case.
+
+- **Four new tokens from api 7.12.0** — `mqtt.raw.v1`,
+  `webhook.inbound.v1`, `diagrams.v1` and `admin.persistence.v1`. The last
+  one is the one a caller of this package can act on today: `/users` and
+  `/areas` are mounted with or without a database behind them, and without
+  one every write is refused in a way a client cannot tell apart from a
+  permission problem. `admin.persistence.v1` is that distinction.
+
+- **A token means _configured_, not running.** The daemon pinned this
+  meaning in 7.12.0 and it is worth repeating at this end: a briefly
+  unreachable broker is not a missing capability. For what is working right
+  now, read the daemon's `/health` components — they gained `security` and
+  `discovery.mdns` in 0.65.0.
+
+The alarm bootstrap now feature-detects through `Capability.ALARM` instead
+of a hand-typed `"alarm.v1"`. Behaviour is unchanged; the string is gone
+from the one place it was still spelled out.
+
 # Version 2026.8.24 (2026-08-24)
 
 Syncs the client to daemon 0.64.2 / api 7.9.0 (`openccu-loom-types`

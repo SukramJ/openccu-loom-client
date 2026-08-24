@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from openccu_loom_client._version import __version__
 from openccu_loom_client.auth import BasicAuth, BearerAuth, SessionAuth
+from openccu_loom_client.capabilities import ALWAYS_ON, Capability
 from openccu_loom_client.client import LoomClient
 from openccu_loom_client.config import LoomConfig
 from openccu_loom_client.exceptions import (
@@ -42,9 +43,11 @@ from openccu_loom_client.store import LoomStore
 
 __all__ = [
     # General
+    "ALWAYS_ON",
     "BaseLoomException",
     "BasicAuth",
     "BearerAuth",
+    "Capability",
     "LoomAuthError",
     "LoomBadRequestError",
     "LoomClient",
