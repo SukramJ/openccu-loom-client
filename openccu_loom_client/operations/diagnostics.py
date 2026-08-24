@@ -39,6 +39,32 @@ class DiagnosticsOperations(_OperationsBase):
         payload = await self._transport.request(method="GET", path="/diagnostics")
         return dict(payload or {})
 
+    async def get_wiring(self) -> list[dict[str, Any]]:
+        """
+        Return the seams the running daemon declared as it wired them.
+
+        Wire: ``GET /diagnostics/wiring`` (admin, daemon api 7.7.0+).
+
+        Each entry names the seam, the collaborator, whether it is a
+        per-central observer or a once-only ordered attachment, the boot
+        marks it must precede or follow, and what stops working when it
+        is absent. ``violations`` lists the ordering constraints that
+        were already broken when the seam attached — normally empty; a
+        non-empty list is a wiring defect the daemon reports about
+        itself, and nothing else about it looks wrong.
+
+        An empty list is a valid answer and means the daemon wired none
+        of them. It is not an error, which is why this endpoint never
+        reports "unavailable" instead: a caller has to be able to tell
+        "wired nothing" from "cannot say".
+
+        A daemon older than api 7.7.0 has no such route and answers 404.
+        """
+        payload = await self._transport.request(method="GET", path="/diagnostics/wiring")
+        if not isinstance(payload, list):
+            return []
+        return [dict(entry) for entry in payload if isinstance(entry, dict)]
+
     # ---- log levels ----
 
     async def get_log_level(self) -> dict[str, Any]:

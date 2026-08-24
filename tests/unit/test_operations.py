@@ -10,7 +10,14 @@ from collections.abc import AsyncIterator
 from openccu_loom_types import DAEMON_API_VERSION
 import pytest
 
-from openccu_loom_client.operations import DataPointsOperations, DevicesOperations, HubOperations, SystemOperations
+from openccu_loom_client.operations import (
+    ConfigOperations,
+    DataPointsOperations,
+    DevicesOperations,
+    DiagnosticsOperations,
+    HubOperations,
+    SystemOperations,
+)
 from openccu_loom_client.transport import HttpTransport
 from tests.helpers import MockDaemon
 
@@ -209,3 +216,124 @@ class TestSystemOperations:
         await SystemOperations(transport=http).install_addon_update()
         call = next(r for r in mock_daemon.requests if r.path.endswith("/addon-update/install"))
         assert call.method == "POST"
+
+
+class TestWiringManifest:
+    """``GET /diagnostics/wiring`` — what the daemon says it wired."""
+
+    async def test_get_wiring_returns_the_declared_seams(self, mock_daemon: MockDaemon, http: HttpTransport) -> None:
+        mock_daemon.get(
+            "/api/v1/diagnostics/wiring",
+            payload=[
+                {
+                    "name": "history.recorder",
+                    "collaborator": "*history.Recorder",
+                    "phase": "per-central",
+                    "why": "no value change is ever recorded",
+                },
+                {
+                    "name": "webhook.alarm_bus",
+                    "collaborator": "*engine.Service alarm bus",
+                    "phase": "ordered",
+                    "before": ["northbridges.started"],
+                    "why": "no alarm-panel event is ever forwarded",
+                },
+            ],
+        )
+        seams = await DiagnosticsOperations(transport=http).get_wiring()
+        assert [s["name"] for s in seams] == ["history.recorder", "webhook.alarm_bus"]
+        assert seams[1]["before"] == ["northbridges.started"]
+
+    async def test_get_wiring_reports_a_violation_verbatim(self, mock_daemon: MockDaemon, http: HttpTransport) -> None:
+        """
+        A violated ordering constraint must survive the client untouched.
+
+        It is the one field that says a wired-looking daemon is not: the
+        collaborator IS attached, every other surface reports healthy,
+        and only this list says the attach came too late.
+        """
+        mock_daemon.get(
+            "/api/v1/diagnostics/wiring",
+            payload=[
+                {
+                    "name": "webhook.alarm_bus",
+                    "collaborator": "*engine.Service alarm bus",
+                    "phase": "ordered",
+                    "before": ["northbridges.started"],
+                    "why": "no alarm-panel event is ever forwarded",
+                    "violations": ['attached after "northbridges.started"'],
+                }
+            ],
+        )
+        seams = await DiagnosticsOperations(transport=http).get_wiring()
+        assert seams[0]["violations"] == ['attached after "northbridges.started"']
+
+    async def test_get_wiring_accepts_an_empty_ledger(self, mock_daemon: MockDaemon, http: HttpTransport) -> None:
+        """Empty is a valid answer — "wired none of them", not an error."""
+        mock_daemon.get("/api/v1/diagnostics/wiring", payload=[])
+        assert await DiagnosticsOperations(transport=http).get_wiring() == []
+
+
+class TestConfigSectionSave:
+    """``PUT /config/sections/{section}`` — stored is not the same as in effect."""
+
+    async def test_put_section_surfaces_applied(self, mock_daemon: MockDaemon, http: HttpTransport) -> None:
+        mock_daemon.put(
+            "/api/v1/config/sections/north.mqtt",
+            payload={
+                "section": "north.mqtt",
+                "version": 3,
+                "updated_at": "2026-08-24T08:00:00Z",
+                "restart_required": False,
+                "applied": True,
+            },
+        )
+        ack = await ConfigOperations(transport=http).put_section(
+            section="north.mqtt", values={"topic_base": "loomtest"}
+        )
+        assert ack["applied"] is True
+        assert "apply_error" not in ack
+
+    async def test_put_section_surfaces_a_failed_apply(self, mock_daemon: MockDaemon, http: HttpTransport) -> None:
+        """
+        Only ``apply_error`` separates the two outcomes.
+
+        The section is stored either way; the field is what distinguishes
+        "took effect now" from "the running daemon refused it". A caller
+        that reports the second as a plain success repeats the defect the
+        field exists to close.
+        """
+        mock_daemon.put(
+            "/api/v1/config/sections/north.mqtt",
+            payload={
+                "section": "north.mqtt",
+                "version": 4,
+                "updated_at": "2026-08-24T08:01:00Z",
+                "restart_required": False,
+                "applied": False,
+                "apply_error": "broker refused the connection",
+            },
+        )
+        ack = await ConfigOperations(transport=http).put_section(
+            section="north.mqtt", values={"broker_url": "tcp://nope:1883"}
+        )
+        assert ack["applied"] is False
+        assert ack["apply_error"] == "broker refused the connection"
+
+    async def test_put_section_against_an_older_daemon_omits_applied(
+        self, mock_daemon: MockDaemon, http: HttpTransport
+    ) -> None:
+        """A daemon below api 7.8.0 sends neither key: unknown, not False."""
+        mock_daemon.put(
+            "/api/v1/config/sections/north.mqtt",
+            payload={
+                "section": "north.mqtt",
+                "version": 5,
+                "updated_at": "2026-08-24T08:02:00Z",
+                "restart_required": False,
+            },
+        )
+        ack = await ConfigOperations(transport=http).put_section(
+            section="north.mqtt", values={"topic_base": "loomtest"}
+        )
+        assert "applied" not in ack
