@@ -44,6 +44,7 @@ import logging
 from typing import TYPE_CHECKING, Final, Self
 
 from openccu_loom_client.bridge import bind_ws_events_to_store
+from openccu_loom_client.capabilities import Capability
 from openccu_loom_client.events import (
     DeviceCreatedEvent,
     EventBus,
@@ -231,6 +232,24 @@ class LoomClient:
         """
         return self._http.info
 
+    def has_capability(self, capability: Capability | str, /) -> bool:
+        """
+        Report whether the daemon advertises ``capability``.
+
+        Answers ``False`` before connect and for a daemon whose ``/info``
+        carries no capability list — both mean "this client has no
+        evidence the feature is there", which is the answer a caller
+        should act on either way.
+
+        A ``True`` here means the daemon is **configured** for the
+        capability, not that the subsystem is healthy right now. Read the
+        daemon's ``/health`` components for that.
+        """
+        info = self._http.info
+        if info is None:
+            return False
+        return str(capability) in (info.capabilities or [])
+
     # ---- async context manager ----
 
     async def __aenter__(self) -> Self:
@@ -341,7 +360,7 @@ class LoomClient:
         updates then ride the ``alarm.*`` WS topics bound by the bridge.
         """
         info = self._http.info
-        if info is not None and "alarm.v1" not in (info.capabilities or []):
+        if info is not None and not self.has_capability(Capability.ALARM):
             _LOGGER.debug("daemon does not advertise alarm.v1 — alarm subsystem disabled, skipping panels")
             return
         try:
