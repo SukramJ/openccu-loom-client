@@ -79,9 +79,11 @@ The scenario matrix and the reasoning per fix are in
 
 Also in this release:
 
-- Requires `openccu-loom-types` 0.5.7 (daemon 0.65.3 / api 7.15.0). Its schema
+- Requires `openccu-loom-types` 0.5.8 (daemon 0.66.0 / api 7.17.0). Its schema
   digest matches that daemon build exactly, so `connect()` no longer warns
-  about contract drift.
+  about contract drift. The only model change reaching this client is a new
+  optional `InboxDevice.awaiting_release` field, which nothing here reads yet —
+  see `notes/open-work.md`.
 - `aiohomematic` is capped at `<2026.9` in `pyproject.toml`. The comment above
   the dependency and `CLAUDE.md` both said an upper bound was pinned in both
   files; only `requirements.txt` carried one, so a plain `pip install` resolved
