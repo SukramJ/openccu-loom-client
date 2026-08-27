@@ -1,3 +1,33 @@
+# Version 2026.8.28 (2026-08-27)
+
+Syncs the client to daemon 0.66.0 / api 7.17.0 (`openccu-loom-types` 0.5.8).
+No client code had to change: the contract version moved two minors, but the
+generated models moved by a single optional field, because the daemon ties its
+`api_version` to its contract assets rather than to the size of the change they
+carry. The schema digest matches the new daemon build exactly, so `connect()`
+stays quiet about contract drift.
+
+- **The device inbox gained a state this client cannot yet tell apart.** The
+  daemon's new `awaiting_release` flag marks a device that is already accepted
+  and fully materialised — it has its CCU ise*id, its channels and its data
+  points, and can be renamed and assigned rooms — but is deliberately withheld
+  from the ecosystems (MQTT and therefore Home Assistant, the Matter bridge,
+  outbound webhooks) until an operator finishes onboarding it. Such entries are
+  listed in the same inbox as the ones genuinely waiting for a decision, and
+  the daemon's schema says a client must not offer \_accept* for them: they are
+  already accepted, and what they need is the new release call.
+
+  Nothing here reads the flag yet. Inbox entries are flattened into
+  aiohomematic's record, which has no field to carry it, so Home Assistant is
+  offered the same accept action for every entry alike — and there is no client
+  call for the release route either. Closing that needs a change on the
+  aiohomematic side as well, so it is recorded in `notes/open-work.md` rather
+  than half-done here, together with the question to settle first: what the
+  daemon actually does with an accept against a device that is already
+  accepted.
+
+- `ruff` 0.16.4 → 0.16.5 (hook pin and pre-commit requirement in lock-step).
+
 # Version 2026.8.27 (2026-08-27)
 
 Makes reconnect recovery complete. The backoff machinery was already right —
@@ -79,11 +109,9 @@ The scenario matrix and the reasoning per fix are in
 
 Also in this release:
 
-- Requires `openccu-loom-types` 0.5.8 (daemon 0.66.0 / api 7.17.0). Its schema
+- Requires `openccu-loom-types` 0.5.7 (daemon 0.65.3 / api 7.15.0). Its schema
   digest matches that daemon build exactly, so `connect()` no longer warns
-  about contract drift. The only model change reaching this client is a new
-  optional `InboxDevice.awaiting_release` field, which nothing here reads yet —
-  see `notes/open-work.md`.
+  about contract drift.
 - `aiohomematic` is capped at `<2026.9` in `pyproject.toml`. The comment above
   the dependency and `CLAUDE.md` both said an upper bound was pinned in both
   files; only `requirements.txt` carried one, so a plain `pip install` resolved
