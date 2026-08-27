@@ -1,9 +1,8 @@
 # openccu-loom-client
 
-**Status:** WIP / Alpha — transport, event bus, domain store, the full
-daemon REST surface (HA-relevant + admin/ops), and the `aiohomematic`
-compat namespace are in place (see "Status of the wire contract"
-below).
+**Status:** Beta — transport, event bus, domain store, the full daemon
+REST surface (HA-relevant + admin/ops), and the `aiohomematic` compat
+namespace are in place (see "Status of the wire contract" below).
 
 Async Python REST + WebSocket client for the
 [openccu-loom](https://github.com/SukramJ/openccu-loom) daemon.
