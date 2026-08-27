@@ -1,3 +1,21 @@
+# Version 2026.8.26 (2026-08-27)
+
+Syncs the client to daemon 0.65.1 / api 7.13.0 (`openccu-loom-types` 0.5.5).
+A small sync: the daemon release behind it is a Matter conformance fix, which
+does not reach this client, and the generated types changed in one field's
+description rather than in any shape. No client code had to change to keep
+working.
+
+- **`connection_latency` measures something different than it used to**, and
+  its docstring now says what. The daemon fed that hub metric from a single
+  JSON-RPC call on the reconciler's five-minute cadence — one one-way leg, no
+  XML-RPC, no BIN-RPC, and not the callback path every event actually returns
+  on. It now carries the round-trip of a matched PING/PONG pair over each
+  interface's own transport, including the callback reply, on the 30-second
+  connection-check cadence. The value a consumer reads is the same field with
+  the same unit; what it stands for is no longer a fraction of the path it is
+  named after.
+
 # Version 2026.8.25 (2026-08-24)
 
 Syncs the client to daemon 0.65.0 / api 7.12.0 (`openccu-loom-types`
