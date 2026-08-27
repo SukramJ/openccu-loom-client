@@ -38,6 +38,8 @@ import openccu_loom_types
 from openccu_loom_types.rest import Info
 
 from openccu_loom_client.exceptions import (
+    BaseLoomException,
+    LoomIncompatibleVersionError,
     LoomServiceUnreadyError,
     LoomTransportError,
     LoomUpstreamUnavailableError,
@@ -249,7 +251,11 @@ class HttpTransport:
                 f"installed openccu-loom-types expects {expected!r} (same major, minor ≥ {exp_minor}). "
                 f"Update the daemon or install an openccu-loom-types release matching it."
             )
-            raise LoomTransportError(msg)
+            # Typed distinctly from every other connect() failure. This one does
+            # not clear on its own: retrying reaches the same daemon with the
+            # same answer until somebody upgrades one side. A caller that
+            # retries "not ready" conditions needs to tell the two apart.
+            raise LoomIncompatibleVersionError(msg)
 
     @staticmethod
     def _parse_major_minor(version: str) -> tuple[int, int] | None:
@@ -275,6 +281,47 @@ class HttpTransport:
     def info(self) -> Info | None:
         """Return the last ``/info`` payload, or ``None`` before connect."""
         return self._info
+
+    async def recheck_contract(self) -> bool:
+        """
+        Re-run the ``/info`` handshake against a daemon that may have changed.
+
+        The connect-time handshake fixes the contract for the lifetime of the
+        session, which is exactly as long as the caller keeps the client alive —
+        so a daemon upgraded underneath a running connection was never noticed.
+        The mismatch then surfaced far from its cause, as a pydantic error in
+        whichever call first met a reshaped payload.
+
+        Call this when the connection has just come back after an interruption
+        long enough for the peer to have restarted. Returns ``True`` when the
+        daemon still matches, ``False`` when ``/info`` could not be read (a
+        transient failure — the caller keeps going and tries again later), and
+        raises :class:`LoomIncompatibleVersionError` when the daemon on the
+        other end is now one this build cannot talk to.
+        """
+        previous = self._info
+        try:
+            payload = await self.request(method="GET", path="/info")
+        except LoomIncompatibleVersionError:
+            raise
+        except BaseLoomException as err:
+            _LOGGER.debug("contract re-check could not read /info (keeping the previous handshake): %s", err)
+            return False
+        api_version = payload.get("api_version", "") if isinstance(payload, dict) else ""
+        # Raises when the peer moved outside what this build supports.
+        self._check_api_version(api_version=api_version)
+        self._info = Info.model_validate(payload)
+        self._check_schema_digest(info_payload=payload)
+        if previous is not None and previous.version != self._info.version:
+            _LOGGER.info(
+                "daemon at %s changed build across the reconnect: %s -> %s (api_version %s -> %s)",
+                self._config.host,
+                previous.version,
+                self._info.version,
+                previous.api_version,
+                self._info.api_version,
+            )
+        return True
 
     # ---- core request ----
 

@@ -54,6 +54,7 @@ from openccu_loom_client.compat.aiohomematic._upstream import (
     BackupData,
     CentralHealth,
     CentralState as AioCentralState,
+    CentralStateChangedEvent as AioCentralStateChangedEvent,
     ClientState as AioClientState,
     DataPointCategory as AioDataPointCategory,
     DataPointsCreatedEvent as AioDataPointsCreatedEvent,
@@ -96,6 +97,8 @@ from openccu_loom_client.events import (
     AlarmPanelChangedEvent as LoomAlarmPanelChangedEvent,
     AlarmReadinessChangedEvent as LoomAlarmReadinessChangedEvent,
     AlarmTriggeredEvent as LoomAlarmTriggeredEvent,
+    AuthFailedEvent as LoomAuthFailedEvent,
+    ConnectionStateChangedEvent as LoomConnectionStateChangedEvent,
 )
 from openccu_loom_client.exceptions import BaseLoomException, LoomHttpError, LoomNotFoundError
 
@@ -1236,6 +1239,13 @@ class LoomCentralAdapter:
                 LoomAlarmPanelChangedEvent,
             ):
                 self._refresh_group.subscribe(event_type=latch_event, handler=self._on_possible_latch_change)
+            # Availability. Without these the central stayed Running through
+            # any outage — a dropped socket, a 60 s ping timeout, a daemon
+            # killed outright — and HA rendered its last values as live.
+            self._refresh_group.subscribe(
+                event_type=LoomConnectionStateChangedEvent, handler=self._on_connection_state_changed
+            )
+            self._refresh_group.subscribe(event_type=LoomAuthFailedEvent, handler=self._on_auth_failed)
             # Announce every data point (generic + custom) in one batch *after*
             # the custom DPs are attached, so HA's platforms spawn entities for
             # them too. Published on the real aiohomematic bus as the real
@@ -1253,6 +1263,71 @@ class LoomCentralAdapter:
             # idempotent and None-safe, so it cleans up whatever was created.
             await self.stop()
             raise
+
+    async def _on_connection_state_changed(self, event: LoomConnectionStateChangedEvent, /) -> None:
+        """
+        Track push availability in the central's lifecycle state.
+
+        ``Degraded`` rather than ``Stopped``: REST is very likely still
+        reachable (the WS drop may be a proxy, an idle NAT mapping, a restarting
+        daemon), the store keeps its contents, and writes may well succeed. It
+        is aiohomematic's word for "running, but do not trust this as live", and
+        :attr:`available` deliberately still answers True for it — flipping
+        every entity to unavailable on a five-second reconnect would be worse
+        than the staleness it reports.
+
+        Never overrides a terminal state: once ``stop()`` has run, a late
+        transition from the transport winding down must not resurrect the
+        central into Running.
+        """
+        if self._state in (CentralState.Stopped, CentralState.Failed):
+            return
+        new_state = CentralState.Running if event.connected else CentralState.Degraded
+        if new_state is self._state:
+            return
+        old_state = self._state
+        self._state = new_state
+        _LOGGER.info(
+            "central %s: %s -> %s (event stream %s)",
+            self._name,
+            old_state,
+            new_state,
+            "connected" if event.connected else "disconnected",
+        )
+        # The daemon-connection sensor mirrors the same fact, and a killed
+        # daemon sends no daemon_status.changed to move it — this is the only
+        # thing that does.
+        for dp in self.hub_coordinator._apply_daemon_connection(connected=event.connected):
+            await self._ha_bus.publish(
+                event=AioDataPointStateChangedEvent(
+                    timestamp=datetime.now(tz=UTC), unique_id=dp.unique_id, new_value=dp.value
+                )
+            )
+        await self._ha_bus.publish(
+            event=AioCentralStateChangedEvent(
+                timestamp=datetime.now(tz=UTC),
+                central_name=self._name,
+                old_state=_to_aio_central_state(state=old_state),
+                new_state=_to_aio_central_state(state=new_state),
+                trigger=None,
+            )
+        )
+
+    async def _on_auth_failed(self, _event: LoomAuthFailedEvent, /) -> None:
+        """
+        Degrade on a rejected credential, which the transport does not retry.
+
+        Distinct from a connection drop in one way that matters to a consumer:
+        this one does not resolve on its own. The reconnect loop has stopped,
+        so nothing will restore push until the credential is replaced and the
+        stream restarted.
+        """
+        _LOGGER.error(
+            "central %s: the daemon rejected this client's credential — push has stopped until it is replaced",
+            self._name,
+        )
+        if self._state not in (CentralState.Stopped, CentralState.Failed):
+            self._state = CentralState.Degraded
 
     async def _on_possible_latch_change(self, event: Any, /) -> None:
         """

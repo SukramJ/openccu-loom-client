@@ -50,9 +50,11 @@ from openccu_loom_client.events import (
     EventBus,
     SubscriptionGroup,
     event_from_envelope,
+    new_auth_failed_event,
+    new_connection_state_changed_event,
     new_data_points_created_event,
 )
-from openccu_loom_client.exceptions import BaseLoomException, LoomNotFoundError
+from openccu_loom_client.exceptions import BaseLoomException, LoomIncompatibleVersionError, LoomNotFoundError
 from openccu_loom_client.operations import (
     AlarmOperations,
     AuthOperations,
@@ -119,6 +121,25 @@ _DEFAULT_WS_SUBSCRIPTIONS: Final = (
 _REBOOTSTRAP_COOLDOWN_SECONDS: Final = 30.0
 
 
+# Upper bound on reconcile fan-out. Each reconcile is one GET /devices/{addr}
+# plus one GET …/data-points per channel, so an unfiltered batch of device
+# lifecycle events used to translate into hundreds of concurrent requests —
+# against a daemon that is typically mid-bring-up when they arrive. The filters
+# in _on_device_created should keep batches small; this is the backstop for the
+# case they do not, and it only paces the work, never drops it.
+_MAX_CONCURRENT_RECONCILES: Final = 4
+
+# Creation source that means "restored from the daemon's persisted description
+# cache at boot", not "a device arrived". See DeviceCreatedPayload.source in the
+# daemon's openapi.yaml (documented from 0.65.3; absent on older daemons).
+_SOURCE_CACHE_RESTORE: Final = "CACHE"
+
+
+def _is_cache_restore(*, source: str | None) -> bool:
+    """Report whether a ``device.created`` payload is a boot cache restore."""
+    return source is not None and source.upper() == _SOURCE_CACHE_RESTORE
+
+
 def _channel_dp_map(
     *,
     device_channels: list[DeviceChannel] | None,
@@ -166,6 +187,11 @@ class LoomClient:
         # never blocks event delivery. Tracked so close() can cancel them.
         self._bg_tasks: set[asyncio.Task[None]] = set()
         self._rebootstrap_task: asyncio.Task[None] | None = None
+        # Paces reconcile fan-out (see _MAX_CONCURRENT_RECONCILES). Created
+        # lazily on first use so constructing a client outside a running loop
+        # stays possible.
+        self._reconcile_slots: asyncio.Semaphore | None = None
+        self._connected = False
         # Loop time the last replay-lost re-bootstrap finished, for the
         # cooldown that keeps a replay_lost / overflow burst from re-walking
         # the snapshot back-to-back (see _REBOOTSTRAP_COOLDOWN_SECONDS).
@@ -414,6 +440,8 @@ class LoomClient:
                 config=self._config,
                 initial_subscriptions=list(subscriptions or _DEFAULT_WS_SUBSCRIPTIONS),
                 on_replay_lost=self._on_replay_lost,
+                on_auth_failed=self._on_auth_failed,
+                on_connection_state=self._on_connection_state,
             )
             await self._ws.start()
         else:
@@ -541,16 +569,68 @@ class LoomClient:
         The wire bridge has already seeded a stub; here we fetch the full
         graph and announce it — off the dispatch loop, so loading the new
         device's channels/DPs doesn't stall event delivery.
+
+        Two filters keep a batch of these from becoming a REST storm against a
+        daemon that is usually busy when they arrive:
+
+        - ``source == CACHE`` is skipped outright. That is the daemon restoring
+          devices from its persisted description cache at boot — a whole fleet
+          at once, all of it already covered by the snapshot walk a consumer
+          runs anyway. The other sources are single-device events (``NEW`` a
+          pairing, ``REFRESH`` a factory-reset re-pair, ``MANUAL`` an operator
+          accept) and are worth a round trip. Daemon ≥ 0.65.3 documents the
+          vocabulary; an older one sends no ``source`` at all, in which case
+          nothing is skipped and behaviour is unchanged.
+        - a device the store already holds complete is skipped. Nothing in the
+          payload adds to what a finished graph already has.
+
+        Whatever survives both is still bounded by
+        :data:`_MAX_CONCURRENT_RECONCILES`, so even an unforeseen burst walks
+        the daemon a few devices at a time instead of all at once.
         """
         if self._closing:
+            return
+        if _is_cache_restore(source=event.payload.source):
+            _LOGGER.debug(
+                "device.created for %s carries source=CACHE — boot restore, not a new device; skipping reconcile",
+                event.payload.device_address,
+            )
+            return
+        if self._store_holds_complete_device(address=event.payload.device_address):
+            _LOGGER.debug(
+                "device.created for %s is already complete in the store — skipping reconcile",
+                event.payload.device_address,
+            )
             return
         self._spawn_background(
             coro=self._reconcile_new_device(address=event.payload.device_address),
             name="openccu-loom-reconcile-device",
         )
 
+    def _store_holds_complete_device(self, *, address: str) -> bool:
+        """
+        Report whether the store already has this device with channels and data points.
+
+        "Complete" is deliberately strict: a device whose channels are all empty
+        is a stub the wire bridge just seeded, and that is exactly the case a
+        reconcile exists for. A device with at least one populated channel came
+        from a snapshot walk or an earlier reconcile and needs no second one.
+        """
+        device = self._store.get_device(address=address)
+        if device is None:
+            return False
+        channels = list(device.channels)
+        return bool(channels) and any(channel.data_points for channel in channels)
+
     async def _reconcile_new_device(self, *, address: str) -> None:
         """Fetch detail + DPs for a new device and publish a DataPointsCreatedEvent."""
+        if self._reconcile_slots is None:
+            self._reconcile_slots = asyncio.Semaphore(_MAX_CONCURRENT_RECONCILES)
+        async with self._reconcile_slots:
+            await self._reconcile_new_device_now(address=address)
+
+    async def _reconcile_new_device_now(self, *, address: str) -> None:
+        """Body of :meth:`_reconcile_new_device`, run while holding a slot."""
         try:
             await self._fetch_device_into_store(address=address)
         except asyncio.CancelledError:
@@ -568,6 +648,73 @@ class LoomClient:
                 central=self._store.central_id or None,
             )
         )
+
+    @property
+    def connected(self) -> bool:
+        """
+        Report whether the event stream is currently connected.
+
+        ``False`` before :meth:`start_events`, while the transport is between
+        reconnect attempts, and after a credential was rejected. A consumer
+        rendering daemon-sourced state should treat it as the freshness flag it
+        is: the store keeps its last values across a drop, and nothing else
+        says they stopped being updated.
+        """
+        return self._connected
+
+    async def _on_connection_state(self, connected: bool, /) -> None:
+        """
+        Publish a WS connect / disconnect transition, and re-check the contract.
+
+        The transport de-duplicates, so this only ever sees real transitions.
+
+        On a reconnect the daemon on the other end may not be the process this
+        client handshook with — an outage long enough to notice is long enough
+        for it to have been upgraded. The handshake was a connect-time one-shot,
+        so that went unnoticed until some later call met a reshaped payload.
+        Re-checking here keeps the failure at its cause. It runs as a background
+        task: this callback is invoked from the transport's reader loop, and a
+        REST round trip inline there would sit inside the inbound-ping deadline.
+        """
+        self._connected = connected
+        if connected and not self._closing:
+            self._spawn_background(coro=self._recheck_contract(), name="openccu-loom-recheck-contract")
+        await self._bus.publish(event=new_connection_state_changed_event(connected=connected))
+
+    async def _recheck_contract(self) -> None:
+        """Re-run the ``/info`` handshake; log loudly when the peer became incompatible."""
+        try:
+            await self._http.recheck_contract()
+        except asyncio.CancelledError:
+            raise
+        except LoomIncompatibleVersionError:
+            # Deliberately not fatal here. Tearing the client down from a
+            # background task would strand the consumer with no way to report
+            # why; the exception is raised again by the next REST call the
+            # consumer makes, where it can be handled in context.
+            _LOGGER.error(
+                "the daemon reachable after this reconnect is no longer contract-compatible with this build; "
+                "REST calls will fail until the daemon or openccu-loom-types is updated",
+            )
+        except Exception:
+            _LOGGER.debug("contract re-check after reconnect failed", exc_info=True)
+
+    async def _on_auth_failed(self) -> None:
+        """
+        Publish the credential rejection that just ended the event stream.
+
+        The transport stops its reconnect loop on a 401/403 — correctly, since
+        retrying a rejected credential can only hammer the daemon with one that
+        cannot start working again. That left the stream dead and silent: the
+        dispatch loop ran out, and no consumer was told. Publishing it makes the
+        one condition a consumer must act on (re-provision, then restart the
+        stream) visible.
+        """
+        _LOGGER.error(
+            "the daemon rejected this client's credential — the event stream has stopped; "
+            "provide a fresh credential and call start_events() again",
+        )
+        await self._bus.publish(event=new_auth_failed_event(reason="credential_rejected"))
 
     async def _on_replay_lost(self, oldest_seq: int, /) -> None:
         """

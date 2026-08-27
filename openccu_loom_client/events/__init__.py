@@ -18,8 +18,12 @@ from __future__ import annotations
 
 from openccu_loom_client.events.bus import EventBus, SubscriptionGroup, UnsubscribeCallback
 from openccu_loom_client.events.synthetic import (
+    AuthFailedEvent,
+    ConnectionStateChangedEvent,
     DataPointsCreatedEvent,
     OptimisticRollbackEvent,
+    new_auth_failed_event,
+    new_connection_state_changed_event,
     new_data_points_created_event,
     new_optimistic_rollback_event,
 )
@@ -85,8 +89,10 @@ __all__ = [
     "AlarmStateChangedEvent",
     "AlarmTriggeredEvent",
     "AlarmWalkTestProgressEvent",
+    "AuthFailedEvent",
     "CentralReadinessChangedEvent",
     "CentralStateChangedEvent",
+    "ConnectionStateChangedEvent",
     "CustomDataPointStateChangedEvent",
     "DaemonStatusChangedEvent",
     "DataPointValueChangedEvent",
@@ -125,6 +131,8 @@ __all__ = [
     "UnknownLoomEvent",
     "UnsubscribeCallback",
     "event_from_envelope",
+    "new_auth_failed_event",
+    "new_connection_state_changed_event",
     "new_data_points_created_event",
     "new_optimistic_rollback_event",
 ]

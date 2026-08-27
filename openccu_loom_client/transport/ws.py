@@ -134,6 +134,16 @@ again) or tear the client down — without it, a rejected token would let the
 reconnect loop spin forever against a dead credential.
 """
 
+ConnectionStateHandler = Callable[[bool], Awaitable[None]]
+"""Async callback invoked when the WS connection goes up (True) or down (False).
+
+The transport reconnects on its own, so this is not a request for the caller to
+do anything about the socket. It is the only way anything above the transport
+can learn that push has stopped: a dropped connection is exactly what the
+daemon cannot announce, and without this signal a consumer keeps presenting the
+last values it received as though they were still live.
+"""
+
 # How long :meth:`WsTransport.reauth` waits for the daemon's ack control frame.
 _REAUTH_ACK_TIMEOUT_SECONDS: Final = 10.0
 
@@ -160,6 +170,7 @@ class WsTransport:
         initial_subscriptions: list[str] | None = None,
         on_replay_lost: ReplayLostHandler | None = None,
         on_auth_failed: AuthFailedHandler | None = None,
+        on_connection_state: ConnectionStateHandler | None = None,
         session: aiohttp.ClientSession | None = None,
         classify: bool = False,
     ) -> None:
@@ -183,6 +194,10 @@ class WsTransport:
         self._last_seq: int | None = None
         self._on_replay_lost: Final = on_replay_lost
         self._on_auth_failed: Final = on_auth_failed
+        self._on_connection_state: Final = on_connection_state
+        # Last state handed to the callback, so a reconnect storm does not
+        # emit a run of identical notifications.
+        self._reported_connected = False
         # Pending in-band reauth ack (resolved by _handle_control on
         # reauth_ok/reauth_failed); None when no reauth is in flight.
         self._reauth_ack: asyncio.Future[bool] | None = None
@@ -251,6 +266,7 @@ class WsTransport:
         if self._session is not None and self._external_session is None:
             await self._session.close()
             self._session = None
+        await self._report_connection_state(connected=False)
         self._stopped.set()
 
     # ---- public API ----
@@ -362,6 +378,7 @@ class WsTransport:
                         self._config.host,
                         exc.status,
                     )
+                    await self._report_connection_state(connected=False)
                     if self._on_auth_failed is not None:
                         with contextlib.suppress(Exception):
                             await self._on_auth_failed()
@@ -423,10 +440,15 @@ class WsTransport:
         ) as ws:
             self._ws = ws
             await self._send_initial_subscribe()
+            # Announced only after the subscribe frame is away, so a consumer
+            # acting on "connected" (re-checking the contract, re-bootstrapping)
+            # cannot run against a socket that is not yet subscribed.
+            await self._report_connection_state(connected=True)
             try:
                 await self._read_loop(ws=ws)
             finally:
                 self._ws = None
+                await self._report_connection_state(connected=False)
 
     async def _send_initial_subscribe(self) -> None:
         if not self._subscriptions:
@@ -584,6 +606,23 @@ class WsTransport:
                     await self._on_auth_failed()
         else:
             _LOGGER.debug("unknown WS control op %r: %s", op, frame)
+
+    async def _report_connection_state(self, *, connected: bool) -> None:
+        """
+        Hand a connection transition to the callback, de-duplicated.
+
+        Only transitions are reported: the reconnect loop calls this on every
+        cycle, and a daemon that is down for an hour would otherwise produce a
+        disconnect notification every 30 seconds. Handler errors are swallowed
+        for the same reason the resync callback swallows them — a consumer's
+        bug must not take the reader loop down with it.
+        """
+        if connected == self._reported_connected:
+            return
+        self._reported_connected = connected
+        if self._on_connection_state is not None:
+            with contextlib.suppress(Exception):
+                await self._on_connection_state(connected)
 
     async def _trigger_resync(self, *, oldest_seq: int) -> None:
         """

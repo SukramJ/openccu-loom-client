@@ -100,6 +100,72 @@ class OptimisticRollbackEvent(LoomEvent):
             self.event_key = self.central
 
 
+@dataclass(slots=True, kw_only=True)
+class ConnectionStateChangedEvent(LoomEvent):
+    """
+    The event stream's connection to the daemon went up or down.
+
+    Locally observed, not a daemon broadcast — a dropped socket is precisely
+    what the daemon cannot tell anyone about. Without it a consumer had no way
+    to learn that push had stopped: the WS transport reconnects silently, and
+    HA kept rendering the last values it had as though they were live.
+
+    ``connected`` is the new state. ``reason`` carries a short machine-ish
+    token for the transition (``"auth_failed"``, ``"stream_ended"``) where one
+    applies, and is ``None`` for an ordinary connect/disconnect.
+    """
+
+    connected: bool
+    reason: str | None = None
+    type_id: ClassVar[str] = "client.connection_state_changed"
+
+
+@dataclass(slots=True, kw_only=True)
+class AuthFailedEvent(LoomEvent):
+    """
+    The daemon rejected this client's credential and the stream stopped.
+
+    Distinct from a connection drop, and the distinction is what a consumer
+    acts on: a drop is retried by the transport on its backoff ladder, while a
+    rejected credential ends the reconnect loop for good — retrying it would
+    hammer the daemon with a credential that cannot start working again. The
+    consumer's job is to re-provision (a fresh token, a new session) and then
+    restart the stream.
+    """
+
+    reason: str | None = None
+    type_id: ClassVar[str] = "client.auth_failed"
+
+
+def new_connection_state_changed_event(
+    *,
+    connected: bool,
+    reason: str | None = None,
+) -> ConnectionStateChangedEvent:
+    """Construct a ready-to-publish ConnectionStateChangedEvent."""
+    return ConnectionStateChangedEvent(
+        seq=0,
+        kind=Kind.change,
+        ts=_now(),
+        topic=None,
+        type=ConnectionStateChangedEvent.type_id,
+        connected=connected,
+        reason=reason,
+    )
+
+
+def new_auth_failed_event(*, reason: str | None = None) -> AuthFailedEvent:
+    """Construct a ready-to-publish AuthFailedEvent."""
+    return AuthFailedEvent(
+        seq=0,
+        kind=Kind.change,
+        ts=_now(),
+        topic=None,
+        type=AuthFailedEvent.type_id,
+        reason=reason,
+    )
+
+
 def new_data_points_created_event(
     *,
     devices: list[Device],
