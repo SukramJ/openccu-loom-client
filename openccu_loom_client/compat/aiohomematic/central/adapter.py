@@ -1197,16 +1197,22 @@ class LoomCentralAdapter:
             await self._refresh_system_information()
             await self.client_coordinator.refresh()
             self._state = CentralState.Starting
-            await self._client.bootstrap()
-            await self._bootstrap_hub_catalogue()
-            await self.hub_coordinator.fetch_hub_singleton_data()
-            # Custom DPs first: schedule discovery and the combined duration
-            # number key off the devices' CDP catalogue (aiohomematic builds
-            # both through the custom data points).
-            await self._bootstrap_custom_data_points()
-            await self._bootstrap_schedules()
-            await self._bootstrap_combined_data_points()
+            # Wait for the daemon's southbound bring-up before paying for the
+            # snapshot walk. `GET /snapshot` answers 200 with empty lists while
+            # the central is still in waiting_for_ccu and never 5xx, so
+            # bootstrapping early "succeeds" into an empty model and HA spawns
+            # no entities at all. Bounded, and a timeout is not fatal: the walk
+            # runs anyway and the daemon's resync push re-bootstraps once the
+            # CCU arrives — which now reaches this layer too, via the hook
+            # installed below.
+            await self._client.wait_until_ready()
+            await self._bootstrap_model()
             await self.query_facade.prefetch_un_ignore_candidates()
+            # Repeat this layer's half of the bootstrap whenever the client
+            # re-walks the store (replay lost, queue overflow, or the daemon's
+            # resync when the CCU finally arrives). Without it the store gains
+            # devices that never become entities.
+            self._client.set_rebootstrap_hook(self._on_store_rebootstrapped)
             await self._client.start_events()
             # Fan the daemon's typed value events into the uniform
             # DataPointStateChangedEvent the HA entities subscribe to.
@@ -1263,6 +1269,52 @@ class LoomCentralAdapter:
             # idempotent and None-safe, so it cleans up whatever was created.
             await self.stop()
             raise
+
+    async def _bootstrap_model(self) -> None:
+        """
+        Build this layer's model on top of a freshly-populated store.
+
+        Shared by :meth:`start` and the re-bootstrap hook so the two cannot
+        drift — the drift is the bug: a re-bootstrap that refills the store
+        without rebuilding the custom data points, schedules and combined
+        numbers leaves HA holding entities backed by nothing.
+
+        The store's own walk is the caller's job; this is everything layered on
+        top of it. Custom DPs come first: schedule discovery and the combined
+        duration number both key off the devices' CDP catalogue.
+        """
+        await self._client.bootstrap()
+        await self._bootstrap_hub_catalogue()
+        await self.hub_coordinator.fetch_hub_singleton_data()
+        await self._bootstrap_custom_data_points()
+        await self._bootstrap_schedules()
+        await self._bootstrap_combined_data_points()
+
+    async def _on_store_rebootstrapped(self) -> None:
+        """
+        Rebuild this layer and re-announce, after the client re-walked the store.
+
+        The client's re-bootstrap has already refilled the store by the time
+        this runs, so only the layered model and the announcement are missing.
+        Both are idempotent for what HA already has: the announcement carries
+        the un-registered data points, and the alarm-panel announce keeps its
+        own identity set, so a device HA already spawned is not spawned twice.
+
+        Never raises — this runs inside the client's re-bootstrap task, and a
+        failure here must not look like a failed walk.
+        """
+        if self._state in (CentralState.Stopped, CentralState.Failed):
+            return
+        _LOGGER.info("central %s: store re-bootstrapped — rebuilding the compat model", self._name)
+        try:
+            await self._bootstrap_hub_catalogue()
+            await self.hub_coordinator.fetch_hub_singleton_data()
+            await self._bootstrap_custom_data_points()
+            await self._bootstrap_schedules()
+            await self._bootstrap_combined_data_points()
+            await self._emit_data_points_created()
+        except Exception:
+            _LOGGER.exception("central %s: rebuilding the compat model after a re-bootstrap failed", self._name)
 
     async def _on_connection_state_changed(self, event: LoomConnectionStateChangedEvent, /) -> None:
         """
@@ -1647,6 +1699,7 @@ class LoomCentralAdapter:
             self._refresh_group.cancel()
             self._refresh_group = None
         self._looper.cancel_tasks()
+        self._client.set_rebootstrap_hook(None)
         await self._client.close()
         self._state = CentralState.Stopped
 

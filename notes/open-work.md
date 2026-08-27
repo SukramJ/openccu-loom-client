@@ -55,92 +55,19 @@ Currently `xfail`. Each needs harness work rather than production code.
 
 ## Open in this repository
 
-### Reconnect / recovery (2026-08-27)
+### Reconnect / recovery — closed (2026-08-27)
 
-The full scenario matrix, with sources and the reasoning per failure mode, is
-in [`reconnect-recovery.md`](./reconnect-recovery.md). The backoff, dedup and
-cooldown machinery that keeps an unavailable daemon from being hammered is in
-place and correct; the gaps are all in what happens _after_ a successful
-reconnect. Ordered by severity:
+All nine gaps (G1–G9) are fixed, and the two cross-repo asks shipped in daemon
+0.65.2/0.65.3. The scenario matrix, the reasoning per gap and the table of what
+shipped where are in [`reconnect-recovery.md`](./reconnect-recovery.md); it stays
+as the record of why each change exists.
 
-- **G1 — the `since` cursor is not re-anchored on `replay_lost`.**
-  `_last_seq` only ever grows (`transport/ws.py:461-468`) and the
-  `replay_lost` branch merely logs the daemon's anchor
-  (`transport/ws.py:512-521`), which the daemon documents as "the anchor to
-  resume from" (`internal/north/rest/ws/hub.go:348`). After a daemon restart
-  the cursor keeps the previous incarnation's high value, so _every_ later
-  reconnect is answered `Lost` and walks the full snapshot again. Re-anchor in
-  the `replay_lost` branch only — the overflow path passes a `-1` sentinel and
-  must not touch the cursor.
-- **G2 — unbounded `device.created` reconcile fan-out.** Downgraded: the burst
-  is gone daemon-side as of 0.65.2 (the CCU's full re-announcement is no longer
-  broadcast). `_on_device_created` still spawns one background task per event
-  with no semaphore and no check against what the store already holds
-  (`client.py:527-560`); keep the cheap guard. The earlier claim that
-  `applyPull` drove the burst was wrong — `InitialPull` has no production
-  caller; see `reconnect-recovery.md` §5 G2.
-- **G3 — `on_auth_failed` is never wired, and the deadline is now readable.**
-  `WsTransport` raises the callback correctly (`transport/ws.py:344-361`);
-  `start_events()` passes only `on_replay_lost` (`client.py:412-418`). An
-  expired or revoked token therefore ends the event stream silently — the daemon
-  closes the socket on expiry (`internal/north/rest/ws/client.go:424`), the
-  reconnect gets a 401, the loop stops, and no consumer is told. Since api
-  7.15.0 the fix is no longer only "notice the 401": `Identity.expires_at` says
-  when the credential dies, on `GET /auth/me`, on the login response and on the
-  `{op:"reauth_ok"}` ack, so a client can refill in-band before it happens.
-  `WsTransport.reauth` currently discards the ack body beyond ok/failed
-  (`transport/ws.py:610`).
-- **G4 — the compat layer does not re-bootstrap.** `_run_rebootstrap` calls
-  `LoomClient.bootstrap()` only; the custom-data-point / schedule / combined /
-  hub-catalogue passes and `_emit_data_points_created` live in
-  `adapter.start()` alone (`adapter.py:1198-1205`, `:1243`), and nothing
-  subscribes the client's `DataPointsCreatedEvent`. A client that bootstraps
-  while the daemon is still in `waiting_for_ccu` gets a valid 200 with empty
-  lists (`internal/north/rest/handlers/snapshot.go:102`), and when the CCU
-  arrives the daemon's `SignalResync` refills the store while HA still sees
-  nothing. Also subscribe `central.readiness_changed` — the event exists on
-  both sides (`events/types.py:192`) and is currently consumed by nobody.
-- **G9 — the client never asks whether the daemon is functional.** The root
-  cause behind G4 and G5. `connect()` checks contract compatibility only
-  (`api_version`, capabilities, `schema_digest`); the daemon's own contract says
-  a capability token means "configured", not "working", and points at `/health`
-  for liveness. `system.get_health()` exists (`operations/system.py:38`) and is
-  called nowhere in production code. `GET /system/ccu` **is** called
-  (`adapter.py:1678`) and everything but `serial` is discarded — including
-  `available` and `readiness{phase, ready}`. `/interfaces` is read exactly once
-  at `start()` (`adapter.py:1195`), so `central.health` renders the boot moment
-  forever. Fix: read `/health` at the end of `connect()` and after a WS
-  reconnect, and gate `bootstrap()` on `readiness.ready`.
-- **G5 — no availability signal downwards.** `LoomCentralAdapter._state` is set
-  only in `start()` / `stop()`, so `available` stays `True` through any outage
-  (`adapter.py:1134`, `:1196`, `:1248`) and `CentralState.Degraded` is never
-  used.
-- **G6 — version incompatibility is neither typed nor re-checked.**
-  `_check_api_version` raises a plain `LoomTransportError`
-  (`transport/http.py:252`), indistinguishable from "host unreachable", and the
-  handshake runs only in `connect()` — a daemon upgraded under a live
-  connection is never noticed.
-- **G7 — no jitter in the WS reconnect ladder** (`transport/ws.py:56`).
-- **G8 — a second `start_events()` leaks the previous `SubscriptionGroup`**
-  (`client.py:428`), double-applying every event to the store. Reachable
-  exactly on the recovery path G3 leaves open.
-
-- **Optimistic rollback in the store model.** The daemon's
-  `datapoint.optimistic_rolled_back` broadcast is bridged to the public
-  `OptimisticRollbackEvent` with `restored_value=present`
-  (`compat/aiohomematic/central/refresh.py`). Whether the **store's** model is
-  reverted on that path — rather than only when the next genuine daemon value
-  arrives via the optimistic-drop in `store.py` — is unverified. A reader
-  could otherwise still see the un-confirmed value in between. Establish which
-  it is before deciding whether anything needs fixing.
-- **mypy cannot resolve editable first-party deps.** Under `strict = true`,
-  mypy reports "Cannot find implementation or library stub" for
-  `openccu_loom_types.*` even though it ships `py.typed`, because editable
-  installs are not followed; this cascades into spurious `no-any-return`
-  errors. Logic is unaffected — the type gate is just noisy. Current
-  workaround: install the package non-editable. Fix by setting `mypy_path` /
-  `explicit_package_bases`, or by installing first-party deps non-editable in
-  the type-check environment, so strict mode means something again.
+Nothing here is open. Two design choices in it look like omissions and are not,
+so they are recorded rather than re-litigated: `available` stays True while the
+central is `Degraded` (a WS drop makes the store stale, not wrong, and flipping
+every entity unavailable on a five-second reconnect is worse than the staleness),
+and `wait_until_ready()` giving up is not an error (the bootstrap runs anyway and
+the daemon's resync re-bootstraps when the CCU arrives).
 
 ## Adopting daemon 0.65.3 / api 7.15.0
 

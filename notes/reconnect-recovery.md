@@ -185,7 +185,13 @@ in its busiest moment.
 
 ## 5. Gaps
 
-### G1 — the `since` cursor is not re-anchored on `replay_lost` (high)
+**All nine are fixed** as of the reconnect-recovery work; the analysis below is
+kept because it is the record of _why_ each change exists, and a reader hitting
+one of these behaviours years from now needs the reasoning, not just the diff.
+Each entry names what shipped. G2's trigger was additionally removed daemon-side
+in 0.65.2 (§6).
+
+### G1 — the `since` cursor is not re-anchored on `replay_lost` — **fixed**
 
 `_handle_control` logs `oldest_seq` and fires the resync but never moves the
 cursor (`ws.py:512-521`); `_last_seq` grows monotonically only
@@ -203,7 +209,7 @@ Fix: set `_last_seq` to the supplied anchor in the `replay_lost` branch (or to
 `None` when the value is missing/invalid). **Not** on the overflow path — the
 cursor is correct there, and the `-1` sentinel (`ws.py:504`) would destroy it.
 
-### G2 — unbounded `device.created` fan-out (medium; the trigger is gone)
+### G2 — unbounded `device.created` fan-out — **fixed**
 
 `_on_device_created` spawns one background task per event with no semaphore, no
 coalescing, and no check whether the store already holds the device complete
@@ -236,7 +242,7 @@ reconcile when the store already carries the device with its channels and data
 points; (b) an `asyncio.Semaphore` around `_spawn_background`; (c) ignore
 `source == CACHE`, which the bootstrap walk covers anyway.
 
-### G3 — `on_auth_failed` is wired nowhere (high)
+### G3 — `on_auth_failed` is wired nowhere — **fixed**
 
 `WsTransport` offers the callback and fires it correctly (`ws.py:344-361`);
 `LoomClient.start_events()` passes only `on_replay_lost` (`client.py:412-418`).
@@ -247,7 +253,7 @@ showing the last values, `available` stays `True`.
 Fix: wire the callback and surface it, so the adapter can move to
 `Degraded`/`Stopped` and HA can start a re-auth.
 
-### G4 — the compat layer does not re-bootstrap itself (high)
+### G4 — the compat layer does not re-bootstrap itself — **fixed**
 
 `_run_rebootstrap` calls `LoomClient.bootstrap()` (`client.py:600`). That fills
 the store. It does **not** call:
@@ -279,7 +285,7 @@ readiness from an empty snapshot. The event exists on both sides
 (`events/types.py:192`; daemon `pkg/hmevent/catalogue.go:143`) and carries the
 phase `waiting_for_ccu → loading_hub → loading_devices → ready`.
 
-### G9 — the client never asks whether the daemon is functional (high)
+### G9 — the client never asks whether the daemon is functional — **fixed**
 
 The root cause behind G4 and G5, and worth stating separately: `connect()`
 verifies contract compatibility, not liveness (see §2). `GET /health` — an
@@ -296,7 +302,7 @@ adapter already fetches — instead of bootstrapping an empty snapshot and calli
 it success. That single field turns B1/C1 from "silently wrong" into "wait for
 the push".
 
-### G5 — no availability signal downwards (medium)
+### G5 — no availability signal downwards — **fixed**
 
 `LoomCentralAdapter._state` is assigned exactly three times: `Starting` and
 `Running` in `start()`, `Stopped` in `stop()` (`adapter.py:1196`, `:1248`,
@@ -311,7 +317,7 @@ The only substitute is `DaemonConnectionDp`, moved solely by the
 Fix: surface WS connection-state transitions as callbacks (`connected` /
 `disconnected`) and map them onto `Degraded` in the adapter.
 
-### G6 — version incompatibility is neither typed nor re-checked (medium)
+### G6 — version incompatibility is neither typed nor re-checked — **fixed**
 
 Two separate halves:
 
@@ -325,13 +331,13 @@ Two separate halves:
 Fix: a dedicated `LoomIncompatibleVersionError`, and an `/info` re-check when a
 WS connection comes back after a longer outage.
 
-### G7 — no jitter in the reconnect backoff (low)
+### G7 — no jitter in the reconnect backoff — **fixed**
 
 `_RECONNECT_BACKOFF` is a fixed sequence (`ws.py:56`). Several clients that
 lived through the same outage return in lockstep — on a restart, exactly while
 the daemon is pulling the CCU. ±20 % jitter costs nothing.
 
-### G8 — a second `start_events()` leaks the previous SubscriptionGroup (low)
+### G8 — a second `start_events()` leaks the previous SubscriptionGroup — **fixed**
 
 `start_events()` reassigns `self._wire_group` without cancelling the previous
 group (`client.py:428`). The old subscriptions stay on the bus
@@ -412,3 +418,30 @@ a filter.
   collapse it into one `reconnect()`.
 - **The N×M bootstrap walk.** Known, and addressed daemon-side (a streamed
   snapshot is an open ask); none of it belongs in the recovery logic.
+
+---
+
+## 7. What shipped
+
+| Gap | Fix                                                                                                        | Where                                                 |
+| --- | ---------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| G1  | `replay_lost` re-anchors `_last_seq` on the daemon's anchor; the overflow path deliberately does not       | `transport/ws.py`                                     |
+| G2  | `source == CACHE` skipped, complete devices skipped, fan-out capped at 4                                   | `client.py`                                           |
+| G3  | `on_auth_failed` wired → `AuthFailedEvent`; adapter degrades                                               | `client.py`, `compat/…/adapter.py`                    |
+| G4  | `set_rebootstrap_hook` → the compat layer rebuilds its model and re-announces                              | `client.py`, `compat/…/adapter.py`                    |
+| G5  | WS connection transitions → `ConnectionStateChangedEvent`, `LoomClient.connected`, `CentralState.Degraded` | `transport/ws.py`, `client.py`, `compat/…/adapter.py` |
+| G6  | `LoomIncompatibleVersionError`; `recheck_contract()` on every reconnect                                    | `exceptions.py`, `transport/http.py`, `client.py`     |
+| G7  | ±20% jitter on the backoff ladder                                                                          | `transport/ws.py`                                     |
+| G8  | `start_events()` cancels the previous wire group                                                           | `client.py`                                           |
+| G9  | `get_health()`, `get_readiness()`, `wait_until_ready()`; adapter gates its bootstrap                       | `client.py`, `compat/…/adapter.py`                    |
+
+Two choices worth keeping visible, because both look like omissions:
+
+- **`available` stays True while Degraded.** A WS drop makes the store stale,
+  not wrong: REST is very likely still reachable and writes may well succeed.
+  Flipping every entity to unavailable on a five-second reconnect would be worse
+  than the staleness it reports.
+- **`wait_until_ready()` giving up is not an error.** It returns False, the
+  bootstrap runs anyway, and the daemon's resync push re-bootstraps when the CCU
+  arrives — which now reaches the compat layer too (G4). The wait only avoids
+  paying for a walk that is known to be empty.

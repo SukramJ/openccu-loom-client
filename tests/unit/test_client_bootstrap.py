@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from datetime import UTC, datetime
+from unittest.mock import patch
 
 from openccu_loom_types import DAEMON_API_VERSION
 from openccu_loom_types.rest import Kind2 as Kind
@@ -632,6 +633,130 @@ class TestStartEventsIsRestartable:
             assert client.events.subscription_count() == first
         finally:
             await client.close()
+
+
+class TestReadinessGate:
+    """G9: bootstrapping before the daemon reached the CCU yields an empty model."""
+
+    @staticmethod
+    def _ccu_entry(*, phase: str, ready: bool) -> dict[str, object]:
+        return {
+            "entries": [
+                {
+                    "name": "home",
+                    "host": "ccu.example.lan",
+                    "available": True,
+                    "is_ha_app": False,
+                    "configured_interfaces": ["HmIP-RF"],
+                    "serial": "ABC123",
+                    "readiness": {
+                        "phase": phase,
+                        "ready": ready,
+                        "interfaces_loaded": 1 if ready else 0,
+                        "interfaces_total": 1,
+                    },
+                }
+            ]
+        }
+
+    async def test_readiness_is_read_from_system_ccu(self, mock_daemon: MockDaemon) -> None:
+        mock_daemon.get("/api/v1/info", payload=_INFO)
+        mock_daemon.get("/api/v1/system/ccu", payload=self._ccu_entry(phase="waiting_for_ccu", ready=False))
+        async with LoomClient(config=mock_daemon.config) as client:
+            readiness = await client.get_readiness()
+            assert readiness is not None
+            assert readiness.ready is False
+            assert str(getattr(readiness.phase, "value", readiness.phase)) == "waiting_for_ccu"
+
+    async def test_wait_returns_once_ready_latches(self, mock_daemon: MockDaemon) -> None:
+        mock_daemon.get("/api/v1/info", payload=_INFO)
+        mock_daemon.get("/api/v1/system/ccu", payload=self._ccu_entry(phase="loading_devices", ready=False))
+        mock_daemon.get("/api/v1/system/ccu", payload=self._ccu_entry(phase="ready", ready=True))
+        async with LoomClient(config=mock_daemon.config) as client:
+            with patch.object(client_module, "_READINESS_POLL_SECONDS", 0.01):
+                assert await client.wait_until_ready(timeout_seconds=2.0) is True
+
+    async def test_wait_gives_up_without_blocking_forever(self, mock_daemon: MockDaemon) -> None:
+        """
+        A daemon whose CCU never appears must not hold a consumer's setup open.
+
+        Giving up is not fatal — the walk runs anyway and the daemon's resync
+        push re-bootstraps once the CCU arrives.
+        """
+        mock_daemon.get("/api/v1/info", payload=_INFO)
+        mock_daemon.get("/api/v1/system/ccu", payload=self._ccu_entry(phase="waiting_for_ccu", ready=False))
+        async with LoomClient(config=mock_daemon.config) as client:
+            with patch.object(client_module, "_READINESS_POLL_SECONDS", 0.01):
+                assert await client.wait_until_ready(timeout_seconds=0.05) is False
+
+    async def test_daemon_without_readiness_never_blocks(self, mock_daemon: MockDaemon) -> None:
+        """An older daemon reports no readiness; that must not stall anybody."""
+        mock_daemon.get("/api/v1/info", payload=_INFO)
+        mock_daemon.get("/api/v1/system/ccu", payload={"entries": []})
+        async with LoomClient(config=mock_daemon.config) as client:
+            assert await client.get_readiness() is None
+            assert await client.wait_until_ready(timeout_seconds=0.05) is True
+
+    async def test_health_probe_is_reachable_and_never_raises(self, mock_daemon: MockDaemon) -> None:
+        mock_daemon.get("/api/v1/info", payload=_INFO)
+        mock_daemon.get("/api/v1/health", payload={"status": "degraded", "components": []})
+        async with LoomClient(config=mock_daemon.config) as client:
+            health = await client.get_health()
+            assert health is not None
+            assert str(getattr(health.status, "value", health.status)) == "degraded"
+
+    async def test_health_probe_returns_none_when_unreadable(self, mock_daemon: MockDaemon) -> None:
+        mock_daemon.get("/api/v1/info", payload=_INFO)  # no /health stub registered
+        async with LoomClient(config=mock_daemon.config) as client:
+            assert await client.get_health() is None
+
+
+class TestRebootstrapHook:
+    """G4: a layer built on top of the store must learn that the store was re-walked."""
+
+    async def test_hook_runs_after_the_walk(self, mock_daemon: MockDaemon) -> None:
+        _wire_endpoints(mock_daemon)
+        async with LoomClient(config=mock_daemon.config) as client:
+            order: list[str] = []
+
+            async def fake_bootstrap(**_kwargs: object) -> None:
+                order.append("walk")
+
+            async def hook() -> None:
+                order.append("hook")
+
+            client.bootstrap = fake_bootstrap  # type: ignore[method-assign]
+            client.set_rebootstrap_hook(hook)
+            await client._run_rebootstrap()
+            # Order matters: the hook builds on what the walk just put there.
+            assert order == ["walk", "hook"]
+
+    async def test_hook_failure_does_not_break_the_walk(self, mock_daemon: MockDaemon) -> None:
+        _wire_endpoints(mock_daemon)
+        async with LoomClient(config=mock_daemon.config) as client:
+
+            async def hook() -> None:
+                raise RuntimeError("consumer bug")
+
+            client.set_rebootstrap_hook(hook)
+            await client._run_rebootstrap()  # must not raise
+            assert client._last_rebootstrap_finished is not None
+
+    async def test_hook_can_be_cleared(self, mock_daemon: MockDaemon) -> None:
+        _wire_endpoints(mock_daemon)
+        async with LoomClient(config=mock_daemon.config) as client:
+            calls = 0
+
+            async def hook() -> None:
+                nonlocal calls
+                calls += 1
+
+            client.set_rebootstrap_hook(hook)
+            await client._run_rebootstrap()
+            assert calls == 1
+            client.set_rebootstrap_hook(None)
+            await client._run_rebootstrap()
+            assert calls == 1
 
 
 class TestConnectionStateAndAuthFailure:
