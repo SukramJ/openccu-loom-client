@@ -7,27 +7,27 @@ generated models moved by a single optional field, because the daemon ties its
 carry. The schema digest matches the new daemon build exactly, so `connect()`
 stays quiet about contract drift.
 
-- **The daemon's new onboarding wizard does not yet cover this backend.** From
+- **The daemon's onboarding hold does not yet apply to this backend.** From
   0.66.0 a freshly paired device is named and placed before any ecosystem sees
   it, which is the right order: an ecosystem shown a device first and corrected
   afterwards keeps the identity it saw — in Home Assistant's case the entity
-  ids of the still-unnamed device. So the daemon holds the device back until
-  the operator finishes onboarding, and releases it to MQTT, the Matter bridge
-  and outbound webhooks only then.
+  ids of the still-unnamed device. The daemon holds the device back until the
+  operator finishes onboarding, then releases it.
 
-  That hold deliberately does not apply to the daemon's REST and WebSocket
-  surfaces: they are where the naming happens, so they have to show the device.
-  This backend reaches Home Assistant over exactly those surfaces, which makes
-  it an ecosystem sitting on the configuration channel — a role the split does
-  not anticipate. A device still mid-wizard therefore arrives in Home Assistant
-  as soon as it is accepted, before it has been named. Devices in the wizard's
-  first state are unaffected: those are held out of the daemon's model
-  entirely and never reach a snapshot.
+  That hold is enforced for MQTT and the outbound webhook, but not on the REST
+  and WebSocket surfaces this backend uses. Accepting a device materialises it
+  in the daemon's model — it has to, or there would be no ise_id and no
+  channels to name — and from that moment it is in the snapshot and in the live
+  `device.created` push alike. So over this backend a device still mid-wizard
+  arrives in Home Assistant as soon as it is accepted, before it has been
+  named. (Devices in the wizard's first state are unaffected: those are held
+  out of the model entirely.)
 
-  Nothing is fixed here, because nothing can be fixed here alone: the snapshot
+  Nothing is fixed here, because nothing can be fixed here alone. The snapshot
   carries no flag saying a device is still held, and no WebSocket event
   announces a release, so this client cannot tell the two states apart even if
-  it wanted to. `notes/open-work.md` records what it would take.
+  it wanted to. `notes/open-work.md` traces it end to end and records what the
+  daemon would need.
 
 - `ruff` 0.16.4 → 0.16.5 (hook pin and pre-commit requirement in lock-step).
 
