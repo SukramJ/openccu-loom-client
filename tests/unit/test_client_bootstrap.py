@@ -14,7 +14,9 @@ bus must mutate the store's DP in place.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from datetime import UTC, datetime
+from unittest.mock import patch
 
 from openccu_loom_types import DAEMON_API_VERSION
 from openccu_loom_types.rest import Kind2 as Kind
@@ -23,12 +25,16 @@ import pytest
 
 from openccu_loom_client import LoomClient
 from openccu_loom_client.bridge import bind_ws_events_to_store
+import openccu_loom_client.client as client_module
 from openccu_loom_client.events import (
+    AuthFailedEvent,
+    ConnectionStateChangedEvent,
     DataPointsCreatedEvent,
     DataPointValueChangedEvent,
     DeviceAvailabilityChangedEvent,
     DeviceCreatedEvent,
 )
+from openccu_loom_client.exceptions import LoomIncompatibleVersionError, LoomTransportError
 from tests.helpers import MockDaemon
 
 _INFO = {
@@ -355,7 +361,7 @@ _NEW_DEVICE_DATA_POINTS = [
 ]
 
 
-def _device_created_event(*, address: str) -> DeviceCreatedEvent:
+def _device_created_event(*, address: str, source: str = "NEW") -> DeviceCreatedEvent:
     """Build the typed event the dispatch loop would emit for a device.created push."""
     return DeviceCreatedEvent(
         seq=99,
@@ -369,7 +375,7 @@ def _device_created_event(*, address: str) -> DeviceCreatedEvent:
                 "interface_id": "home:HmIP-RF",
                 "device_address": address,
                 "model": "HmIP-SWDO",
-                "source": "pairing",
+                "source": source,
             }
         ),
     )
@@ -484,6 +490,379 @@ class TestExternalWsTransport:
             assert stub.subscribed == [["device.*", "hub.*"]]
         finally:
             await client.close()
+
+
+class TestReconcileFanOutIsBounded:
+    """G2: a batch of device.created events must not become a REST storm."""
+
+    async def test_cache_restore_is_not_reconciled(self, mock_daemon: MockDaemon) -> None:
+        """
+        source=CACHE is the daemon restoring its description cache at boot.
+
+        That is a whole fleet at once, and every device in it is already covered
+        by the snapshot walk — reconciling each one is pure duplicate load, sent
+        exactly when the daemon is busiest.
+        """
+        _wire_endpoints(mock_daemon)
+        async with LoomClient(config=mock_daemon.config) as client:
+            await client.bootstrap()
+            before = len(mock_daemon.requests)
+            await client._on_device_created(_device_created_event(address="VCU0404", source="CACHE"))
+            await asyncio.sleep(0.05)
+            assert len(mock_daemon.requests) == before
+
+    async def test_genuine_arrival_is_still_reconciled(self, mock_daemon: MockDaemon) -> None:
+        """The filter must not swallow the case the reconcile exists for."""
+        _wire_endpoints(mock_daemon)
+        mock_daemon.get("/api/v1/devices/VCU0002", payload=_NEW_DEVICE_DETAIL)
+        mock_daemon.get(
+            "/api/v1/devices/VCU0002/channels/1/data-points",
+            payload=_NEW_DEVICE_DATA_POINTS,
+        )
+        async with LoomClient(config=mock_daemon.config) as client:
+            await client.bootstrap()
+            before = len(mock_daemon.requests)
+            await client._on_device_created(_device_created_event(address="VCU0002", source="NEW"))
+            await asyncio.sleep(0.1)
+            assert len(mock_daemon.requests) > before
+            assert client.store.get_device(address="VCU0002") is not None
+
+    async def test_missing_source_still_reconciles(self, mock_daemon: MockDaemon) -> None:
+        """An older daemon sends no source; behaviour must be unchanged there."""
+        _wire_endpoints(mock_daemon)
+        mock_daemon.get("/api/v1/devices/VCU0002", payload=_NEW_DEVICE_DETAIL)
+        mock_daemon.get(
+            "/api/v1/devices/VCU0002/channels/1/data-points",
+            payload=_NEW_DEVICE_DATA_POINTS,
+        )
+        event = _device_created_event(address="VCU0002")
+        event.payload.source = None
+        async with LoomClient(config=mock_daemon.config) as client:
+            await client.bootstrap()
+            before = len(mock_daemon.requests)
+            await client._on_device_created(event)
+            await asyncio.sleep(0.1)
+            assert len(mock_daemon.requests) > before
+
+    async def test_device_already_complete_is_not_refetched(self, mock_daemon: MockDaemon) -> None:
+        """A device the snapshot walk just loaded needs no second round trip."""
+        _wire_endpoints(mock_daemon)
+        async with LoomClient(config=mock_daemon.config) as client:
+            await client.bootstrap()
+            # VCU0001 came from the snapshot complete with channels + DPs.
+            assert client.store.get_device(address="VCU0001") is not None
+            before = len(mock_daemon.requests)
+            await client._on_device_created(_device_created_event(address="VCU0001"))
+            await asyncio.sleep(0.05)
+            assert len(mock_daemon.requests) == before
+
+    async def test_stub_device_is_reconciled(self, mock_daemon: MockDaemon) -> None:
+        """
+        The completeness check must not mistake the bridge's stub for the real thing.
+
+        The wire bridge seeds a channel-less stub before this handler runs; that
+        is precisely the state a reconcile has to fill in.
+        """
+        _wire_endpoints(mock_daemon)
+        mock_daemon.get("/api/v1/devices/VCU0002", payload=_NEW_DEVICE_DETAIL)
+        mock_daemon.get(
+            "/api/v1/devices/VCU0002/channels/1/data-points",
+            payload=_NEW_DEVICE_DATA_POINTS,
+        )
+        async with LoomClient(config=mock_daemon.config) as client:
+            await client.bootstrap()
+            event = _device_created_event(address="VCU0002")
+            client.store.apply_device_created(payload=event.payload)  # seed the stub
+            assert client.store.get_device(address="VCU0002") is not None
+            before = len(mock_daemon.requests)
+            await client._on_device_created(event)
+            await asyncio.sleep(0.1)
+            assert len(mock_daemon.requests) > before
+
+    async def test_reconcile_concurrency_is_capped(self, mock_daemon: MockDaemon) -> None:
+        """Whatever survives the filters is still paced, never fired all at once."""
+        _wire_endpoints(mock_daemon)
+        async with LoomClient(config=mock_daemon.config) as client:
+            await client.bootstrap()
+            live = 0
+            peak = 0
+
+            async def slow_fetch(**_kwargs: object) -> None:
+                nonlocal live, peak
+                live += 1
+                peak = max(peak, live)
+                await asyncio.sleep(0.05)
+                live -= 1
+
+            client._fetch_device_into_store = slow_fetch  # type: ignore[method-assign]
+            for i in range(20):
+                await client._on_device_created(_device_created_event(address=f"VCU9{i:03d}"))
+            await asyncio.sleep(0.6)
+            assert peak <= client_module._MAX_CONCURRENT_RECONCILES
+
+
+class TestStartEventsIsRestartable:
+    """G8: a second start_events() must not leave the previous wiring on the bus."""
+
+    async def test_restart_after_dispatch_died_does_not_double_apply(self, mock_daemon: MockDaemon) -> None:
+        """
+        The idempotence guard only holds while the dispatch task lives.
+
+        The one path that ends it without close() is the WS transport giving up
+        on a rejected credential — and calling start_events() again is the
+        natural recovery. Before the fix that re-assigned `_wire_group` without
+        cancelling, so both generations of wire handlers stayed subscribed and
+        every event was applied to the store twice.
+        """
+        mock_daemon.get("/api/v1/info", payload=_INFO)
+        stub = _StubWs()
+        client = LoomClient(config=mock_daemon.config, ws_transport=stub)  # type: ignore[arg-type]
+        await client.connect()
+        try:
+            await client.start_events()
+            first = client.events.subscription_count()
+            assert first > 0
+
+            # Simulate the transport having given up: the dispatch task is
+            # done, so the guard lets a retry through.
+            client._dispatch_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await client._dispatch_task
+
+            await client.start_events()
+            assert client.events.subscription_count() == first
+        finally:
+            await client.close()
+
+
+class TestReadinessGate:
+    """G9: bootstrapping before the daemon reached the CCU yields an empty model."""
+
+    @staticmethod
+    def _ccu_entry(*, phase: str, ready: bool) -> dict[str, object]:
+        return {
+            "entries": [
+                {
+                    "name": "home",
+                    "host": "ccu.example.lan",
+                    "available": True,
+                    "is_ha_app": False,
+                    "configured_interfaces": ["HmIP-RF"],
+                    "serial": "ABC123",
+                    "readiness": {
+                        "phase": phase,
+                        "ready": ready,
+                        "interfaces_loaded": 1 if ready else 0,
+                        "interfaces_total": 1,
+                    },
+                }
+            ]
+        }
+
+    async def test_readiness_is_read_from_system_ccu(self, mock_daemon: MockDaemon) -> None:
+        mock_daemon.get("/api/v1/info", payload=_INFO)
+        mock_daemon.get("/api/v1/system/ccu", payload=self._ccu_entry(phase="waiting_for_ccu", ready=False))
+        async with LoomClient(config=mock_daemon.config) as client:
+            readiness = await client.get_readiness()
+            assert readiness is not None
+            assert readiness.ready is False
+            assert str(getattr(readiness.phase, "value", readiness.phase)) == "waiting_for_ccu"
+
+    async def test_wait_returns_once_ready_latches(self, mock_daemon: MockDaemon) -> None:
+        mock_daemon.get("/api/v1/info", payload=_INFO)
+        mock_daemon.get("/api/v1/system/ccu", payload=self._ccu_entry(phase="loading_devices", ready=False))
+        mock_daemon.get("/api/v1/system/ccu", payload=self._ccu_entry(phase="ready", ready=True))
+        async with LoomClient(config=mock_daemon.config) as client:
+            with patch.object(client_module, "_READINESS_POLL_SECONDS", 0.01):
+                assert await client.wait_until_ready(timeout_seconds=2.0) is True
+
+    async def test_wait_gives_up_without_blocking_forever(self, mock_daemon: MockDaemon) -> None:
+        """
+        A daemon whose CCU never appears must not hold a consumer's setup open.
+
+        Giving up is not fatal — the walk runs anyway and the daemon's resync
+        push re-bootstraps once the CCU arrives.
+        """
+        mock_daemon.get("/api/v1/info", payload=_INFO)
+        mock_daemon.get("/api/v1/system/ccu", payload=self._ccu_entry(phase="waiting_for_ccu", ready=False))
+        async with LoomClient(config=mock_daemon.config) as client:
+            with patch.object(client_module, "_READINESS_POLL_SECONDS", 0.01):
+                assert await client.wait_until_ready(timeout_seconds=0.05) is False
+
+    async def test_daemon_without_readiness_never_blocks(self, mock_daemon: MockDaemon) -> None:
+        """An older daemon reports no readiness; that must not stall anybody."""
+        mock_daemon.get("/api/v1/info", payload=_INFO)
+        mock_daemon.get("/api/v1/system/ccu", payload={"entries": []})
+        async with LoomClient(config=mock_daemon.config) as client:
+            assert await client.get_readiness() is None
+            assert await client.wait_until_ready(timeout_seconds=0.05) is True
+
+    async def test_health_probe_is_reachable_and_never_raises(self, mock_daemon: MockDaemon) -> None:
+        mock_daemon.get("/api/v1/info", payload=_INFO)
+        mock_daemon.get("/api/v1/health", payload={"status": "degraded", "components": []})
+        async with LoomClient(config=mock_daemon.config) as client:
+            health = await client.get_health()
+            assert health is not None
+            assert str(getattr(health.status, "value", health.status)) == "degraded"
+
+    async def test_health_probe_returns_none_when_unreadable(self, mock_daemon: MockDaemon) -> None:
+        mock_daemon.get("/api/v1/info", payload=_INFO)  # no /health stub registered
+        async with LoomClient(config=mock_daemon.config) as client:
+            assert await client.get_health() is None
+
+
+class TestRebootstrapHook:
+    """G4: a layer built on top of the store must learn that the store was re-walked."""
+
+    async def test_hook_runs_after_the_walk(self, mock_daemon: MockDaemon) -> None:
+        _wire_endpoints(mock_daemon)
+        async with LoomClient(config=mock_daemon.config) as client:
+            order: list[str] = []
+
+            async def fake_bootstrap(**_kwargs: object) -> None:
+                order.append("walk")
+
+            async def hook() -> None:
+                order.append("hook")
+
+            client.bootstrap = fake_bootstrap  # type: ignore[method-assign]
+            client.set_rebootstrap_hook(hook)
+            await client._run_rebootstrap()
+            # Order matters: the hook builds on what the walk just put there.
+            assert order == ["walk", "hook"]
+
+    async def test_hook_failure_does_not_break_the_walk(self, mock_daemon: MockDaemon) -> None:
+        _wire_endpoints(mock_daemon)
+        async with LoomClient(config=mock_daemon.config) as client:
+
+            async def hook() -> None:
+                raise RuntimeError("consumer bug")
+
+            client.set_rebootstrap_hook(hook)
+            await client._run_rebootstrap()  # must not raise
+            assert client._last_rebootstrap_finished is not None
+
+    async def test_hook_can_be_cleared(self, mock_daemon: MockDaemon) -> None:
+        _wire_endpoints(mock_daemon)
+        async with LoomClient(config=mock_daemon.config) as client:
+            calls = 0
+
+            async def hook() -> None:
+                nonlocal calls
+                calls += 1
+
+            client.set_rebootstrap_hook(hook)
+            await client._run_rebootstrap()
+            assert calls == 1
+            client.set_rebootstrap_hook(None)
+            await client._run_rebootstrap()
+            assert calls == 1
+
+
+class TestConnectionStateAndAuthFailure:
+    """G3 + G5: a dropped stream and a rejected credential must both be visible."""
+
+    async def test_connection_transitions_are_published(self, mock_daemon: MockDaemon) -> None:
+        mock_daemon.get("/api/v1/info", payload=_INFO)
+        async with LoomClient(config=mock_daemon.config) as client:
+            seen: list[bool] = []
+
+            async def on_state(e: ConnectionStateChangedEvent) -> None:
+                seen.append(e.connected)
+
+            client.events.subscribe(event_type=ConnectionStateChangedEvent, handler=on_state)
+            assert client.connected is False
+
+            await client._on_connection_state(True)
+            assert client.connected is True
+            await client._on_connection_state(False)
+            assert client.connected is False
+            await asyncio.sleep(0.05)
+            assert seen == [True, False]
+
+    async def test_auth_failure_is_published(self, mock_daemon: MockDaemon) -> None:
+        """
+        The transport stops its reconnect loop on a rejected credential.
+
+        That is right — retrying a dead credential can only hammer the daemon —
+        but it used to leave the stream silent with nobody told.
+        """
+        mock_daemon.get("/api/v1/info", payload=_INFO)
+        async with LoomClient(config=mock_daemon.config) as client:
+            seen: list[AuthFailedEvent] = []
+
+            async def on_auth(e: AuthFailedEvent) -> None:
+                seen.append(e)
+
+            client.events.subscribe(event_type=AuthFailedEvent, handler=on_auth)
+            await client._on_auth_failed()
+            await asyncio.sleep(0.05)
+            assert len(seen) == 1
+            assert seen[0].reason == "credential_rejected"
+
+
+class TestContractRecheck:
+    """G6: a daemon upgraded under a live connection must be noticed."""
+
+    async def test_incompatible_version_is_typed(self, mock_daemon: MockDaemon) -> None:
+        """
+        "Host unreachable" and "will never work" must not arrive as one class.
+
+        A caller retrying a failed setup needs to tell a condition that clears
+        on its own from one that clears only when somebody upgrades.
+        """
+        major = int(DAEMON_API_VERSION.split(".")[0])
+        mock_daemon.get("/api/v1/info", payload={**_INFO, "api_version": f"{major + 1}.0.0"})
+        client = LoomClient(config=mock_daemon.config)
+        with pytest.raises(LoomIncompatibleVersionError):
+            await client.connect()
+        await client.close()
+
+    async def test_recheck_notices_a_swapped_daemon(self, mock_daemon: MockDaemon) -> None:
+        """A daemon upgraded under a live connection is caught at its cause."""
+        major = int(DAEMON_API_VERSION.split(".")[0])
+        # Both queued up front: the stub repeats its last entry, so registering
+        # the second one after connect() would leave the first still on the
+        # queue and the re-check would read the compatible answer again.
+        mock_daemon.get("/api/v1/info", payload=_INFO)
+        mock_daemon.get("/api/v1/info", payload={**_INFO, "api_version": f"{major + 1}.0.0"})
+        async with LoomClient(config=mock_daemon.config) as client:
+            assert client.info is not None
+            with pytest.raises(LoomIncompatibleVersionError):
+                await client._http.recheck_contract()
+
+    async def test_recheck_survives_a_transient_failure(self, mock_daemon: MockDaemon) -> None:
+        """A /info that cannot be read is not evidence of incompatibility."""
+        mock_daemon.get("/api/v1/info", payload=_INFO)
+        async with LoomClient(config=mock_daemon.config) as client:
+            before = client.info
+
+            async def boom(**_kwargs: object) -> None:
+                raise LoomTransportError("connection refused")
+
+            client._http.request = boom  # type: ignore[method-assign]
+            assert await client._http.recheck_contract() is False
+            # The previous handshake is kept rather than discarded.
+            assert client.info is before
+
+    async def test_reconnect_triggers_the_recheck(self, mock_daemon: MockDaemon) -> None:
+        mock_daemon.get("/api/v1/info", payload=_INFO)
+        async with LoomClient(config=mock_daemon.config) as client:
+            calls = 0
+
+            async def counting_recheck() -> bool:
+                nonlocal calls
+                calls += 1
+                return True
+
+            client._http.recheck_contract = counting_recheck  # type: ignore[method-assign]
+            await client._on_connection_state(True)
+            await asyncio.sleep(0.05)
+            assert calls == 1
+            # A disconnect must not re-check anything — there is nothing to ask.
+            await client._on_connection_state(False)
+            await asyncio.sleep(0.05)
+            assert calls == 1
 
 
 class TestReplayLostRebootstrap:

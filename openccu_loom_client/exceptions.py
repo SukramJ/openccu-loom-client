@@ -58,6 +58,21 @@ class LoomTransportError(BaseLoomException):
     """
 
 
+class LoomIncompatibleVersionError(LoomTransportError):
+    """
+    The daemon's API version is incompatible with the installed types package.
+
+    A subclass of :class:`LoomTransportError` so existing handlers that catch
+    the transport error keep working, but distinguishable — and the distinction
+    is the point. "Host unreachable" and "this daemon will never work with this
+    build" both used to arrive as the same class, so a caller retrying a failed
+    setup could not tell a condition that clears on its own from one that clears
+    only when somebody upgrades. Home Assistant's split between
+    ``ConfigEntryNotReady`` (retry me) and ``ConfigEntryError`` (tell the user)
+    is exactly that question; catch this before the base class to answer it.
+    """
+
+
 class LoomUnsupportedOperationError(BaseLoomException):
     """
     The operation has no equivalent on the daemon-mediated backend.

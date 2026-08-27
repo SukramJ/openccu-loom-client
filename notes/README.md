@@ -10,11 +10,12 @@ in `openccu-loom-client` there simply is no published half.
 
 ## What lives here
 
-| File                             | Purpose                                                                                         |
-| -------------------------------- | ----------------------------------------------------------------------------------------------- |
-| [`open-work.md`](./open-work.md) | The single backlog: what is still open, and the decisions recorded so they are not re-proposed. |
+| File                                               | Purpose                                                                                                 |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| [`open-work.md`](./open-work.md)                   | The single backlog: what is still open, and the decisions recorded so they are not re-proposed.         |
+| [`reconnect-recovery.md`](./reconnect-recovery.md) | The reconnect / recovery scenario matrix: what the client does per failure mode, and where it does not. |
 
-That is deliberately one file. This repository previously carried two
+The backlog is deliberately one file. This repository previously carried two
 overlapping backlogs (`todo.md` and `docs/optimization-needs.md`) plus three
 executed implementation plans, and the overlap was the problem: an item could
 be open in one and closed in the other, and nothing said which to trust.

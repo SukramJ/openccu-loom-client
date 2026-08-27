@@ -1,3 +1,94 @@
+# Version 2026.8.27 (2026-08-27)
+
+Makes reconnect recovery complete. The backoff machinery was already right —
+a 0.5/2/5/15/30 s ladder clamped at 30 s, a healthy-connection gate so
+accept-then-drop still escalates, a 60 s inbound-ping deadline, one shared
+deadline across REST retries, and a de-duplicated, rate-limited re-bootstrap.
+Steady state against a dead daemon stays one TCP attempt every 30 s. Every
+defect this release fixes was in what happens _after_ a successful reconnect.
+The scenario matrix and the reasoning per fix are in
+`notes/reconnect-recovery.md`.
+
+- **The resume cursor never recovered from a daemon restart.** `_last_seq` only
+  ever grew, and the `replay_lost` frame's anchor was logged and discarded. A
+  restarted daemon begins its seq space at 0, so every live envelope then
+  carried a smaller seq than the cursor kept from the previous incarnation and
+  the cursor never moved again: each later reconnect re-sent that stale
+  `since`, the daemon answered "lost", and the client re-walked the entire
+  snapshot — one REST walk per device, per reconnect, indefinitely, where the
+  daemon's replay buffer could have served it. The cursor now adopts the anchor
+  the daemon names. The queue-overflow path deliberately does not touch it:
+  overflow means this client fell behind, not that the daemon's seq space
+  moved.
+- **Nothing said that push had stopped.** A dropped socket is precisely what a
+  daemon cannot announce, and the transport reconnects silently, so a consumer
+  kept presenting its last values as live through any outage. Connection
+  transitions are now published as `ConnectionStateChangedEvent`, readable as
+  `LoomClient.connected`, and mapped onto `CentralState.Degraded` in the compat
+  layer. Degraded rather than stopped, and `available` deliberately still
+  answers True: a WS drop makes the store stale, not wrong — REST is very
+  likely still reachable — and flipping every entity to unavailable on a
+  five-second reconnect is worse than the staleness it reports.
+- **A rejected credential ended the event stream in silence.** The transport
+  stops reconnecting on 401/403, which is right — retrying a dead credential
+  can only hammer the daemon — but nothing was wired to the callback that says
+  so, and the dispatch loop simply ran out. Now published as `AuthFailedEvent`,
+  with the log line naming what has to happen: re-provision, then call
+  `start_events()` again.
+- **A client that started before the daemon reached the CCU built an empty
+  model, permanently.** `GET /snapshot` answers 200 with empty lists while the
+  central is still in `waiting_for_ccu` and never 5xx, so the bootstrap
+  "succeeded" and announced no entities. Two things were missing and both are
+  here: `get_readiness()` / `wait_until_ready()` read the readiness record the
+  daemon already served on `GET /system/ccu` (and `get_health()` the liveness
+  probe it already served on `/health`), so the walk waits for the bring-up
+  instead of paying for an empty one; and when the CCU arrives later, the
+  daemon's resync push now reaches the compat layer through
+  `set_rebootstrap_hook`, which rebuilds the custom data points, schedules,
+  combined numbers and hub catalogue and re-announces. Previously the store
+  refilled correctly while Home Assistant learned nothing until it was
+  reloaded. Waiting is bounded, and a timeout is not an error: the walk runs
+  anyway and the resync covers the late arrival — a daemon whose CCU never
+  appears must not hold a consumer's setup open.
+- **A daemon upgraded under a live connection went unnoticed.** The `/info`
+  handshake ran once, at connect, so a mismatch first surfaced far from its
+  cause as a validation error in whichever call met a reshaped payload. It is
+  re-checked on every reconnect now, off the reader loop so the round trip
+  cannot sit inside the inbound-ping deadline, and a `/info` that is merely
+  unreadable keeps the previous handshake — a transient failure is not evidence
+  of incompatibility.
+- **`LoomIncompatibleVersionError`** separates "this daemon will never work
+  with this build" from "the host is unreachable", which used to arrive as the
+  same class. A caller retrying a failed setup can now tell a condition that
+  clears on its own from one that clears only when somebody upgrades. It
+  subclasses `LoomTransportError`, so existing handlers keep working.
+- **Reconcile fan-out is bounded.** `device.created` events carrying
+  `source == CACHE` — the daemon restoring its description cache at boot, a
+  whole fleet at once — are skipped, as are devices the store already holds
+  complete; whatever survives is capped at four concurrent reconciles. A daemon
+  older than 0.65.3 sends no source, where nothing is skipped and behaviour is
+  unchanged.
+- **The reconnect ladder has jitter** (±20%). Clients that lived through one
+  daemon outage returned in lockstep, and the instant they picked was the worst
+  available: a restarting daemon is pulling the CCU exactly then.
+- **A second `start_events()` no longer leaks its predecessor's
+  subscriptions**, which had been applying every event to the store twice. The
+  idempotence guard only holds while the dispatch task is alive — and the one
+  path that ends it without `close()` is the credential rejection above, where
+  calling `start_events()` again is the natural recovery.
+
+Also in this release:
+
+- Requires `openccu-loom-types` 0.5.7 (daemon 0.65.3 / api 7.15.0). Its schema
+  digest matches that daemon build exactly, so `connect()` no longer warns
+  about contract drift.
+- `aiohomematic` is capped at `<2026.9` in `pyproject.toml`. The comment above
+  the dependency and `CLAUDE.md` both said an upper bound was pinned in both
+  files; only `requirements.txt` carried one, so a plain `pip install` resolved
+  any later series against a shim that couples to aiohomematic internals.
+- The package moves to Development Status 4 - Beta, with `README.md` and
+  `CLAUDE.md` brought in line — they still said "WIP / Alpha".
+
 # Version 2026.8.26 (2026-08-27)
 
 Syncs the client to daemon 0.65.1 / api 7.13.0 (`openccu-loom-types` 0.5.5).

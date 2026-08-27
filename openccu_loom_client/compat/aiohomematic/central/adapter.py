@@ -54,6 +54,7 @@ from openccu_loom_client.compat.aiohomematic._upstream import (
     BackupData,
     CentralHealth,
     CentralState as AioCentralState,
+    CentralStateChangedEvent as AioCentralStateChangedEvent,
     ClientState as AioClientState,
     DataPointCategory as AioDataPointCategory,
     DataPointsCreatedEvent as AioDataPointsCreatedEvent,
@@ -96,6 +97,8 @@ from openccu_loom_client.events import (
     AlarmPanelChangedEvent as LoomAlarmPanelChangedEvent,
     AlarmReadinessChangedEvent as LoomAlarmReadinessChangedEvent,
     AlarmTriggeredEvent as LoomAlarmTriggeredEvent,
+    AuthFailedEvent as LoomAuthFailedEvent,
+    ConnectionStateChangedEvent as LoomConnectionStateChangedEvent,
 )
 from openccu_loom_client.exceptions import BaseLoomException, LoomHttpError, LoomNotFoundError
 
@@ -1194,16 +1197,22 @@ class LoomCentralAdapter:
             await self._refresh_system_information()
             await self.client_coordinator.refresh()
             self._state = CentralState.Starting
-            await self._client.bootstrap()
-            await self._bootstrap_hub_catalogue()
-            await self.hub_coordinator.fetch_hub_singleton_data()
-            # Custom DPs first: schedule discovery and the combined duration
-            # number key off the devices' CDP catalogue (aiohomematic builds
-            # both through the custom data points).
-            await self._bootstrap_custom_data_points()
-            await self._bootstrap_schedules()
-            await self._bootstrap_combined_data_points()
+            # Wait for the daemon's southbound bring-up before paying for the
+            # snapshot walk. `GET /snapshot` answers 200 with empty lists while
+            # the central is still in waiting_for_ccu and never 5xx, so
+            # bootstrapping early "succeeds" into an empty model and HA spawns
+            # no entities at all. Bounded, and a timeout is not fatal: the walk
+            # runs anyway and the daemon's resync push re-bootstraps once the
+            # CCU arrives — which now reaches this layer too, via the hook
+            # installed below.
+            await self._client.wait_until_ready()
+            await self._bootstrap_model()
             await self.query_facade.prefetch_un_ignore_candidates()
+            # Repeat this layer's half of the bootstrap whenever the client
+            # re-walks the store (replay lost, queue overflow, or the daemon's
+            # resync when the CCU finally arrives). Without it the store gains
+            # devices that never become entities.
+            self._client.set_rebootstrap_hook(self._on_store_rebootstrapped)
             await self._client.start_events()
             # Fan the daemon's typed value events into the uniform
             # DataPointStateChangedEvent the HA entities subscribe to.
@@ -1236,6 +1245,13 @@ class LoomCentralAdapter:
                 LoomAlarmPanelChangedEvent,
             ):
                 self._refresh_group.subscribe(event_type=latch_event, handler=self._on_possible_latch_change)
+            # Availability. Without these the central stayed Running through
+            # any outage — a dropped socket, a 60 s ping timeout, a daemon
+            # killed outright — and HA rendered its last values as live.
+            self._refresh_group.subscribe(
+                event_type=LoomConnectionStateChangedEvent, handler=self._on_connection_state_changed
+            )
+            self._refresh_group.subscribe(event_type=LoomAuthFailedEvent, handler=self._on_auth_failed)
             # Announce every data point (generic + custom) in one batch *after*
             # the custom DPs are attached, so HA's platforms spawn entities for
             # them too. Published on the real aiohomematic bus as the real
@@ -1253,6 +1269,117 @@ class LoomCentralAdapter:
             # idempotent and None-safe, so it cleans up whatever was created.
             await self.stop()
             raise
+
+    async def _bootstrap_model(self) -> None:
+        """
+        Build this layer's model on top of a freshly-populated store.
+
+        Shared by :meth:`start` and the re-bootstrap hook so the two cannot
+        drift — the drift is the bug: a re-bootstrap that refills the store
+        without rebuilding the custom data points, schedules and combined
+        numbers leaves HA holding entities backed by nothing.
+
+        The store's own walk is the caller's job; this is everything layered on
+        top of it. Custom DPs come first: schedule discovery and the combined
+        duration number both key off the devices' CDP catalogue.
+        """
+        await self._client.bootstrap()
+        await self._bootstrap_hub_catalogue()
+        await self.hub_coordinator.fetch_hub_singleton_data()
+        await self._bootstrap_custom_data_points()
+        await self._bootstrap_schedules()
+        await self._bootstrap_combined_data_points()
+
+    async def _on_store_rebootstrapped(self) -> None:
+        """
+        Rebuild this layer and re-announce, after the client re-walked the store.
+
+        The client's re-bootstrap has already refilled the store by the time
+        this runs, so only the layered model and the announcement are missing.
+        Both are idempotent for what HA already has: the announcement carries
+        the un-registered data points, and the alarm-panel announce keeps its
+        own identity set, so a device HA already spawned is not spawned twice.
+
+        Never raises — this runs inside the client's re-bootstrap task, and a
+        failure here must not look like a failed walk.
+        """
+        if self._state in (CentralState.Stopped, CentralState.Failed):
+            return
+        _LOGGER.info("central %s: store re-bootstrapped — rebuilding the compat model", self._name)
+        try:
+            await self._bootstrap_hub_catalogue()
+            await self.hub_coordinator.fetch_hub_singleton_data()
+            await self._bootstrap_custom_data_points()
+            await self._bootstrap_schedules()
+            await self._bootstrap_combined_data_points()
+            await self._emit_data_points_created()
+        except Exception:
+            _LOGGER.exception("central %s: rebuilding the compat model after a re-bootstrap failed", self._name)
+
+    async def _on_connection_state_changed(self, event: LoomConnectionStateChangedEvent, /) -> None:
+        """
+        Track push availability in the central's lifecycle state.
+
+        ``Degraded`` rather than ``Stopped``: REST is very likely still
+        reachable (the WS drop may be a proxy, an idle NAT mapping, a restarting
+        daemon), the store keeps its contents, and writes may well succeed. It
+        is aiohomematic's word for "running, but do not trust this as live", and
+        :attr:`available` deliberately still answers True for it — flipping
+        every entity to unavailable on a five-second reconnect would be worse
+        than the staleness it reports.
+
+        Never overrides a terminal state: once ``stop()`` has run, a late
+        transition from the transport winding down must not resurrect the
+        central into Running.
+        """
+        if self._state in (CentralState.Stopped, CentralState.Failed):
+            return
+        new_state = CentralState.Running if event.connected else CentralState.Degraded
+        if new_state is self._state:
+            return
+        old_state = self._state
+        self._state = new_state
+        _LOGGER.info(
+            "central %s: %s -> %s (event stream %s)",
+            self._name,
+            old_state,
+            new_state,
+            "connected" if event.connected else "disconnected",
+        )
+        # The daemon-connection sensor mirrors the same fact, and a killed
+        # daemon sends no daemon_status.changed to move it — this is the only
+        # thing that does.
+        for dp in self.hub_coordinator._apply_daemon_connection(connected=event.connected):
+            await self._ha_bus.publish(
+                event=AioDataPointStateChangedEvent(
+                    timestamp=datetime.now(tz=UTC), unique_id=dp.unique_id, new_value=dp.value
+                )
+            )
+        await self._ha_bus.publish(
+            event=AioCentralStateChangedEvent(
+                timestamp=datetime.now(tz=UTC),
+                central_name=self._name,
+                old_state=_to_aio_central_state(state=old_state),
+                new_state=_to_aio_central_state(state=new_state),
+                trigger=None,
+            )
+        )
+
+    async def _on_auth_failed(self, _event: LoomAuthFailedEvent, /) -> None:
+        """
+        Degrade on a rejected credential, which the transport does not retry.
+
+        Distinct from a connection drop in one way that matters to a consumer:
+        this one does not resolve on its own. The reconnect loop has stopped,
+        so nothing will restore push until the credential is replaced and the
+        stream restarted.
+        """
+        _LOGGER.error(
+            "central %s: the daemon rejected this client's credential — push has stopped until it is replaced",
+            self._name,
+        )
+        if self._state not in (CentralState.Stopped, CentralState.Failed):
+            self._state = CentralState.Degraded
 
     async def _on_possible_latch_change(self, event: Any, /) -> None:
         """
@@ -1572,6 +1699,7 @@ class LoomCentralAdapter:
             self._refresh_group.cancel()
             self._refresh_group = None
         self._looper.cancel_tasks()
+        self._client.set_rebootstrap_hook(None)
         await self._client.close()
         self._state = CentralState.Stopped
 

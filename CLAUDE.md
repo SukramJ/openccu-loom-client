@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Async Python REST + WebSocket client for the [openccu-loom](https://github.com/SukramJ/openccu-loom) daemon. Status: WIP / Alpha.
+Async Python REST + WebSocket client for the [openccu-loom](https://github.com/SukramJ/openccu-loom) daemon. Status: Beta.
 
 **Strategy — alternative backend, not a replacement.** For the foreseeable future `openccu-loom*` is _not_ meant to replace `aiohomematic`; it is an **alternative backend** for `homematicip_local` that mediates CCU contact through the daemon instead of direct XML-RPC/JSON-RPC. Both backends coexist and HA can choose between them. Because of this, **depending on `aiohomematic` at runtime is deliberate and architecturally sound**: the routing-key algorithm, the `@runtime_checkable` protocols and (selectively) model code are _reused_ from `aiohomematic` rather than re-implemented, which avoids silent drift between two implementations of the same contract. `aiohomematic` and `openccu-loom*` share one maintainer, so the coupling is coordinated, not external.
 

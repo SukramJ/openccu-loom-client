@@ -55,22 +55,45 @@ Currently `xfail`. Each needs harness work rather than production code.
 
 ## Open in this repository
 
-- **Optimistic rollback in the store model.** The daemon's
-  `datapoint.optimistic_rolled_back` broadcast is bridged to the public
-  `OptimisticRollbackEvent` with `restored_value=present`
-  (`compat/aiohomematic/central/refresh.py`). Whether the **store's** model is
-  reverted on that path — rather than only when the next genuine daemon value
-  arrives via the optimistic-drop in `store.py` — is unverified. A reader
-  could otherwise still see the un-confirmed value in between. Establish which
-  it is before deciding whether anything needs fixing.
-- **mypy cannot resolve editable first-party deps.** Under `strict = true`,
-  mypy reports "Cannot find implementation or library stub" for
-  `openccu_loom_types.*` even though it ships `py.typed`, because editable
-  installs are not followed; this cascades into spurious `no-any-return`
-  errors. Logic is unaffected — the type gate is just noisy. Current
-  workaround: install the package non-editable. Fix by setting `mypy_path` /
-  `explicit_package_bases`, or by installing first-party deps non-editable in
-  the type-check environment, so strict mode means something again.
+### Reconnect / recovery — closed (2026-08-27)
+
+All nine gaps (G1–G9) are fixed, and the two cross-repo asks shipped in daemon
+0.65.2/0.65.3. The scenario matrix, the reasoning per gap and the table of what
+shipped where are in [`reconnect-recovery.md`](./reconnect-recovery.md); it stays
+as the record of why each change exists.
+
+Nothing here is open. Two design choices in it look like omissions and are not,
+so they are recorded rather than re-litigated: `available` stays True while the
+central is `Degraded` (a WS drop makes the store stale, not wrong, and flipping
+every entity unavailable on a five-second reconnect is worse than the staleness),
+and `wait_until_ready()` giving up is not an error (the bootstrap runs anyway and
+the daemon's resync re-bootstraps when the CCU arrives).
+
+## Adopting daemon 0.65.3 / api 7.15.0
+
+Both cross-repo asks from the reconnect/recovery review shipped, and so did the
+two follow-ups found while adopting them. Nothing is left on the daemon side.
+
+`openccu-loom-types` 0.5.7 is pinned; its `SCHEMA_DIGEST`
+(`sha256:97a44474…`) matches daemon 0.65.3 exactly, so the connect-time drift
+warning is quiet. Suite, ruff and mypy green on it. See
+[`reconnect-recovery.md`](./reconnect-recovery.md) §6 for what shipped where.
+
+Two notes on the version arithmetic, because they read as inconsistent and are
+not: the daemon's `api_version` went 7.14.0 → **7.15.0** for a
+contract-text-only change, because ADR 0028 ties the version to the assets
+rather than to their semantics — any diff under `assets/` carries at least a
+minor bump, and the CI guard enforces it. The types package still went 0.5.6 →
+**0.5.7**, a plain patch bump: its version tracks the regeneration, not the
+daemon's `api_version`.
+
+What the corrected schema now says, and what a client may rely on: the
+`device.created` broadcast is a genuine arrival, not the CCU's fleet-wide
+re-announcement, and `source` is one of `NEW` (pairing), `REFRESH`
+(factory-reset re-pair), `MANUAL` (operator accept out of the deferred-creation
+inbox) or `CACHE` (boot restore from the persisted description cache). `INIT` is
+in the enum with no producer on this broadcast. The value `NEW_DEVICE` that the
+old description named never existed.
 
 ## Open in `homematicip_local` (cross-repo)
 
