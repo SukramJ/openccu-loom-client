@@ -14,6 +14,7 @@ bus must mutate the store's DP in place.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from datetime import UTC, datetime
 
 from openccu_loom_types import DAEMON_API_VERSION
@@ -482,6 +483,40 @@ class TestExternalWsTransport:
         try:
             assert stub.started
             assert stub.subscribed == [["device.*", "hub.*"]]
+        finally:
+            await client.close()
+
+
+class TestStartEventsIsRestartable:
+    """G8: a second start_events() must not leave the previous wiring on the bus."""
+
+    async def test_restart_after_dispatch_died_does_not_double_apply(self, mock_daemon: MockDaemon) -> None:
+        """
+        The idempotence guard only holds while the dispatch task lives.
+
+        The one path that ends it without close() is the WS transport giving up
+        on a rejected credential — and calling start_events() again is the
+        natural recovery. Before the fix that re-assigned `_wire_group` without
+        cancelling, so both generations of wire handlers stayed subscribed and
+        every event was applied to the store twice.
+        """
+        mock_daemon.get("/api/v1/info", payload=_INFO)
+        stub = _StubWs()
+        client = LoomClient(config=mock_daemon.config, ws_transport=stub)  # type: ignore[arg-type]
+        await client.connect()
+        try:
+            await client.start_events()
+            first = client.events.subscription_count()
+            assert first > 0
+
+            # Simulate the transport having given up: the dispatch task is
+            # done, so the guard lets a retry through.
+            client._dispatch_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await client._dispatch_task
+
+            await client.start_events()
+            assert client.events.subscription_count() == first
         finally:
             await client.close()
 

@@ -32,6 +32,7 @@ from dataclasses import replace
 from http import HTTPStatus
 import json
 import logging
+import random
 from typing import TYPE_CHECKING, Final, Self
 
 import aiohttp
@@ -54,6 +55,14 @@ _LOGGER: Final = logging.getLogger(__name__)
 # reconnect loop. After the final entry the schedule clamps to that
 # value (steady-state reconnect every 30 s).
 _RECONNECT_BACKOFF: Final = (0.5, 2.0, 5.0, 15.0, 30.0)
+
+# Fraction of the ladder step applied as random jitter (± this share). Several
+# clients that lived through the same daemon outage otherwise come back in
+# lockstep, and the moment they pick is the worst one: a restarting daemon is
+# pulling the CCU exactly then. The jitter only spreads arrivals — it never
+# shortens the wait below (1 - share) of the step, so the "no tight loop"
+# property of the ladder is preserved.
+_RECONNECT_JITTER_SHARE: Final = 0.2
 
 # A reconnect only resets the backoff ladder once the connection has been
 # up at least this long. Otherwise a daemon that accepts the upgrade and
@@ -382,9 +391,23 @@ class WsTransport:
                 # keeps the while-condition's narrowing across the call and
                 # wrongly flags this exit as unreachable.
                 return  # type: ignore[unreachable]
-            delay = _RECONNECT_BACKOFF[min(attempt, len(_RECONNECT_BACKOFF) - 1)]
+            delay = self._backoff_delay(attempt=attempt)
             attempt += 1
             await asyncio.sleep(delay)
+
+    @staticmethod
+    def _backoff_delay(*, attempt: int) -> float:
+        """
+        Return the reconnect delay for ``attempt``, jittered.
+
+        The ladder clamps to its last entry, so the steady state against a
+        permanently-down daemon is one attempt per final step. The jitter is
+        symmetric around that step (see :data:`_RECONNECT_JITTER_SHARE`) so a
+        fleet of clients recovering from one outage does not arrive together.
+        """
+        step = _RECONNECT_BACKOFF[min(attempt, len(_RECONNECT_BACKOFF) - 1)]
+        spread = step * _RECONNECT_JITTER_SHARE
+        return step + random.uniform(-spread, spread)  # noqa: S311 # nosec B311 — spreads reconnect arrivals, not a secret
 
     async def _connect_and_read(self) -> None:
         assert self._session is not None  # noqa: S101 — invariant: session opened in connect()
@@ -515,6 +538,30 @@ class WsTransport:
                 "WS replay buffer aged events out (oldest_seq=%s) — caller must resync",
                 oldest,
             )
+            # Re-anchor the resume cursor on the seq space the daemon just
+            # named. Without this the cursor only ever grows (see
+            # _handle_text), which breaks resume for good across a daemon
+            # restart: the daemon's seq counter restarts at 0, every live
+            # envelope then carries a *smaller* seq than the cursor we kept
+            # from the previous incarnation, so the cursor never moves again.
+            # Each later reconnect re-sends that stale `since`, the daemon
+            # answers `Lost` (it is above its current top — see Hub.Replay),
+            # and the client re-walks the whole snapshot every single time,
+            # even where the replay ring could have served it.
+            #
+            # Deliberately only here, not in the shared _trigger_resync: the
+            # queue-overflow path funnels through that same callback with a
+            # -1 sentinel, and its cursor is perfectly good — adopting the
+            # sentinel there would corrupt it.
+            if isinstance(oldest, int) and oldest >= 0:
+                self._last_seq = oldest
+            else:
+                # A malformed or absent anchor: drop the cursor entirely
+                # rather than keep one the daemon has just told us it
+                # cannot place. The next subscribe then omits `since` and
+                # asks for the live stream, which is what the re-bootstrap
+                # this triggers is about to make authoritative anyway.
+                self._last_seq = None
             # Fire the resync callback unconditionally: the buffer has aged
             # out regardless of whether the daemon attached a usable
             # oldest_seq. Coerce a missing / non-int value to a -1 sentinel

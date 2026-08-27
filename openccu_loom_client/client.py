@@ -425,6 +425,16 @@ class LoomClient:
                 await self._ws.subscribe(topics=list(subscriptions))
 
         # Bridge: WS events → store apply_*
+        #
+        # Cancel any group a previous start_events() left behind first. The
+        # idempotence guard above only holds while the dispatch task is alive,
+        # and the one path that ends it without close() — the WS transport
+        # giving up on a rejected credential — is exactly the one where a
+        # caller retries start_events() as its recovery. Re-assigning the
+        # attribute without cancelling leaves the old subscriptions live on the
+        # bus, so every event would be applied to the store twice.
+        if self._wire_group is not None:
+            self._wire_group.cancel()
         self._wire_group = self._bus.create_subscription_group(name="loom-client-wire")
         bind_ws_events_to_store(bus=self._bus, store=self._store, group=self._wire_group)
         # The bridge only seeds a stub for a freshly-paired device; the

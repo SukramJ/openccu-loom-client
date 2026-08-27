@@ -230,6 +230,90 @@ class TestReplayLost:
         # Sentinel -1 → callback fired despite the missing field (no silent skip).
         assert captured == [-1]
 
+    async def test_replay_lost_re_anchors_the_resume_cursor(self, fake_daemon) -> None:
+        """
+        G1: after `replay_lost` the cursor adopts the anchor the daemon named.
+
+        Without this the cursor only ever grows, so a daemon restart (whose seq
+        space restarts at 0) leaves it stuck above every live seq: the next
+        reconnect re-sends the stale `since`, the daemon answers `Lost` again,
+        and the client re-walks the whole snapshot on every reconnect for good.
+        """
+
+        async def script(ws: web.WebSocketResponse, _rx: list[dict]) -> None:
+            await asyncio.sleep(0.05)
+            # A cursor from a previous daemon lifetime is far above the new
+            # daemon's top; it answers replay_lost with its own anchor.
+            await ws.send_str(json.dumps({"op": "replay_lost", "oldest_seq": 7}))
+            await asyncio.sleep(0.05)
+            # Live traffic in the *new* seq space — well below the old cursor.
+            await ws.send_str(_envelope(seq=8))
+            await asyncio.sleep(0.2)
+
+        cfg, _rx = await fake_daemon(script)
+        async with WsTransport(config=cfg, initial_subscriptions=["device.*"]) as transport:
+            transport._last_seq = 50_000
+            await asyncio.sleep(0.3)
+            # Re-anchored on the daemon's value, then advanced by live traffic.
+            assert transport.last_seq == 8
+
+    async def test_replay_lost_without_anchor_drops_the_cursor(self, fake_daemon) -> None:
+        """G1: a malformed anchor clears the cursor rather than keeping a dead one."""
+
+        async def script(ws: web.WebSocketResponse, _rx: list[dict]) -> None:
+            await asyncio.sleep(0.05)
+            await ws.send_str(json.dumps({"op": "replay_lost"}))  # no oldest_seq
+            await asyncio.sleep(0.2)
+
+        cfg, _rx = await fake_daemon(script)
+        async with WsTransport(config=cfg, initial_subscriptions=["device.*"]) as transport:
+            transport._last_seq = 50_000
+            await asyncio.sleep(0.3)
+            assert transport.last_seq is None
+
+    async def test_queue_overflow_keeps_the_cursor(self, fake_daemon, monkeypatch) -> None:
+        """
+        G1 boundary: the overflow resync shares the callback but not the anchor.
+
+        Overflow means the local consumer fell behind, not that the daemon's
+        seq space moved — the cursor is still valid and must survive, or the
+        -1 sentinel would corrupt what replay_lost handling repairs.
+        """
+        monkeypatch.setattr(ws_module, "_ENVELOPE_QUEUE_MAXSIZE", 1)
+
+        async def script(ws: web.WebSocketResponse, _rx: list[dict]) -> None:
+            await asyncio.sleep(0.05)
+            for seq in (11, 12, 13):
+                await ws.send_str(_envelope(seq=seq))
+            await asyncio.sleep(0.2)
+
+        cfg, _rx = await fake_daemon(script)
+        async with WsTransport(config=cfg, initial_subscriptions=["device.*"]) as transport:
+            await asyncio.sleep(0.3)
+            # Highest seq seen on the wire, not the -1 the overflow path passes
+            # to the resync callback.
+            assert transport.last_seq == 13
+
+
+class TestReconnectBackoff:
+    def test_jitter_stays_within_share_of_the_ladder_step(self) -> None:
+        """G7: jitter spreads arrivals without breaking the ladder's guarantee."""
+        share = ws_module._RECONNECT_JITTER_SHARE
+        for attempt, step in enumerate(ws_module._RECONNECT_BACKOFF):
+            delays = [WsTransport._backoff_delay(attempt=attempt) for _ in range(200)]
+            assert min(delays) >= step * (1 - share)
+            assert max(delays) <= step * (1 + share)
+            # Actually random, not a constant dressed up as one.
+            assert len(set(delays)) > 1
+
+    def test_ladder_clamps_past_its_last_step(self) -> None:
+        """G7: the steady state stays the final step, jitter included."""
+        last = ws_module._RECONNECT_BACKOFF[-1]
+        share = ws_module._RECONNECT_JITTER_SHARE
+        for attempt in (len(ws_module._RECONNECT_BACKOFF), 50, 5_000):
+            delay = WsTransport._backoff_delay(attempt=attempt)
+            assert last * (1 - share) <= delay <= last * (1 + share)
+
 
 class TestRuntimeSubscriptions:
     async def test_subscribe_sends_only_new_topics(self, fake_daemon) -> None:
