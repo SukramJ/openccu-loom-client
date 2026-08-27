@@ -55,29 +55,56 @@ Currently `xfail`. Each needs harness work rather than production code.
 
 ## Open in this repository
 
-- **The device inbox does not model the onboarding middle state (daemon
-  0.66.0).** `GET /hub/inbox` now flags entries with `awaiting_release`: the
-  device is already accepted and fully materialised — it has its ise*id,
-  channels and data points, and can be renamed and assigned rooms — but is
-  withheld from MQTT, the Matter bridge and outbound webhooks until an operator
-  finishes onboarding with `POST /devices/{addr}/release`
-  (`internal/north/rest/handlers/hub.go:263-269`, `:1089`). The daemon lists
-  those entries in the same inbox as the ones genuinely awaiting a decision,
-  and its schema says outright that a client must not offer \_accept* for them,
-  because they are already accepted.
+- **The onboarding release step does not reach this backend (daemon 0.66.0).**
+  Not an inbox-rendering detail — a role mismatch, and it needs a daemon-side
+  decision rather than a local fix.
 
-  This client flattens the entry into aiohomematic's `InboxDeviceData`
-  (`compat/aiohomematic/central/adapter.py:616`), which carries only
-  `device_id`/`address`/`name`/`device_type`/`interface` — neither
-  `awaiting_release` nor `pending_creation` survives the conversion, so HA
-  offers `accept_device_in_inbox` for every entry alike. There is also no
-  client call for the release route.
+  0.66.0 makes pairing a three-state wizard so a device is named and placed
+  _before_ any ecosystem sees it. The reasoning in the daemon's changelog is
+  exactly right: an ecosystem that sees a device first and is corrected
+  afterwards keeps the identity it saw — Home Assistant its entity ids, a
+  Matter controller its endpoint number. Hence state 2, _accepted but not
+  released_: the device is materialised and, in the daemon's words, "fully
+  visible and configurable in this daemon's own REST / WebSocket surfaces —
+  which is where the name, rooms and functions are set. The ecosystems still do
+  not see it." `POST /devices/{addr}/release` then ends the hold and "MQTT,
+  Matter and the webhook publish it".
 
-  Two-sided: carrying the flag through needs a field on aiohomematic's record,
-  so it is a coordinated change rather than a local one. Establish first what
-  the daemon does with an accept against an already-accepted device — if it is
-  a harmless no-op the gap is cosmetic, if it errors then HA surfaces a failure
-  for an action it should not have offered.
+  That split equates _REST/WS_ with "the configuration surface" and _MQTT /
+  Matter / webhook_ with "the ecosystems". **This backend breaks the
+  equation**: it is an ecosystem — Home Assistant — reached over the
+  configuration channel. Verified accordingly:
+
+  - the release gate lives in `publishDeviceSnapshot`
+    (`internal/central/adapter/eventbridge.go:852`), i.e. the MQTT path;
+    `IsReleased` has no caller anywhere under `internal/north/rest/`;
+  - `DeviceSummary` in `/snapshot` carries no released/withheld flag, so a
+    consumer cannot filter for itself;
+  - `DeviceReleasedEvent` is published on the internal bus only
+    (`internal/central/adapter/pending_devices.go:140`) and has no entry in
+    `assets/wsapi.json`, so no WS client learns that a hold ended.
+
+  Net effect: over this backend a device reaches Home Assistant the moment it
+  is accepted, before the operator has named it — the precise outcome the
+  release step exists to prevent, with the entity-id consequence the daemon's
+  own changelog names. State 1 (_waiting_) is unaffected: those devices are
+  held out of the model entirely and never reach the snapshot.
+
+  Three ways out, all daemon-side, cheapest first: a `released` flag on
+  `DeviceSummary` and the `device.created` payload plus a `device.released`
+  broadcast, letting this client filter the way it already filters
+  `source == CACHE`; or a scope on the snapshot separating configuration
+  readers from ecosystem readers; or treating REST/WS consumers as ecosystems
+  by default, with an opt-out for the Config UI. Worth raising as a design
+  question rather than filing as a bug — the daemon's model is coherent, this
+  client simply occupies a role it did not anticipate.
+
+  The inbox rendering is a second, smaller consequence of the same thing: the
+  entry's `awaiting_release` flag does not survive the conversion into
+  aiohomematic's `InboxDeviceData` (`compat/…/adapter.py:616`), which has no
+  field for it, so HA offers _accept_ for a device that is already accepted and
+  needs _release_. Fixing that needs a field on aiohomematic's record, so it
+  travels with whichever answer the question above gets.
 
 ### Reconnect / recovery — closed (2026-08-27)
 
