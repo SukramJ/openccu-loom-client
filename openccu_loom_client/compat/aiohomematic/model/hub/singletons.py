@@ -348,7 +348,14 @@ class SystemHealthSensor(HubSingletonDp):
 
 
 class ConnectionLatencySensor(HubSingletonDp):
-    """Average backend connection latency in milliseconds."""
+    """
+    Round-trip latency to the CCU in milliseconds.
+
+    The daemon measures it as a matched PING/PONG pair over each
+    interface's own transport (XML-RPC or BIN-RPC), including the
+    callback reply leg, and reports one value per CCU rather than per
+    interface. Absent until the first pair is confirmed.
+    """
 
     _data_type: ClassVar[str | None] = "FLOAT"
     _unit: ClassVar[str | None] = "ms"
