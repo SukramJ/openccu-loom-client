@@ -55,6 +55,30 @@ Currently `xfail`. Each needs harness work rather than production code.
 
 ## Open in this repository
 
+- **The device inbox does not model the onboarding middle state (daemon
+  0.66.0).** `GET /hub/inbox` now flags entries with `awaiting_release`: the
+  device is already accepted and fully materialised — it has its ise*id,
+  channels and data points, and can be renamed and assigned rooms — but is
+  withheld from MQTT, the Matter bridge and outbound webhooks until an operator
+  finishes onboarding with `POST /devices/{addr}/release`
+  (`internal/north/rest/handlers/hub.go:263-269`, `:1089`). The daemon lists
+  those entries in the same inbox as the ones genuinely awaiting a decision,
+  and its schema says outright that a client must not offer \_accept* for them,
+  because they are already accepted.
+
+  This client flattens the entry into aiohomematic's `InboxDeviceData`
+  (`compat/aiohomematic/central/adapter.py:616`), which carries only
+  `device_id`/`address`/`name`/`device_type`/`interface` — neither
+  `awaiting_release` nor `pending_creation` survives the conversion, so HA
+  offers `accept_device_in_inbox` for every entry alike. There is also no
+  client call for the release route.
+
+  Two-sided: carrying the flag through needs a field on aiohomematic's record,
+  so it is a coordinated change rather than a local one. Establish first what
+  the daemon does with an accept against an already-accepted device — if it is
+  a harmless no-op the gap is cosmetic, if it errors then HA surfaces a failure
+  for an action it should not have offered.
+
 ### Reconnect / recovery — closed (2026-08-27)
 
 All nine gaps (G1–G9) are fixed, and the two cross-repo asks shipped in daemon
