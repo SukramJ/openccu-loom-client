@@ -53,6 +53,7 @@ from openccu_loom_client.events import (
     event_from_envelope,
     new_auth_failed_event,
     new_connection_state_changed_event,
+    new_daemon_latency_changed_event,
     new_data_points_created_event,
 )
 from openccu_loom_client.exceptions import BaseLoomException, LoomIncompatibleVersionError, LoomNotFoundError
@@ -561,6 +562,7 @@ class LoomClient:
                 on_replay_lost=self._on_replay_lost,
                 on_auth_failed=self._on_auth_failed,
                 on_connection_state=self._on_connection_state,
+                on_heartbeat=self._on_heartbeat,
             )
             await self._ws.start()
         else:
@@ -810,6 +812,21 @@ class LoomClient:
         says they stopped being updated.
         """
         return self._connected
+
+    @property
+    def daemon_latency_ms(self) -> float | None:
+        """
+        Latest client↔daemon round trip in milliseconds, or ``None``.
+
+        Measured by the daemon across the heartbeat it already runs, so reading
+        it costs nothing. ``None`` before the stream has completed a second
+        heartbeat, and against a daemon that does not time its pings.
+        """
+        return self._ws.last_rtt_ms if self._ws is not None else None
+
+    async def _on_heartbeat(self, latency_ms: float, /) -> None:
+        """Publish the round trip the daemon just reported."""
+        await self._bus.publish(event=new_daemon_latency_changed_event(latency_ms=latency_ms))
 
     async def _on_connection_state(self, connected: bool, /) -> None:
         """

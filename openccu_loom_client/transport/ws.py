@@ -144,6 +144,19 @@ daemon cannot announce, and without this signal a consumer keeps presenting the
 last values it received as though they were still live.
 """
 
+HeartbeatHandler = Callable[[float], Awaitable[None]]
+"""Async callback invoked with the client↔daemon round-trip time in milliseconds.
+
+Measured by the daemon: it stamps an opaque token onto each ping, we echo it
+back, and the round trip it computes against its own clock arrives on the next
+ping as ``rtt_ms``. Nothing here times anything, and the two clocks need no
+agreement.
+
+This is the distance to the *daemon*. The hub's ``connection_latency`` metric
+reports the daemon-to-CCU leg, which has entirely different causes — a slow
+reverse proxy on this side is invisible there.
+"""
+
 # How long :meth:`WsTransport.reauth` waits for the daemon's ack control frame.
 _REAUTH_ACK_TIMEOUT_SECONDS: Final = 10.0
 
@@ -171,6 +184,7 @@ class WsTransport:
         on_replay_lost: ReplayLostHandler | None = None,
         on_auth_failed: AuthFailedHandler | None = None,
         on_connection_state: ConnectionStateHandler | None = None,
+        on_heartbeat: HeartbeatHandler | None = None,
         session: aiohttp.ClientSession | None = None,
         classify: bool = False,
     ) -> None:
@@ -206,6 +220,10 @@ class WsTransport:
         self._on_replay_lost: Final = on_replay_lost
         self._on_auth_failed: Final = on_auth_failed
         self._on_connection_state: Final = on_connection_state
+        self._on_heartbeat: Final = on_heartbeat
+        # Latest client↔daemon round trip the daemon reported, or None until
+        # the second heartbeat of a connection (the first has nothing to time).
+        self._last_rtt_ms: float | None = None
         # Last state handed to the callback, so a reconnect storm does not
         # emit a run of identical notifications.
         self._reported_connected = False
@@ -281,6 +299,17 @@ class WsTransport:
         self._stopped.set()
 
     # ---- public API ----
+
+    @property
+    def last_rtt_ms(self) -> float | None:
+        """
+        Latest client↔daemon round trip in milliseconds, or ``None``.
+
+        ``None`` until the daemon has timed one: the first ping of a connection
+        has no preceding pong to measure, and a daemon older than api 7.13.0
+        never reports one at all.
+        """
+        return self._last_rtt_ms
 
     @property
     def last_seq(self) -> int | None:
@@ -565,7 +594,21 @@ class WsTransport:
 
     async def _handle_control(self, *, op: str, frame: dict[str, object]) -> None:
         if op == "ping":
-            await self._send(frame={"op": "pong"})
+            # `rtt_ms` on this ping is the round trip of the PREVIOUS heartbeat,
+            # measured by the daemon against its own clock — so it needs no
+            # agreement between the two clocks, and we need no timer of our own.
+            if (rtt := frame.get("rtt_ms")) is not None and isinstance(rtt, int | float):
+                self._last_rtt_ms = float(rtt)
+                if self._on_heartbeat is not None:
+                    with contextlib.suppress(Exception):
+                        await self._on_heartbeat(float(rtt))
+            # Echo the token back, when the daemon sent one. A bare pong is a
+            # valid heartbeat and the contract says so — it just cannot be
+            # timed, which is why the daemon never had an rtt to report before.
+            pong: dict[str, object] = {"op": "pong"}
+            if (echo := frame.get("echo")) is not None:
+                pong["echo"] = echo
+            await self._send(frame=pong)
         elif op == "replay_done":
             seq = frame.get("seq")
             _LOGGER.debug("replay_done at seq=%s", seq)

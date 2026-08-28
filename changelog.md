@@ -1,3 +1,22 @@
+# Version 2026.8.32 (2026-08-28)
+
+- **A sensor for the latency between this client and the daemon.** There was
+  one for the daemon-to-CCU leg and none for this one, so a slow reverse proxy,
+  a congested wireless link or an overloaded host between Home Assistant and
+  the daemon was invisible — the CCU figure says nothing about it, and a
+  struggling CCU says nothing about the daemon.
+
+  Nothing on this side measures anything. The daemon already stamps a token
+  onto each heartbeat ping and computes the round trip against its own clock
+  when the token comes back, so the two clocks need no agreement; the client
+  simply never echoed the token, which is why the daemon had nothing to report.
+  It does now, and the figure it sends arrives as a `daemon_latency` sensor
+  alongside the existing `connection_latency`.
+
+  Absent until a connection has completed its second heartbeat — the first has
+  no preceding pong to measure — and against a daemon that does not time its
+  pings, where a bare pong stays a valid heartbeat by contract.
+
 # Version 2026.8.31 (2026-08-28)
 
 Completes the onboarding wizard on this backend. 2026.8.30 already kept an

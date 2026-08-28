@@ -20,10 +20,12 @@ from openccu_loom_client.events.bus import EventBus, SubscriptionGroup, Unsubscr
 from openccu_loom_client.events.synthetic import (
     AuthFailedEvent,
     ConnectionStateChangedEvent,
+    DaemonLatencyChangedEvent,
     DataPointsCreatedEvent,
     OptimisticRollbackEvent,
     new_auth_failed_event,
     new_connection_state_changed_event,
+    new_daemon_latency_changed_event,
     new_data_points_created_event,
     new_optimistic_rollback_event,
 )
@@ -95,6 +97,7 @@ __all__ = [
     "CentralStateChangedEvent",
     "ConnectionStateChangedEvent",
     "CustomDataPointStateChangedEvent",
+    "DaemonLatencyChangedEvent",
     "DaemonStatusChangedEvent",
     "DataPointValueChangedEvent",
     "DataPointsCreatedEvent",
@@ -135,6 +138,7 @@ __all__ = [
     "event_from_envelope",
     "new_auth_failed_event",
     "new_connection_state_changed_event",
+    "new_daemon_latency_changed_event",
     "new_data_points_created_event",
     "new_optimistic_rollback_event",
 ]
