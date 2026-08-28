@@ -144,6 +144,43 @@ old description named never existed.
 
 ## Open in `homematicip_local` (cross-repo)
 
+### From the reconnect/recovery and onboarding work (2026-08-28)
+
+Three consequences of what this client now does. None is a defect over there —
+they are things that changed underneath it. Verified against
+`homematicip_local` at `47b181c`.
+
+- **`CentralState.DEGRADED` is now reached on an ordinary WS drop**, where
+  before it was effectively unreachable on this backend. `_on_central_running`
+  (`control_unit.py:980`) fires the `homematicip_local.central_state_changed`
+  bus event on every transition back to RUNNING, so an automation listening for
+  it now runs after each reconnect — including a five-second one. Decide
+  whether that event should be debounced, or whether the automations that
+  consume it should be.
+
+  Explicitly **not** a problem, having checked: the repair issues are raised
+  from `_handle_degraded_state` (`:871`), which hangs off
+  `SystemStatusChangedEvent`, and the loom adapter does not publish that event.
+  `_on_central_state_changed` (`:992`) only re-signals availability and, on
+  RUNNING, _deletes_ issues. So there is no repair-issue flapping — worth
+  recording, because "degraded on every reconnect" reads as though there would
+  be.
+
+- **`LoomIncompatibleVersionError` deserves `ConfigEntryError`.** Setup catches
+  only `AuthFailure` today (`__init__.py:221`), so a daemon whose API version
+  this build cannot talk to retries forever with the same result. The client
+  now raises a distinct type for exactly that, and it subclasses
+  `LoomTransportError` — so it has to be caught _before_ any handler for the
+  general transport error, or the specific case is swallowed by the broad one.
+
+- **`start()` can now block for up to three minutes.** The adapter waits for
+  the daemon's southbound bring-up before walking the snapshot, because
+  bootstrapping earlier "succeeds" into an empty model and spawns no entities
+  at all. Bounded and non-fatal — it proceeds on timeout and the daemon's
+  resync re-bootstraps when the CCU arrives — but a config-entry setup that
+  sits there for minutes is visible in HA's logs. If that is unwanted, the wait
+  is a client-side knob rather than something to work around here.
+
 - **Registry migration + serial wiring.** The one-time migration to the
   canonical `loom_`/serial scheme lives in `async_migrate_entries`; the old
   `entry_id[-10:]` `central_id` injection is obsolete.
