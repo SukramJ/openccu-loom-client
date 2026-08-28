@@ -32,17 +32,14 @@ close them. None is blocked on code.
 - **Sysvar `extended` marker.** Wired end-to-end
   (`compat/aiohomematic/model/hub/__init__.py`); confirm an extended variable
   surfaces as the writable flavour.
-- **`rename_device(ise_id)`.** Implemented and unit-tested. The recorded
-  blocker no longer holds: godevccu assigns ReGa object ids when
-  `Realism{RegaIDs: true}` is set (`internal/jsonrpc/handlers.go` `objectID` →
-  `RegisterAddress`, emitted as a string because that is what a CCU sends). The
-  daemon's own integration tests already drive `godevccu.Realism` for
-  `BatchEvents`, `FaultCodes` and `ErrorModel`, so the switch is available
-  rather than merely present. This is harness work here, not a daemon gap —
-  and it means the entry no longer belongs under "only real hardware can close
-  them".
 
 ## Verification gaps in the e2e suite
+
+`rename_device(ise_id)` is covered as of 2026-08-28 and no longer sits under
+"only real hardware": the missing piece was `Realism{RegaIDs: true}` on the
+`godevccu-e2e` helper (daemon PR #636), without which every `ise_id` is `None`.
+The suite itself had stopped running altogether — see the same day's
+`test(e2e): make the suite runnable again`.
 
 Currently `xfail`. Each needs harness work rather than production code.
 

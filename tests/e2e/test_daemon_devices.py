@@ -117,3 +117,66 @@ async def test_build_event_groups(client_with_ccu: LoomClient) -> None:
     # for an id that lost its namespace.
     assert group.unique_id.startswith("loom_event_group_")
     assert group.event_types  # lower-cased PRESS_* names
+
+
+async def test_devices_carry_rega_ise_ids(client_with_ccu: LoomClient) -> None:
+    """
+    The simulator reports ReGa object ids, so ise_id-addressed calls are testable.
+
+    A CCU always has them; the helper asks godevccu for them via
+    ``Realism{RegaIDs: true}``. Without that every ``ise_id`` is ``None`` and
+    the rename path below cannot be exercised at all — which is why this
+    assertion is separate: it names the precondition rather than letting the
+    rename test fail with an unrelated-looking lookup error.
+    """
+    await client_with_ccu.bootstrap()
+    devices = list(client_with_ccu.store.devices)
+    assert devices, "expected the seeded device set"
+    with_ids = [d for d in devices if d.ise_id is not None]
+    assert with_ids, "no device carries an ise_id — is Realism{RegaIDs:true} set on the helper?"
+
+
+async def test_rename_device_by_ise_id(client_with_ccu: LoomClient) -> None:
+    """
+    Rename through the aiohomematic-facing surface, addressed by ise_id.
+
+    This is the whole chain HA drives: it hands the compat layer an ise_id,
+    which resolves it to an address against the store and PATCHes the daemon.
+    Unit tests cover the resolution with a stubbed store; only the simulator
+    shows that the ise_id the daemon reports is the one the lookup matches on
+    — the two are populated by different code paths (`Device.listAllDetail`'s
+    ReGa id vs. the snapshot summary), and a mismatch there is invisible until
+    a real rename is attempted.
+    """
+    from openccu_loom_client.compat.aiohomematic.central.adapter import LoomCentralAdapter
+
+    await client_with_ccu.bootstrap()
+    device = next((d for d in client_with_ccu.store.devices if d.ise_id is not None), None)
+    assert device is not None, "no device carries an ise_id"
+    original = device.summary.name
+    new_name = f"{original}-renamed" if original else "renamed-by-e2e"
+
+    json_rpc = LoomCentralAdapter(client=client_with_ccu, name="e2e").json_rpc_client
+    assert await json_rpc.rename_device(ise_id=device.ise_id, new_name=new_name) is True
+
+    # Read it back from the daemon rather than the local store: the store is
+    # only refreshed by a metadata push, and this asserts the CCU-side write.
+    detail = await client_with_ccu.devices.get_device_detail(address=device.address)
+    assert detail.name == new_name
+
+
+async def test_rename_device_with_unknown_ise_id_raises_not_found(client_with_ccu: LoomClient) -> None:
+    """
+    An ise_id no device carries must raise inside the aiohomematic hierarchy.
+
+    `homematicip_local`'s handler catches BaseHomematicException and renders a
+    typed websocket error from it; anything else reaches the config panel as a
+    generic `unknown_error` with the cause lost.
+    """
+    from openccu_loom_client.compat.aiohomematic.central.adapter import LoomCentralAdapter
+    from openccu_loom_client.exceptions import BaseLoomException
+
+    await client_with_ccu.bootstrap()
+    json_rpc = LoomCentralAdapter(client=client_with_ccu, name="e2e").json_rpc_client
+    with pytest.raises(BaseLoomException):
+        await json_rpc.rename_device(ise_id=999_999_999, new_name="nope")
