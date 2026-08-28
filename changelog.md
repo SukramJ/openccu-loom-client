@@ -1,5 +1,37 @@
 # Version 2026.8.33 (2026-08-28)
 
+- **CUxD entities re-key once on this upgrade.** Not a change in this package,
+  but its consequence, and it lands here because this is the release that pins
+  `aiohomematic==2026.8.7`.
+
+  The daemon has always namespaced `CUX*` addresses by the central: CUxD hands
+  out the same synthetic addresses on every CCU — the first `(28) System`
+  device is `CUX2801001` on essentially every install — so two CCUs bridged
+  into one Home Assistant would otherwise declare identical `unique_id`s and
+  HA would keep only the first. The reference implementation did not, so this
+  client's _rebuilt_ key disagreed with the daemon's _stamped_ one for exactly
+  that address family. aiohomematic 2026.8.7 adopted the rule, and
+  `canonical.py` inherits it.
+
+  Where the daemon stamps the key — every generic data point — nothing moves;
+  those already used the daemon's value. What moves is the keys this client
+  synthesises because the daemon does not stamp them: custom data points, week
+  profiles, the combined duration number, the device-update entity and event
+  groups. On a CUxD device those go from `loom_<addr>_<param>` to
+  `loom_<serial10>_<addr>_<param>`.
+
+  So: an installation with no CUxD devices is unaffected. One with CUxD
+  devices sees those entities re-key once, and the previous entities are left
+  behind in the registry until the migration pass in `homematicip_local`
+  covers them. If you run CUxD, upgrade at a time when you can check your
+  automations.
+
+  The upside is what the divergence cost: a rebuilt key that did not match the
+  daemon's routed to nothing, so any CUxD entity that fell back to the rebuild
+  path was silently inert. The daemon retired its divergence fixture in
+  0.67.1; the two implementations are now replayed against the same golden
+  cases.
+
 - **This release requires a daemon at api 7.23.0 or newer.** It adopts
   `openccu-loom-types` 0.5.10, whose stamped `DAEMON_API_VERSION` is what
   `connect()` compares the daemon's own against — same major, minor at or
