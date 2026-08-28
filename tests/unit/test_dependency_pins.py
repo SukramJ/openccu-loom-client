@@ -22,12 +22,14 @@ import re
 import tomllib
 
 _ROOT = Path(__file__).resolve().parents[2]
-# Pins kept exactly in both files, by distribution name. Both couple this
-# package to one build of something it does not control: the wire models are
-# generated per daemon release, and the compat shim reaches into aiohomematic
-# internals that only the drift-guard test validates — and it validates one
-# version, not a range.
-_EXACT_IN_BOTH = ("openccu-loom-types", "aiohomematic")
+# Dependencies pinned exactly in both files, by distribution name.
+# `openccu-loom-types` qualifies because nothing but this client consumes it —
+# the wire models are generated per daemon build, and an exact pin there cannot
+# conflict with anybody. `aiohomematic` deliberately does not: the application
+# that consumes this library depends on it directly and pins it exactly, so an
+# `==` here would make the two unsatisfiable together the moment they differed.
+# Its floor-versus-CI-pin relationship is checked separately below.
+_EXACT_IN_BOTH = ("openccu-loom-types",)
 
 
 def _pyproject_requirements() -> dict[str, str]:
@@ -88,18 +90,42 @@ class TestExactPinsAgree:
         )
 
 
-class TestAiohomematicIsPinnedNotRanged:
-    """The shim couples to internals the drift guard validates one version of."""
+class TestAiohomematicIsFloored:
+    """A library must not pin what its own consumer pins."""
 
-    def test_pin_is_exact(self) -> None:
+    def test_declared_as_a_floor_not_a_pin(self) -> None:
         """
-        A range would declare versions compatible that nothing has checked.
+        `homematicip_local` depends on aiohomematic directly and pins it exactly.
 
-        It was a calendar-versioned cap (`<2026.9`) before, which was worse than
-        no bound at all: it read as though 2026.9.0 were a breaking change when
-        all it means is that a month turned. CalVer carries no compatibility
-        semantics, so any boundary drawn in it is arbitrary — and one that looks
-        principled is the kind a reader trusts.
+        An `==` here would be unsatisfiable together with that pin the moment
+        the two named different versions — this library would block the only
+        application that installs it. The coupling is guarded by the drift test
+        against the CI pin instead, which is where a new series is validated.
         """
         spec = _pyproject_requirements()["aiohomematic"]
-        assert spec.startswith("aiohomematic=="), f"aiohomematic is not pinned exactly: {spec!r}"
+        assert "==" not in spec, f"aiohomematic must not be pinned exactly here: {spec!r}"
+        assert ">=" in spec, f"aiohomematic needs a floor naming what it requires: {spec!r}"
+
+    def test_no_calendar_version_cap(self) -> None:
+        """
+        There is no honest upper bound to write.
+
+        `<2026.9` claimed 2026.9.0 breaks something merely because a month
+        turned. CalVer carries no compatibility semantics, so a boundary drawn
+        in it is arbitrary — and one that looks principled is the kind a reader
+        trusts.
+        """
+        spec = _pyproject_requirements()["aiohomematic"]
+        assert "<" not in spec, f"aiohomematic carries a calendar-version cap: {spec!r}"
+
+    def test_ci_pin_satisfies_the_floor(self) -> None:
+        """The version CI validates has to be one the published metadata allows."""
+        from packaging.requirements import Requirement
+        from packaging.version import Version
+
+        declared = Requirement(_pyproject_requirements()["aiohomematic"])
+        ci_version = _requirements_txt()["aiohomematic"].split("==", 1)[1].strip()
+        assert declared.specifier.contains(Version(ci_version)), (
+            f"requirements.txt pins aiohomematic {ci_version}, which the declared "
+            f"specifier {declared.specifier} does not allow"
+        )

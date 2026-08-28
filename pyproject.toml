@@ -11,22 +11,28 @@ license = { text = "MIT" }
 authors = [{ name = "OpenCCU-Loom authors" }]
 requires-python = ">=3.14"
 dependencies = [
-    # Pinned exactly, not ranged. The compat shim couples to aiohomematic
-    # internals rather than a stable public API, and the drift-guard test
-    # (tests/compat/test_aiohomematic_protocol_parity.py) validates exactly one
-    # version — a range would declare versions compatible that nothing checked.
+    # A floor, not a pin and not a cap. This package is a library and
+    # `homematicip_local` is the application that consumes it — and that
+    # application depends on aiohomematic directly and pins it exactly. An `==`
+    # here would therefore not merely force an extra release per aiohomematic
+    # release; the moment the consumer pinned a different version the two
+    # requirements would be unsatisfiable together and this library would block
+    # the only thing that installs it.
     #
-    # A calendar-versioned cap was worse than none: it read as though 2026.9.0
-    # were a breaking change, when all it means is that a month turned. CalVer
-    # carries no compatibility semantics, so any boundary drawn in it is
-    # arbitrary — and an arbitrary boundary that looks principled is the kind a
-    # reader trusts.
+    # The floor names what is actually required: `InboxDeviceData.awaiting_release`
+    # arrived in 2026.8.6. No upper bound, because there is no honest one to
+    # write — CalVer carries no compatibility semantics, so `<2026.9` would
+    # claim 2026.9.0 breaks something merely because a month turned.
     #
-    # `homematicip_local` pins the same library exactly, so a range here could
-    # not widen anything in practice either; it would only disagree with the
-    # consumer about which version is in play. Bump this, requirements.txt and
-    # the drift-guard snapshot together.
-    "aiohomematic==2026.8.6",
+    # What guards the coupling is not metadata but the drift-guard test
+    # (tests/compat/test_aiohomematic_protocol_parity.py) running against the
+    # exact version in requirements.txt. That is the CI pin, and it is where a
+    # new aiohomematic series gets validated before anyone relies on it.
+    #
+    # (openccu-loom-types is pinned exactly and that is not a contradiction:
+    # nothing but this client consumes it, so an exact pin there cannot
+    # conflict with anybody.)
+    "aiohomematic>=2026.8.6",
     # Floors match the CI-pinned versions in requirements.txt so a fresh
     # `pip install` resolves a tested-compatible set, not an ancient one.
     "aiohttp>=3.12.0",

@@ -22,14 +22,22 @@ finish the onboarding.
   not retried: the daemon answers 404 when nothing withholds the address, so a
   blind repeat cannot be told from a genuine miss.
 
-- **`aiohomematic` is pinned exactly instead of range-capped.** The bound was
-  `<2026.9`, which read as though 2026.9.0 were a breaking change when all it
-  means is that a month turned — CalVer carries no compatibility semantics, so
-  any boundary drawn in it is arbitrary, and one that looks principled is the
-  kind a reader trusts. The compat shim couples to aiohomematic internals and
-  the drift-guard test validates exactly one version, so that is what the
-  metadata now says. `homematicip_local` pins the same library exactly, so a
-  range could not have widened anything in practice either.
+- **The `aiohomematic` requirement is a floor again, with no upper bound.** It
+  was capped at `<2026.9`, which claimed 2026.9.0 breaks something merely
+  because a month turned — CalVer carries no compatibility semantics, so a
+  boundary drawn in it is arbitrary, and one that looks principled is the kind
+  a reader trusts.
+
+  The cap is gone and nothing replaces it. An exact pin would be worse than the
+  cap: this package is a library, and the application that consumes it depends
+  on `aiohomematic` directly and pins it exactly — two exact pins naming
+  different versions cannot be satisfied together, so this library would block
+  the only thing that installs it. The floor names what is actually required
+  (`awaiting_release`, from 2026.8.6).
+
+  What guards the coupling to aiohomematic internals is not metadata but the
+  drift-guard test running against the exact version in `requirements.txt`.
+  That is where a new series gets validated before anyone relies on it.
 
 Requires `aiohomematic` 2026.8.6.
 
