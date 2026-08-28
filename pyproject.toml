@@ -11,11 +11,22 @@ license = { text = "MIT" }
 authors = [{ name = "OpenCCU-Loom authors" }]
 requires-python = ">=3.14"
 dependencies = [
-    # Upper bound: the compat shim couples to aiohomematic internals (not a
-    # stable public API), so cap the calendar-versioned minor until a new
-    # series is validated against the drift-guard test
-    # (tests/compat/test_aiohomematic_protocol_parity.py) — bump both together.
-    "aiohomematic>=2026.8.6,<2026.9",
+    # Pinned exactly, not ranged. The compat shim couples to aiohomematic
+    # internals rather than a stable public API, and the drift-guard test
+    # (tests/compat/test_aiohomematic_protocol_parity.py) validates exactly one
+    # version — a range would declare versions compatible that nothing checked.
+    #
+    # A calendar-versioned cap was worse than none: it read as though 2026.9.0
+    # were a breaking change, when all it means is that a month turned. CalVer
+    # carries no compatibility semantics, so any boundary drawn in it is
+    # arbitrary — and an arbitrary boundary that looks principled is the kind a
+    # reader trusts.
+    #
+    # `homematicip_local` pins the same library exactly, so a range here could
+    # not widen anything in practice either; it would only disagree with the
+    # consumer about which version is in play. Bump this, requirements.txt and
+    # the drift-guard snapshot together.
+    "aiohomematic==2026.8.6",
     # Floors match the CI-pinned versions in requirements.txt so a fresh
     # `pip install` resolves a tested-compatible set, not an ancient one.
     "aiohttp>=3.12.0",

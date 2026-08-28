@@ -22,6 +22,15 @@ finish the onboarding.
   not retried: the daemon answers 404 when nothing withholds the address, so a
   blind repeat cannot be told from a genuine miss.
 
+- **`aiohomematic` is pinned exactly instead of range-capped.** The bound was
+  `<2026.9`, which read as though 2026.9.0 were a breaking change when all it
+  means is that a month turned — CalVer carries no compatibility semantics, so
+  any boundary drawn in it is arbitrary, and one that looks principled is the
+  kind a reader trusts. The compat shim couples to aiohomematic internals and
+  the drift-guard test validates exactly one version, so that is what the
+  metadata now says. `homematicip_local` pins the same library exactly, so a
+  range could not have widened anything in practice either.
+
 Requires `aiohomematic` 2026.8.6.
 
 # Version 2026.8.30 (2026-08-28)
