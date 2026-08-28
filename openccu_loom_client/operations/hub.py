@@ -33,6 +33,17 @@ class HubOperations(_OperationsBase):
         """List all programs on the CCU. Wire: ``GET /programs``."""
         return await self._request_list(method="GET", path="/programs", model=ProgramSummary)
 
+    async def get_program(self, *, program_id: str) -> ProgramSummary:
+        """
+        Read one program's current state.
+
+        Wire: ``GET /programs/{id}``. The list endpoint has no single-item
+        counterpart in this façade otherwise, and the store needs one to
+        refresh a program after a push that carries no payload.
+        """
+        payload = await self._transport.request(method="GET", path=f"/programs/{quote(program_id, safe='')}")
+        return ProgramSummary.model_validate(payload)
+
     async def execute_program(self, *, program_id: str) -> None:
         """Wire: ``POST /programs/{id}/execute``."""
         await self._transport.request(

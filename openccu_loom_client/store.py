@@ -29,11 +29,12 @@ component (the future ``LoomClient``) wires WS events → store
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+from functools import cached_property
 import logging
 from typing import TYPE_CHECKING, Any, Final, Protocol, runtime_checkable
-from urllib.parse import quote
 
 from openccu_loom_types.rest import (
+    AlarmArmAccepted,
     AlarmMotionResetResult,
     AlarmPanelEntity,
     AlarmTriggeredMotionSensor,
@@ -61,6 +62,11 @@ from openccu_loom_client.model import (
     Program,
     Sysvar,
 )
+from openccu_loom_client.operations.alarm import AlarmOperations
+from openccu_loom_client.operations.custom_data_points import CustomDataPointsOperations
+from openccu_loom_client.operations.datapoints import DataPointsOperations
+from openccu_loom_client.operations.devices import DevicesOperations
+from openccu_loom_client.operations.hub import HubOperations
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -286,6 +292,43 @@ class LoomStore:
         """Return the bound transport, or ``None`` if none is attached yet."""
         return self._transport
 
+    # ---- operation façades ----
+    #
+    # The store used to build its own requests. Seventeen of its eighteen path
+    # literals existed byte-identically in ``operations/`` already, retry flag
+    # included, so the same URL was maintained in two places — and a path
+    # literal maintained twice drifts. These delegate instead.
+    #
+    # They are built lazily rather than in ``__init__`` because the transport
+    # is late-bound: a store can be constructed before the client opens its
+    # session (``set_transport``), and ``_require_transport`` is what turns
+    # "no transport yet" into a readable error at the point of use.
+
+    @cached_property
+    def _ops_alarm(self) -> AlarmOperations:
+        """Return the alarm façade, built on the bound transport."""
+        return AlarmOperations(transport=self._require_transport())
+
+    @cached_property
+    def _ops_hub(self) -> HubOperations:
+        """Return the hub façade, built on the bound transport."""
+        return HubOperations(transport=self._require_transport())
+
+    @cached_property
+    def _ops_datapoints(self) -> DataPointsOperations:
+        """Return the data-point façade, built on the bound transport."""
+        return DataPointsOperations(transport=self._require_transport())
+
+    @cached_property
+    def _ops_devices(self) -> DevicesOperations:
+        """Return the devices façade, built on the bound transport."""
+        return DevicesOperations(transport=self._require_transport())
+
+    @cached_property
+    def _ops_cdps(self) -> CustomDataPointsOperations:
+        """Return the custom-data-point façade, built on the bound transport."""
+        return CustomDataPointsOperations(transport=self._require_transport())
+
     def _require_transport(self) -> HttpTransport:
         """Return the bound transport, raising if none is set (write-back path)."""
         if self._transport is None:
@@ -393,14 +436,12 @@ class LoomStore:
         # and we drop this now-stale REST snapshot rather than overwrite the
         # newer pushed state (CDP state carries no wire timestamp to compare).
         generation = cdp._apply_generation
-        payload = await self._transport.request(method="GET", path=f"/devices/{address}/cdps/{quote(name, safe='')}")
+        summary = await self._ops_cdps.get(address=address, name=name)
         cdp = self._cdps.get((address, name))
         if cdp is None or cdp._apply_generation != generation:
             return
-        if isinstance(payload, dict):
-            state = payload.get("state")
-            if isinstance(state, dict):
-                cdp._replace_state(state=state)
+        if summary.state is not None:
+            cdp._replace_state(state=summary.state)
 
     async def refresh_data_point(self, *, address: str, channel: int, parameter: str) -> None:
         """
@@ -412,15 +453,10 @@ class LoomStore:
         """
         if self._transport is None:
             return
-        payload = await self._transport.request(
-            method="GET", path=f"/devices/{address}/channels/{channel}/data-points/{parameter}"
-        )
+        summary = await self._ops_devices.get_data_point(address=address, channel=channel, parameter=parameter)
         dp = self._data_points.get((address, channel, parameter))
         if dp is None:
             return
-        if not isinstance(payload, dict):
-            return
-        summary = DataPointSummary.model_validate(payload)
         if self._refresh_is_stale(
             current_modified_at=dp.summary.modified_at,
             incoming_modified_at=summary.modified_at,
@@ -754,7 +790,7 @@ class LoomStore:
         force: bool | None = None,
         skip_delay: bool | None = None,
         bypass: list[str] | None = None,
-    ) -> None:
+    ) -> AlarmArmAccepted:
         """
         Arm one alarm zone.
 
@@ -762,58 +798,33 @@ class LoomStore:
         side effects (exit delay, chirps) and readiness may change
         between attempts. The resulting state travels back via the
         ``alarm.panel_changed`` push.
+
+        Returns the daemon's acceptance record. This used to discard it, and
+        discarding it was the reason the delegation below could not simply
+        happen: the façade validates the response, so a caller that threw it
+        away turned an empty body into a parse error. The record says what the
+        daemon accepted — which zones, with what delay — and only the caller
+        can decide whether that matches what the user asked for.
         """
-        transport = self._require_transport()
-        body: dict[str, Any] = {"mode": mode}
-        if force is not None:
-            body["force"] = force
-        if skip_delay is not None:
-            body["skip_delay"] = skip_delay
-        if bypass is not None:
-            body["bypass"] = bypass
-        if code is not None:
-            body["code"] = code
-        await transport.request(
-            method="POST",
-            path=f"/alarm/zones/{quote(zone_id, safe='')}/arm",
-            json_body=body,
-            allow_retry=False,
+        return await self._ops_alarm.arm_zone(
+            zone_id=zone_id, mode=mode, force=force, skip_delay=skip_delay, bypass=bypass, code=code
         )
 
     async def disarm_alarm_zone(self, *, zone_id: str, code: str | None = None) -> None:
         """Disarm one alarm zone. Wire: ``POST /alarm/zones/{id}/disarm``. Not retried."""
-        transport = self._require_transport()
-        await transport.request(
-            method="POST",
-            path=f"/alarm/zones/{quote(zone_id, safe='')}/disarm",
-            json_body={"code": code} if code is not None else {},
-            allow_retry=False,
-        )
+        await self._ops_alarm.disarm_zone(zone_id=zone_id, code=code)
 
     async def silence_alarm_zone(self, *, zone_id: str, code: str | None = None) -> None:
         """Silence one zone's sounding outputs. Wire: ``POST /alarm/zones/{id}/silence``."""
-        transport = self._require_transport()
-        await transport.request(
-            method="POST",
-            path=f"/alarm/zones/{quote(zone_id, safe='')}/silence",
-            json_body={"code": code} if code is not None else {},
-            allow_retry=False,
-        )
+        await self._ops_alarm.silence_zone(zone_id=zone_id, code=code)
 
     async def acknowledge_alarm_zone(self, *, zone_id: str, code: str | None = None) -> None:
         """Acknowledge an ended incident. Wire: ``POST /alarm/zones/{id}/acknowledge``."""
-        transport = self._require_transport()
-        await transport.request(
-            method="POST",
-            path=f"/alarm/zones/{quote(zone_id, safe='')}/acknowledge",
-            json_body={"code": code} if code is not None else {},
-            allow_retry=False,
-        )
+        await self._ops_alarm.acknowledge_zone(zone_id=zone_id, code=code)
 
     async def silence_all_alarm_zones(self) -> None:
         """Silence every sounding output (break-glass). Wire: ``POST /alarm/silence-all``."""
-        transport = self._require_transport()
-        await transport.request(method="POST", path="/alarm/silence-all", allow_retry=False)
+        await self._ops_alarm.silence_all()
 
     async def reset_alarm_zone_motion(self, *, zone_id: str) -> AlarmMotionResetResult:
         """
@@ -830,11 +841,7 @@ class LoomStore:
         what that means for the user. There is no ``alarm.*`` broadcast
         for a reset pass, so the return value is the only report.
         """
-        transport = self._require_transport()
-        payload = await transport.request(
-            method="POST", path=f"/alarm/zones/{quote(zone_id, safe='')}/reset-motion", allow_retry=False
-        )
-        return AlarmMotionResetResult.model_validate(payload)
+        return await self._ops_alarm.reset_zone_motion(zone_id=zone_id)
 
     async def reset_all_alarm_motion(self) -> AlarmMotionResetResult:
         """
@@ -843,9 +850,7 @@ class LoomStore:
         Wire: ``POST /alarm/reset-motion`` (daemon ≥ 0.58.1). Not
         retried. Same counter semantics as :meth:`reset_alarm_zone_motion`.
         """
-        transport = self._require_transport()
-        payload = await transport.request(method="POST", path="/alarm/reset-motion", allow_retry=False)
-        return AlarmMotionResetResult.model_validate(payload)
+        return await self._ops_alarm.reset_all_motion()
 
     # ---- CDP attach ----
 
@@ -1268,16 +1273,8 @@ class LoomStore:
         priority: str | None = None,
     ) -> None:
         """Translate a domain ``send_value`` into a daemon REST call."""
-        transport = self._require_transport()
-        body: dict[str, Any] = {"value": value}
-        if priority is not None:
-            body["priority"] = priority
-        path = f"/devices/{address}/channels/{channel}/data-points/{parameter}/value"
-        await transport.request(
-            method="PUT",
-            path=path,
-            json_body=body,
-            allow_retry=True,  # PUT here is idempotent — the daemon serializes the write.
+        await self._ops_datapoints.set_value(
+            address=address, channel=channel, parameter=parameter, value=value, priority=priority
         )
 
     async def set_sysvar(self, *, name: str, value: Any) -> None:
@@ -1286,13 +1283,7 @@ class LoomStore:
 
         Wire: ``PUT /sysvars/{name}``.
         """
-        transport = self._require_transport()
-        await transport.request(
-            method="PUT",
-            path=f"/sysvars/{quote(name, safe='')}",
-            json_body={"value": value},
-            allow_retry=True,
-        )
+        await self._ops_hub.set_sysvar(name=name, value=value)
 
     async def execute_program(self, *, program_id: str) -> None:
         """
@@ -1302,12 +1293,7 @@ class LoomStore:
         can have side effects (cover open, notification send) where
         a double-invocation is the wrong default.
         """
-        transport = self._require_transport()
-        await transport.request(
-            method="POST",
-            path=f"/programs/{program_id}/execute",
-            allow_retry=False,
-        )
+        await self._ops_hub.execute_program(program_id=program_id)
 
     async def set_program_enabled(self, *, program_id: str, active: bool) -> None:
         """
@@ -1323,13 +1309,7 @@ class LoomStore:
         consumer that reads the program straight after the call, without
         waiting for the push.
         """
-        transport = self._require_transport()
-        await transport.request(
-            method="PATCH",
-            path=f"/programs/{quote(program_id, safe='')}",
-            json_body={"active": active},
-            allow_retry=True,
-        )
+        await self._ops_hub.set_program_enabled(program_id=program_id, active=active)
         await self.refresh_program(program_id=program_id)
 
     async def refresh_program(self, *, program_id: str) -> None:
@@ -1342,9 +1322,7 @@ class LoomStore:
         """
         if self._transport is None:
             return
-        payload = await self._transport.request(method="GET", path=f"/programs/{quote(program_id, safe='')}")
-        if isinstance(payload, dict):
-            self._upsert_program(summary=ProgramSummary.model_validate(payload))
+        self._upsert_program(summary=await self._ops_hub.get_program(program_id=program_id))
 
     async def invoke_custom_data_point(
         self,
@@ -1356,21 +1334,7 @@ class LoomStore:
         priority: str | None = None,
     ) -> None:
         """Translate a domain ``CustomDataPoint.invoke`` into a CDP-invoke REST call."""
-        transport = self._require_transport()
-        body: dict[str, Any] = {}
-        if params is not None:
-            body["params"] = params
-        if priority is not None:
-            body["priority"] = priority
-        # Always send a JSON body: the daemon parses the body strictly and
-        # rejects an empty payload with 400 "Invalid JSON: EOF", so a bare
-        # operation (turn_on without params) must POST ``{}``.
-        await transport.request(
-            method="POST",
-            path=f"/devices/{address}/cdps/{quote(name, safe='')}/{quote(operation, safe='')}",
-            json_body=body,
-            allow_retry=False,  # CDP operations may not be idempotent (e.g. cover open).
-        )
+        await self._ops_cdps.invoke(address=address, name=name, operation=operation, params=params, priority=priority)
 
     # ---- internals ----
 
@@ -1483,12 +1447,9 @@ class LoomStore:
         """Re-read one calculated DP from the daemon and apply its value."""
         if self._transport is None:
             return
-        payload = await self._transport.request(
-            method="GET", path=f"/devices/{address}/channels/{channel}/calc-dps/{name}"
-        )
+        calc = await self._ops_devices.get_calculated_data_point(address=address, channel=channel, name=name)
         dp = self._data_points.get((address, channel, name))
-        if dp is not None and isinstance(payload, dict):
-            calc = CalculatedDPSummary.model_validate(payload)
+        if dp is not None:
             if self._refresh_is_stale(
                 current_modified_at=dp.summary.modified_at,
                 incoming_modified_at=calc.modified_at,
@@ -1519,8 +1480,7 @@ class LoomStore:
         """
         if self._transport is None:
             return
-        payload = await self._transport.request(method="GET", path=f"/devices/{address}")
-        self.attach_device_detail(detail=DeviceDetail.model_validate(payload))
+        self.attach_device_detail(detail=await self._ops_devices.get_device_detail(address=address))
 
     async def update_device_firmware(self, *, address: str) -> None:
         """
@@ -1529,12 +1489,7 @@ class LoomStore:
         Wire: ``POST /devices/{addr}/firmware/update``. Never retried —
         a duplicated trigger could double-flash the device.
         """
-        transport = self._require_transport()
-        await transport.request(
-            method="POST",
-            path=f"/devices/{address}/firmware/update",
-            allow_retry=False,
-        )
+        await self._ops_devices.update_firmware(address=address)
 
     def attach_hub_catalogue(
         self,

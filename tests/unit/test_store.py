@@ -714,7 +714,17 @@ class _RacingCdpTransport:
                 }
             )
         )
-        return {"state": self._stale_state}
+        # A whole CustomDPSummary, because that is what the endpoint returns
+        # and what the operations façade validates. The old fixture answered
+        # with `{"state": …}` alone, which no daemon sends.
+        return {
+            "name": "SWITCH",
+            "category": "switch",
+            "channel_no": 1,
+            "supported_operations": ["turn_on", "turn_off"],
+            "unique_id": "loom_test_switch_1",
+            "state": self._stale_state,
+        }
 
 
 class TestCdpRefreshStaleGuard:
