@@ -296,6 +296,77 @@ class TestReplayLost:
             assert transport.last_seq == 13
 
 
+class TestHeartbeatLatency:
+    """The daemon times the round trip; the client only has to echo."""
+
+    async def test_pong_echoes_the_token(self, fake_daemon) -> None:
+        """
+        Without the echo the daemon has nothing to time and never reports one.
+
+        A bare pong stays a valid heartbeat by contract — which is exactly why
+        this went unnoticed: the connection worked, it just carried no rtt.
+        """
+
+        async def script(ws: web.WebSocketResponse, _rx: list[dict]) -> None:
+            await asyncio.sleep(0.05)
+            await ws.send_str(json.dumps({"op": "ping", "echo": "tok-42"}))
+            await asyncio.sleep(0.2)
+
+        cfg, rx = await fake_daemon(script)
+        async with WsTransport(config=cfg, initial_subscriptions=["device.*"]):
+            await asyncio.sleep(0.25)
+        pongs = [f for f in rx if f.get("op") == "pong"]
+        assert pongs, "no pong sent"
+        assert pongs[0].get("echo") == "tok-42"
+
+    async def test_pong_without_a_token_stays_bare(self, fake_daemon) -> None:
+        """An older daemon sends no token; inventing one would be noise."""
+
+        async def script(ws: web.WebSocketResponse, _rx: list[dict]) -> None:
+            await asyncio.sleep(0.05)
+            await ws.send_str(json.dumps({"op": "ping"}))
+            await asyncio.sleep(0.2)
+
+        cfg, rx = await fake_daemon(script)
+        async with WsTransport(config=cfg, initial_subscriptions=["device.*"]):
+            await asyncio.sleep(0.25)
+        pongs = [f for f in rx if f.get("op") == "pong"]
+        assert pongs and "echo" not in pongs[0]
+
+    async def test_rtt_is_read_and_reported(self, fake_daemon) -> None:
+        seen: list[float] = []
+
+        async def on_heartbeat(rtt: float) -> None:
+            seen.append(rtt)
+
+        async def script(ws: web.WebSocketResponse, _rx: list[dict]) -> None:
+            await asyncio.sleep(0.05)
+            await ws.send_str(json.dumps({"op": "ping", "echo": "t1"}))
+            await asyncio.sleep(0.05)
+            # The round trip of the PREVIOUS heartbeat rides the next ping.
+            await ws.send_str(json.dumps({"op": "ping", "echo": "t2", "rtt_ms": 12.5}))
+            await asyncio.sleep(0.2)
+
+        cfg, _rx = await fake_daemon(script)
+        async with WsTransport(config=cfg, initial_subscriptions=["device.*"], on_heartbeat=on_heartbeat) as transport:
+            await asyncio.sleep(0.3)
+            assert transport.last_rtt_ms == 12.5
+        assert seen == [12.5]
+
+    async def test_no_rtt_before_the_daemon_times_one(self, fake_daemon) -> None:
+        """The first ping of a connection has no preceding pong to measure."""
+
+        async def script(ws: web.WebSocketResponse, _rx: list[dict]) -> None:
+            await asyncio.sleep(0.05)
+            await ws.send_str(json.dumps({"op": "ping", "echo": "t1"}))
+            await asyncio.sleep(0.2)
+
+        cfg, _rx = await fake_daemon(script)
+        async with WsTransport(config=cfg, initial_subscriptions=["device.*"]) as transport:
+            await asyncio.sleep(0.25)
+            assert transport.last_rtt_ms is None
+
+
 class TestReleasedOnlySubscribe:
     """The onboarding filter is per connection, so it must ride every subscribe."""
 

@@ -15,6 +15,7 @@ from openccu_loom_client.compat.aiohomematic.model.hub.singletons import (
     AddonUpdateDp,
     AlarmMessagesSensor,
     ConnectionLatencySensor,
+    DaemonLatencySensor,
     InboxSensor,
     InstallModeDpButton,
     InstallModeDpSensor,
@@ -373,6 +374,33 @@ class TestInstallMode:
             {"interface": "BidCos-RF", "active": True, "seconds": 120},
             {"interface": "BidCos-RF", "active": False, "seconds": 0},
         ]
+
+
+class TestDaemonLatencySensor:
+    """The client↔daemon leg, which no REST surface reports."""
+
+    def test_it_is_a_millisecond_float_distinct_from_the_ccu_one(self) -> None:
+        """
+        Two sensors, two legs, unrelated causes.
+
+        A slow reverse proxy between here and the daemon is invisible in the
+        CCU figure, and a struggling CCU is invisible in this one — so they
+        must not share a name or a unique id.
+        """
+        store = _store()
+        daemon = DaemonLatencySensor(store=store)
+        ccu = ConnectionLatencySensor(store=store)
+        assert daemon.unit == "ms"
+        assert daemon.unique_id != ccu.unique_id
+        assert "daemon" in daemon.unique_id
+
+    def test_value_round_trips(self) -> None:
+        dp = DaemonLatencySensor(store=_store())
+        assert dp.value is None  # nothing timed yet
+        assert dp.update_value(value=12.5) is True
+        assert dp.value == 12.5
+        # An unchanged reading must not churn the HA bus.
+        assert dp.update_value(value=12.5) is False
 
 
 class TestSecurityEntityContext:

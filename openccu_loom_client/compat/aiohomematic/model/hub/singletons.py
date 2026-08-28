@@ -371,6 +371,37 @@ class ConnectionLatencySensor(HubSingletonDp):
         )
 
 
+class DaemonLatencySensor(HubSingletonDp):
+    """
+    Round-trip latency between this client and the daemon, in milliseconds.
+
+    Distinct from :class:`ConnectionLatencySensor`, which reports the
+    daemon-to-CCU leg. The two have unrelated causes: a slow reverse proxy, a
+    congested wireless link or an overloaded host between here and the daemon
+    does not show up in the CCU figure at all, and a struggling CCU does not
+    show up here.
+
+    Nothing on this side times anything. The daemon stamps a token onto each
+    heartbeat ping, the transport echoes it back, and the round trip the daemon
+    computes against its own clock arrives on the following ping — so the two
+    clocks need no agreement. Absent until a connection has completed its
+    second heartbeat, and against a daemon that does not time its pings.
+    """
+
+    _data_type: ClassVar[str | None] = "FLOAT"
+    _unit: ClassVar[str | None] = "ms"
+
+    def __init__(self, *, store: LoomStore) -> None:
+        """Bind the daemon-latency singleton to the store."""
+        super().__init__(
+            store=store,
+            name="daemon_latency",
+            parameter_slug="daemon-latency",
+            translation_key="daemon_latency",
+            name_key="discovery.daemon_latency",
+        )
+
+
 class LastEventAgeSensor(HubSingletonDp):
     """Seconds since the last backend event was received."""
 
@@ -1155,6 +1186,7 @@ class MetricsDpType(NamedTuple):
     system_health: SystemHealthSensor
     connection_latency: ConnectionLatencySensor
     last_event_age: LastEventAgeSensor
+    daemon_latency: DaemonLatencySensor
 
 
 class ConnectivityDpType(NamedTuple):
@@ -1173,6 +1205,7 @@ __all__ = [
     "ConnectionLatencySensor",
     "ConnectivityDpType",
     "DaemonConnectionDp",
+    "DaemonLatencySensor",
     "HubSingletonDp",
     "InboxSensor",
     "InstallModeDpButton",

@@ -33,6 +33,7 @@ from openccu_loom_client.compat.aiohomematic.model.hub.singletons import (
     ConnectionLatencySensor,
     ConnectivityDpType,
     DaemonConnectionDp,
+    DaemonLatencySensor,
     InboxSensor,
     InstallModeDpButton,
     InstallModeDpSensor,
@@ -50,6 +51,7 @@ from openccu_loom_client.compat.aiohomematic.model.hub.singletons import (
 )
 from openccu_loom_client.events import (
     AddonUpdateStateChangedEvent,
+    DaemonLatencyChangedEvent,
     DaemonStatusChangedEvent,
     HubAlarmMessageCountChangedEvent,
     HubConnectivityChangedEvent,
@@ -368,6 +370,7 @@ class _HubCoordinator:
             system_health=SystemHealthSensor(store=store),
             connection_latency=ConnectionLatencySensor(store=store),
             last_event_age=LastEventAgeSensor(store=store),
+            daemon_latency=DaemonLatencySensor(store=store),
         )
         await self._build_security_singletons(store=store)
         try:
@@ -798,6 +801,9 @@ class _HubCoordinator:
         group.subscribe(event_type=AddonUpdateStateChangedEvent, handler=self._on_addon_update_push)
         group.subscribe(event_type=InstallModeChangedEvent, handler=self._on_install_mode_push)
         group.subscribe(event_type=DaemonStatusChangedEvent, handler=self._on_daemon_status_push)
+        # The client↔daemon round trip, which no REST surface reports: it is
+        # measured across the heartbeat the WS connection already runs.
+        group.subscribe(event_type=DaemonLatencyChangedEvent, handler=self._on_daemon_latency_push)
         # The Security & Safety plane (daemon ≥ 0.54.0 / api 5.1.0). Before it
         # existed the domain had no push at all, so a smoke alarm reached a
         # consumer whenever it next happened to read GET /security.
@@ -821,6 +827,18 @@ class _HubCoordinator:
             "last_event_age": metrics.last_event_age,
             "last_event_age_seconds": metrics.last_event_age,
         }.get(metric)
+
+    async def _on_daemon_latency_push(self, event: DaemonLatencyChangedEvent, /) -> None:
+        """
+        Apply the round trip the daemon reported for the last heartbeat.
+
+        Daemon-level, not central-scoped: the distance is to the daemon, so it
+        is the same for every central it serves.
+        """
+        if (metrics := self._metrics_dps) is None:
+            return
+        if metrics.daemon_latency.update_value(value=event.latency_ms):
+            await self._publish_changed(dp=metrics.daemon_latency)
 
     async def _on_daemon_status_push(self, event: DaemonStatusChangedEvent, /) -> None:
         """

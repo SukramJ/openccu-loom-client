@@ -137,6 +137,36 @@ class AuthFailedEvent(LoomEvent):
     type_id: ClassVar[str] = "client.auth_failed"
 
 
+@dataclass(slots=True, kw_only=True)
+class DaemonLatencyChangedEvent(LoomEvent):
+    """
+    The daemon reported the round-trip time of the last heartbeat.
+
+    The client↔daemon distance, which nothing else measures: the hub's
+    connection-latency metric covers the daemon↔CCU leg, and the two have
+    different causes — a slow reverse proxy or a congested link on this side is
+    invisible in that one.
+
+    Arrives roughly once per heartbeat while the stream is up, and never on a
+    daemon that does not time its pings.
+    """
+
+    latency_ms: float
+    type_id: ClassVar[str] = "client.daemon_latency_changed"
+
+
+def new_daemon_latency_changed_event(*, latency_ms: float) -> DaemonLatencyChangedEvent:
+    """Construct a ready-to-publish DaemonLatencyChangedEvent."""
+    return DaemonLatencyChangedEvent(
+        seq=0,
+        kind=Kind.change,
+        ts=_now(),
+        topic=None,
+        type=DaemonLatencyChangedEvent.type_id,
+        latency_ms=latency_ms,
+    )
+
+
 def new_connection_state_changed_event(
     *,
     connected: bool,
