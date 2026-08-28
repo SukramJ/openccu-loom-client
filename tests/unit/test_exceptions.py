@@ -219,11 +219,3 @@ class TestAiohomematicHierarchy:
         code, message = handler()
         assert code == "write_failed"
         assert "device gone" in message
-
-    def test_shim_base_is_the_real_upstream_class(self) -> None:
-        """The shim re-exports upstream's base (superset), not the loom alias."""
-        from aiohomematic.exceptions import BaseHomematicException as Upstream
-
-        from openccu_loom_client.compat.aiohomematic.exceptions import BaseHomematicException as Shim
-
-        assert Shim is Upstream

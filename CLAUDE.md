@@ -61,7 +61,9 @@ Data flows in one direction at runtime: **daemon → transport → typed event �
 
 ### The bootstrap cost
 
-`bootstrap()` is N×M REST calls (one detail call per device, one data-point call per channel) — the dominant cost on large CCUs. This matches the current unstreamed daemon contract; a streamed-snapshot endpoint is a deferred daemon-side ask.
+`bootstrap()` used to be N×M REST calls — one detail call per device, one data-point call per channel. The M is closed: the nested snapshot carries the channel data points (`include=data_points`, wired at `client.py:456-472`). The N is one `GET /devices/{address}` per device, still made at `client.py:665` — and no longer necessary, because daemon api 7.23.0 lifts `firmware` and `availability` onto `DeviceSummary`. Removing it is tracked as #127.
+
+Two related capabilities exist and are deliberately unused. The daemon serves `/snapshot` as an NDJSON stream under `Accept: application/x-ndjson` (see the note in `operations/system.py`); this client consumes the nested JSON envelope instead. And `GET /devices` and `GET /snapshot` both accept `?central=`, which would filter server-side; the client fetches the whole fleet and filters in the compat layer. On a daemon fronting two CCUs that means each Home Assistant entry carries the other CCU's device tree. Neither is a daemon gap.
 
 ### The compat shim — `compat/aiohomematic/`
 

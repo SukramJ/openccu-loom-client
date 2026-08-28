@@ -11,17 +11,20 @@ from openccu_loom_client import BasicAuth, BearerAuth, LoomConfig, SessionAuth
 
 
 class TestLoomConfig:
+    # Cleartext and TLS default to the same port: the daemon serves one
+    # listener (ADR 0044), so TLS is a property of it rather than a second
+    # port. Both tests are kept so a future split fails loudly here.
     def test_default_port_for_tls(self) -> None:
         cfg = LoomConfig(host="x", auth=BearerAuth(token="t"))
-        assert cfg.port == 8443
-        assert cfg.http_base_url == "https://x:8443/api/v1"
-        assert cfg.ws_url == "wss://x:8443/api/v1/events"
+        assert cfg.port == 8119
+        assert cfg.http_base_url == "https://x:8119/api/v1"
+        assert cfg.ws_url == "wss://x:8119/api/v1/events"
 
     def test_default_port_for_cleartext(self) -> None:
         cfg = LoomConfig(host="x", tls=False, auth=BearerAuth(token="t"))
-        assert cfg.port == 8080
-        assert cfg.http_base_url == "http://x:8080/api/v1"
-        assert cfg.ws_url == "ws://x:8080/api/v1/events"
+        assert cfg.port == 8119
+        assert cfg.http_base_url == "http://x:8119/api/v1"
+        assert cfg.ws_url == "ws://x:8119/api/v1/events"
 
     def test_explicit_port_overrides_default(self) -> None:
         cfg = LoomConfig(host="x", port=9000, auth=BearerAuth(token="t"))
@@ -30,7 +33,7 @@ class TestLoomConfig:
     def test_create_central_url_omits_api_path(self) -> None:
         # Mirrors aiohomematic: scheme + host + port, no base_path.
         cfg = LoomConfig(host="x", auth=BearerAuth(token="t"))
-        assert cfg.create_central_url() == "https://x:8443"
+        assert cfg.create_central_url() == "https://x:8119"
 
     def test_create_central_url_cleartext(self) -> None:
         cfg = LoomConfig(host="x", port=9000, tls=False, auth=BearerAuth(token="t"))
