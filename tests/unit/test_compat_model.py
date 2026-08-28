@@ -371,6 +371,37 @@ class TestCustomDeepParity:
         assert dp.has_color_temperature is True
         assert dp.level_to_brightness(1.0) == 255
 
+    def test_ha_capability_names_resolve_to_the_daemons_vocabulary(self) -> None:
+        """
+        homematicip_local spells two light capabilities differently to the daemon.
+
+        `light.py:211/213` read `capabilities.hs_color` and
+        `capabilities.color_temperature`; the daemon publishes `color` and
+        `color_temp` (its `CustomDPCapability` vocabulary). Without the alias
+        both read False, which is indistinguishable from a device that lacks
+        the feature.
+        """
+        dp, _ = _cdp_instance(
+            kind="light_color",
+            category="light",
+            capabilities={"color": True, "color_temp": True, "dimmable": True},
+            state={"state": "ON", "brightness": 255},
+        )
+        assert dp.capabilities.hs_color is True
+        assert dp.capabilities.color_temperature is True
+        assert dp.capabilities.brightness is True
+        # An unknown name still answers False rather than raising.
+        assert dp.capabilities.nonexistent is False
+
+    def test_brightness_pct_truncates_like_aiohomematic(self) -> None:
+        """Aiohomematic uses `int(level * 100)`; the daemon sends 0-255 instead."""
+        dp, _ = _cdp_instance(
+            kind="light", category="light", capabilities={"dimmable": True}, state={"state": "ON", "brightness": 128}
+        )
+        assert dp.brightness == 128
+        assert dp.brightness_pct == 50
+        assert dp.group_brightness_pct is None
+
     async def test_light_turn_on_with_brightness_invokes_set_level(self) -> None:
         dp, transport = _cdp_instance(kind="light", category="light", state={"state": "OFF"})
         await dp.turn_on(brightness=200)

@@ -61,14 +61,28 @@ def custom_unique_id(*, serial_suffix: str, device_address: str, channel_no: int
     return canonical_unique_id(serial_suffix=serial_suffix, address=f"{device_address}:{channel_no}")
 
 
-# HA-side capability names whose daemon flag is named differently —
-# HA checks ``capabilities.profiles`` (daemon: ``profile``, drives
-# ClimateEntityFeature.PRESET_MODE), ``capabilities.brightness``
-# (daemon: ``dimmable``, drives ColorMode.BRIGHTNESS) and
-# ``capabilities.tones`` (daemon: ``acoustic``, drives the siren
-# TONES feature).
+# HA-side capability names whose daemon flag is named differently. The
+# daemon's own names are published as the open ``CustomDPCapability``
+# vocabulary in its ``assets/schemas/enums.json``; these are the five where
+# homematicip_local spells the same feature another way:
+#
+#   profiles          → profile     (ClimateEntityFeature.PRESET_MODE)
+#   brightness        → dimmable    (ColorMode.BRIGHTNESS)
+#   tones             → acoustic    (siren TONES)
+#   hs_color          → color       (light.py:211)
+#   color_temperature → color_temp  (light.py:213)
+#
+# The last two are why this table is not merely cosmetic. ``__getattr__``
+# answers False for anything it does not know, so an unaliased name is
+# indistinguishable from a capability the device lacks. Both light checks
+# are written ``data_point.has_hs_color or capabilities.hs_color``, and the
+# first half already resolves correctly here — so the miss is latent today
+# rather than user-visible, and it stops being latent the moment the
+# precedence branch is dropped or reordered.
 _CAPABILITY_ALIASES: dict[str, str] = {
     "brightness": "dimmable",
+    "color_temperature": "color_temp",
+    "hs_color": "color",
     "profiles": "profile",
     "tones": "acoustic",
 }
@@ -324,6 +338,28 @@ class CustomDpDimmer(_CustomEntitySurface):
         return None
 
     @property
+    def brightness_pct(self) -> int | None:
+        """
+        Return the brightness as a percentage (0-100).
+
+        aiohomematic derives this from its 0.0-1.0 level with
+        ``int(level * 100)`` (``model/custom/mixins.py:287``) — truncating,
+        not rounding. The daemon sends a 0-255 brightness instead
+        (``internal/model/custom/light/payload.go:236``), so the same
+        truncation is applied to that scale.
+        """
+        if (brightness := self.brightness) is None:
+            return None
+        return int(brightness / 255 * 100)
+
+    @property
+    def group_brightness_pct(self) -> int | None:
+        """Return the group brightness as a percentage; ``None``, as :attr:`group_brightness` is."""
+        if (brightness := self.group_brightness) is None:
+            return None
+        return int(brightness / 255 * 100)
+
+    @property
     def has_color_temperature(self) -> bool:
         """Return whether the light supports colour temperature."""
         return self.capabilities.color_temp
@@ -477,8 +513,19 @@ class CustomDpSoundPlayerLed(CustomDpDimmer):
 # ---- cover / blind / garage ----
 
 
-class CustomDpCover(_CustomEntitySurface):
-    """Cover (shutter) CDP."""
+class _CoverSurface(_CustomEntitySurface):
+    """
+    The position/stop surface shared by the cover and garage twins.
+
+    aiohomematic declares this surface on ``CustomDpCover`` and on
+    ``CustomDpGarage`` independently — there, a garage is a *sibling* of a
+    cover, not a subclass of one (``model/custom/cover.py``). That shape is
+    load-bearing for the consumer: ``homematicip_local`` checks its cover
+    tuple before its garage tuple (``cover.py:74`` then ``:81``), so a garage
+    that were a cover would never reach the garage branch.
+
+    This intermediate keeps the shape without duplicating the body.
+    """
 
     _category: ClassVar[DataPointCategory] = DataPointCategory.Cover
 
@@ -554,6 +601,10 @@ class CustomDpCover(_CustomEntitySurface):
         await self.invoke(operation="set_position", params={"position": position / 100.0})
 
 
+class CustomDpCover(_CoverSurface):
+    """Cover (shutter) CDP."""
+
+
 class CustomDpBlind(CustomDpCover):
     """Cover with a tilt axis."""
 
@@ -607,11 +658,22 @@ class CustomDpIpBlind(CustomDpBlind):
         return str(val) if val is not None else None
 
 
-class CustomDpGarage(CustomDpCover):
-    """Garage-door CDP."""
+class CustomDpGarage(_CoverSurface):
+    """
+    Garage-door CDP.
 
-    async def ventilate(self) -> None:
-        """Move the garage door to its ventilation position."""
+    A sibling of :class:`CustomDpCover`, not a subclass — see
+    :class:`_CoverSurface`.
+    """
+
+    async def vent(self) -> None:
+        """
+        Move the garage door to its ventilation position.
+
+        Named for aiohomematic's ``CustomDpGarage.vent``, which is also the
+        member ``GarageDataPointProtocol`` requires. The daemon's service is
+        called ``ventilate``, so the wire name stays as it is.
+        """
         await self.invoke(operation="ventilate")
 
 
@@ -677,6 +739,23 @@ class BaseCustomDpClimate(_CustomEntitySurface):
         """Return the temperature offset from the ``temperature_offset`` state key, or ``None``."""
         val = self._state.get("temperature_offset")
         return str(val) if val is not None else None
+
+    @property
+    def temperature_unit(self) -> str:
+        """Return the temperature unit; always Celsius, as in aiohomematic."""
+        return "°C"
+
+    @property
+    def min_max_value_not_relevant_for_manu_mode(self) -> bool:
+        """
+        Return whether min/max are irrelevant in manual mode.
+
+        The daemon carries no such field — ``grep`` over ``internal/`` and
+        ``assets/openapi.yaml`` finds nothing — so this is a protocol-tail
+        member with no wire source. aiohomematic falls back to ``False`` when
+        its data point is absent, and that is the honest answer here too.
+        """
+        return False
 
     @property
     def min_temp(self) -> float:

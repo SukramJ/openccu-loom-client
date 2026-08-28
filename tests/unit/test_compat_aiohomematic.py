@@ -418,14 +418,22 @@ class TestCustomDpMarkers:
 
         assert issubclass(CustomDpSwitch, CustomDataPoint)
 
-    def test_cover_blind_garage_share_lineage(self) -> None:
+    def test_cover_blind_garage_lineage_matches_aiohomematic(self) -> None:
         from openccu_loom_client.compat.aiohomematic.model.custom import (
             CustomDpBlind,
             CustomDpCover,
             CustomDpGarage,
             CustomDpIpBlind,
+            _CoverSurface,
         )
 
         assert issubclass(CustomDpBlind, CustomDpCover)
         assert issubclass(CustomDpIpBlind, CustomDpBlind)
-        assert issubclass(CustomDpGarage, CustomDpCover)
+        # A garage is a *sibling* of a cover, exactly as in aiohomematic
+        # (`CustomDpGarage(PositionMixin, CustomDataPoint, ...)`), not a
+        # subclass. homematicip_local checks its cover tuple before its
+        # garage tuple, so a garage that were a cover would never reach the
+        # garage branch.
+        assert not issubclass(CustomDpGarage, CustomDpCover)
+        assert issubclass(CustomDpGarage, _CoverSurface)
+        assert issubclass(CustomDpCover, _CoverSurface)
