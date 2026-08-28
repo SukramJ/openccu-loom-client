@@ -48,6 +48,29 @@
   and keeps its name: it is this package's own structural twin of
   aiohomematic's type, not a wire model.
 
+- **The store talks to the daemon through the operation façades.** All
+  eighteen of its own request calls are gone; the URLs live in one place now
+  instead of two. Seventeen of the eighteen path literals had existed
+  byte-identically in both, retry flag included, and a URL maintained twice
+  drifts.
+
+  Two things change for callers. `LoomStore.arm_alarm_zone` returns the
+  daemon's `AlarmArmAccepted` record instead of `None` — it always sent one
+  (`POST /alarm/zones/{id}/arm` answers 200 with a body) and this client
+  always threw it away, so nothing could see which zones were accepted or
+  what exit delay was set. And four refresh paths — a custom data point, a
+  data point, a program, a calculated data point — now raise on a malformed
+  response where they used to return quietly. A refresh that silently does
+  nothing is indistinguishable from one that worked, which is the wrong
+  failure to have on a path a user triggered.
+
+  A bug went with it that nothing had hit yet: `custom_data_points.invoke`
+  sent no request body for an operation with no parameters, and the daemon
+  answers a bodyless POST with `400 Invalid JSON: EOF`. Every parameterless
+  operation — `turn_on`, a cover's `open`, a siren's `stop` — would have
+  failed through that façade. The store had always sent `{}` and said why; the
+  façade now does too.
+
 - **A bootstrap is one request.** It used to be one snapshot plus one
   `GET /devices/{address}` per device — on a 200-device CCU, 201 requests
   before the first entity appeared. Daemon api 7.23.0 puts `firmware` and
