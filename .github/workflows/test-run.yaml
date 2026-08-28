@@ -18,6 +18,15 @@ jobs:
     name: Python ${{ matrix.python-version }}
     steps:
       - uses: actions/checkout@v7
+      # The daemon's `assets/wsapi.json` is the source the broadcast drift
+      # guard compares against. Without it that test skips, which is how a
+      # new daemon broadcast could land unbound without anything going red.
+      - name: Check out the daemon for its wire contract
+        uses: actions/checkout@v7
+        with:
+          repository: SukramJ/openccu-loom
+          path: openccu-loom
+          persist-credentials: false
       - name: Set up Python
         uses: actions/setup-python@v7.0.0
         with:
@@ -32,6 +41,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements_test.txt
       - name: Run tests with coverage
+        env:
+          OPENCCU_LOOM_REPO: ${{ github.workspace }}/openccu-loom
         run: |
           pytest tests/ --cov=openccu_loom_client --cov-report=xml --cov-report=term-missing
       - name: Upload coverage to Codecov

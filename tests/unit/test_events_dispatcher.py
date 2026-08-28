@@ -93,13 +93,23 @@ class TestRegistryCoverage:
         """
         wire_broadcasts = _broadcasts_in_wsapi()
         client_bindings = known_event_types()
-        # We bind a couple of payloads ahead of the broadcast being
-        # advertised (DeviceCreated/Removed land in 0.1.2 but aren't
-        # in wsapi.json yet); the test only checks the reverse.
+
+        # Checked in both directions. It used to check one, because this
+        # package bound DeviceCreated/Removed ahead of the daemon
+        # advertising them — a situation that has not held for a long time:
+        # measured against daemon 0.67.0 the two sets are congruent, 46/46,
+        # with an empty difference each way. A binding with no broadcast is
+        # as much of a drift signal as a broadcast with no binding, and it
+        # is the one that survives a daemon *removing* an event.
         missing = wire_broadcasts - client_bindings
         assert missing == set(), (
             f"daemon advertises {len(wire_broadcasts)} broadcasts but "
             f"our event registry is missing bindings for: {sorted(missing)}"
+        )
+        orphaned = client_bindings - wire_broadcasts
+        assert orphaned == set(), (
+            f"our event registry binds {len(client_bindings)} types but the daemon "
+            f"advertises no broadcast for: {sorted(orphaned)}"
         )
 
 
