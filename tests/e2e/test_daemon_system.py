@@ -20,21 +20,6 @@ from openccu_loom_client import LoomClient
 pytestmark = pytest.mark.e2e
 
 
-async def test_get_config(client_no_ccu: LoomClient) -> None:
-    config = await client_no_ccu.config_admin.get_config()
-    assert config is not None
-
-
-async def test_get_config_schema(client_no_ccu: LoomClient) -> None:
-    # Previously xfail on a presumed wire-contract gap. Verified against the
-    # daemon source: the response is ``{sections, fields}`` which validates
-    # against SchemaResponse (the only mismatch is an undocumented per-field
-    # ``default`` in openapi.yaml, which Pydantic ignores). See the
-    # deterministic parse check in test_operations_admin.py.
-    schema = await client_no_ccu.config_admin.get_schema()
-    assert schema is not None
-
-
 async def test_get_diagnostics(client_no_ccu: LoomClient) -> None:
     diag = await client_no_ccu.system.get_diagnostics()
     assert isinstance(diag, dict)
@@ -63,19 +48,9 @@ async def test_system_status(client_no_ccu: LoomClient) -> None:
     assert isinstance(status, dict)
 
 
-async def test_auth_me(client_no_ccu: LoomClient) -> None:
-    identity = await client_no_ccu.auth.me()
-    assert identity is not None
-
-
 async def test_visibility_unignore(client_no_ccu: LoomClient) -> None:
     unignore = await client_no_ccu.visibility.get_unignore()
     assert unignore is not None
-
-
-async def test_matter_status(client_no_ccu: LoomClient) -> None:
-    status = await client_no_ccu.matter.get_status()
-    assert status is not None
 
 
 async def test_audit_log(client_no_ccu: LoomClient) -> None:

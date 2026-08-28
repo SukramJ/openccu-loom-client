@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
-from openccu_loom_types.rest import Availability, DeviceSummary, Firmware
+from openccu_loom_types.rest import DeviceAvailability, DeviceFirmware, DeviceSummary
 
 from openccu_loom_client.model.device_client import DeviceClient
 from openccu_loom_client.operations.devices import DevicesOperations
@@ -94,8 +94,8 @@ class Device:
         """Wrap the given device summary against the owning store."""
         self._summary = summary
         self._store = store
-        self._firmware: Firmware | None = None
-        self._availability: Availability | None = None
+        self._firmware: DeviceFirmware | None = None
+        self._availability: DeviceAvailability | None = None
         self._client: DeviceClient | None = None
         self._forced_availability: Any = None
 
@@ -188,7 +188,7 @@ class Device:
         return tuple(self._summary.rooms or ())
 
     @property
-    def firmware_detail(self) -> Firmware | None:
+    def firmware_detail(self) -> DeviceFirmware | None:
         """Return the firmware detail record, or ``None`` until detail is attached."""
         return self._firmware
 
@@ -222,7 +222,7 @@ class Device:
         )
 
     @property
-    def availability_detail(self) -> Availability | None:
+    def availability_detail(self) -> DeviceAvailability | None:
         """Return the raw wire availability record, or ``None`` until detail is attached."""
         return self._availability
 
@@ -466,8 +466,8 @@ class Device:
     def _attach_detail(
         self,
         *,
-        firmware: Firmware | None,
-        availability: Availability | None,
+        firmware: DeviceFirmware | None,
+        availability: DeviceAvailability | None,
     ) -> None:
         """Attach the detail-only firmware and availability records."""
         self._firmware = firmware

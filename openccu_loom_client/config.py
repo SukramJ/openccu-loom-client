@@ -12,12 +12,24 @@ if TYPE_CHECKING:
     from openccu_loom_client.auth import AuthMethod
 
 
-# Default daemon ports. The daemon's default config publishes:
-# - HTTP REST + WS on 8080 (cleartext)
-# - HTTPS REST + WSS on 8443 (TLS)
-# See `config.example.yaml` in the daemon repo.
-DEFAULT_HTTP_PORT = 8080
-DEFAULT_HTTPS_PORT = 8443
+# The daemon's default port, for cleartext and TLS alike.
+#
+# It serves ONE listener: `internal/config/bootstrap.go:148` and
+# `internal/config/config.go:1915` both default `North.REST.Listen` to
+# ":8119", the Home Assistant add-on's `rest_port` option defaults to 8119,
+# and ADR 0044 records why the second listener was retired — HA Ingress does
+# not forward arbitrary ports, so REST, SPA and the bootstrap surface were
+# collapsed onto one. TLS is a property of that listener, not a second port.
+#
+# The two names are kept because `LoomConfig` picks between them, and because
+# a future split would want them back; today they hold the same value.
+#
+# Previously 8080/8443, citing a `config.example.yaml` that does not exist in
+# the daemon repository. 8080 was the pre-0.13.0 default — the daemon's
+# add-on changelog records the move — and 8443 has no counterpart in the
+# daemon at all.
+DEFAULT_HTTP_PORT = 8119
+DEFAULT_HTTPS_PORT = 8119
 
 # Daemon's REST surface is mounted at /api/v1 per `assets/openapi.yaml`.
 DEFAULT_BASE_PATH = "/api/v1"

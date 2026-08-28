@@ -43,6 +43,8 @@ import contextlib
 import logging
 from typing import TYPE_CHECKING, Final, Self
 
+from openccu_loom_types.rest import DeviceDetail
+
 from openccu_loom_client.bridge import bind_ws_events_to_store
 from openccu_loom_client.capabilities import Capability
 from openccu_loom_client.events import (
@@ -59,24 +61,17 @@ from openccu_loom_client.events import (
 from openccu_loom_client.exceptions import BaseLoomException, LoomIncompatibleVersionError, LoomNotFoundError
 from openccu_loom_client.operations import (
     AlarmOperations,
-    AuthOperations,
     BackupOperations,
-    CentralsOperations,
-    ConfigOperations,
     CustomDataPointsOperations,
     DataPointsOperations,
     DevicesOperations,
     DiagnosticsOperations,
-    GroupsOperations,
     HubOperations,
     I18nOperations,
     LinksOperations,
-    MatterOperations,
     SchedulesOperations,
     SecurityOperations,
-    SessionsOperations,
     SystemOperations,
-    UsersOperations,
     VisibilityOperations,
 )
 from openccu_loom_client.store import LoomStore
@@ -85,7 +80,7 @@ from openccu_loom_client.transport import HttpTransport, WsTransport
 if TYPE_CHECKING:
     from types import TracebackType
 
-    from openccu_loom_types.rest import DataPointSummary, DeviceChannel, Health, Info, Readiness
+    from openccu_loom_types.rest import Channel, DataPointSummary, DeviceChannel, DeviceSummary, Health, Info, Readiness
 
     from openccu_loom_client.config import LoomConfig
 
@@ -155,6 +150,25 @@ def _is_cache_restore(*, source: str | None) -> bool:
     return source is not None and source.upper() == _SOURCE_CACHE_RESTORE
 
 
+def _channel_map(
+    *,
+    device_channels: list[DeviceChannel] | None,
+) -> dict[str, list[Channel]]:
+    """
+    Index a nested snapshot's ``device_channels`` by device address.
+
+    ``Channel`` is a subclass of ``ChannelSummary`` carrying every field the
+    detail response's channel list carries, plus the nested data points — so
+    a snapshot expanded with ``include=channels`` supplies everything
+    :meth:`LoomStore.attach_device_detail` needs, and no per-device
+    ``GET /devices/{address}`` is required.
+
+    Empty when the daemon returned no nested data; the caller then falls
+    back to the per-device detail call.
+    """
+    return {entry.device_address: list(entry.channels or ()) for entry in device_channels or ()}
+
+
 def _channel_dp_map(
     *,
     device_channels: list[DeviceChannel] | None,
@@ -222,7 +236,6 @@ class LoomClient:
         self.system: Final = SystemOperations(transport=self._http)
         self.schedules: Final = SchedulesOperations(transport=self._http)
         self.links: Final = LinksOperations(transport=self._http)
-        self.groups: Final = GroupsOperations(transport=self._http)
         self.alarm: Final = AlarmOperations(transport=self._http)
         # The Security & Safety domain runs with or without the alarm
         # engine, so it is wired unconditionally next to it rather than
@@ -235,14 +248,8 @@ class LoomClient:
         self.i18n: Final = I18nOperations(transport=self._http)
         # Admin / ops surface — present for completeness; HA typically
         # touches only auth (token provisioning) and diagnostics.
-        self.auth: Final = AuthOperations(transport=self._http)
-        self.users: Final = UsersOperations(transport=self._http)
-        self.centrals: Final = CentralsOperations(transport=self._http)
-        self.config_admin: Final = ConfigOperations(transport=self._http)
         self.diagnostics: Final = DiagnosticsOperations(transport=self._http)
         self.backup: Final = BackupOperations(transport=self._http)
-        self.sessions: Final = SessionsOperations(transport=self._http)
-        self.matter: Final = MatterOperations(transport=self._http)
         self.visibility: Final = VisibilityOperations(transport=self._http)
 
     # ---- public state access ----
@@ -438,13 +445,15 @@ class LoomClient:
         1. ``GET /snapshot?include=data_points`` → registers every device
            and, in the same response, the nested channels + data points
            (:attr:`Snapshot.device_channels`).
-        2. For each device: ``GET /devices/{addr}`` to attach the
-           firmware / availability detail the flat snapshot omits (and
-           the authoritative channel list).
+        2. For each device: attach the channel list from that same
+           response. Since daemon api 7.23.0 the summary also carries
+           ``firmware`` and ``availability``, so nothing is left that
+           would need a per-device ``GET /devices/{addr}``.
         3. Optional (``fetch_data_points=True``): attach each channel's
            DPs from the nested snapshot — no extra REST call. If the
-           daemon did not return ``device_channels`` (older daemon), fall
-           back to one ``GET …/data-points`` per channel.
+           daemon did not return ``device_channels``, fall back to the
+           per-device detail call and one ``GET …/data-points`` per
+           channel.
         4. Attach the alarm-panel catalogue (``GET /alarm/panels`` +
            ``GET /alarm/state``). A 404 means the daemon's alarm
            subsystem is disabled (its routes are unmounted; there is no
@@ -453,13 +462,14 @@ class LoomClient:
            device the store now knows, so HA-side spawn-entities
            subscribers fire once at the end of bootstrap.
 
-        The nested snapshot collapses the formerly dominant cost — one
-        ``GET …/data-points`` per channel (N*M REST calls) — into the
-        single snapshot round trip. The per-device detail call (step 2)
-        stays: ``firmware`` / the rich ``availability`` object are
-        detail-only, not carried by the snapshot's device summaries.
+        A bootstrap is therefore one request. The M — one
+        ``GET …/data-points`` per channel — went with the nested snapshot;
+        the N — one detail call per device — goes here, because the fields
+        that forced it are on the summary now. The fallback path is kept
+        rather than deleted: it costs one branch and it is what answers a
+        daemon that ignores ``include``.
         """
-        include = "data_points" if fetch_data_points else None
+        include = "channels,data_points" if fetch_data_points else "channels"
         snapshot = await self.system.get_snapshot(include=include, released_only=self._config.released_only)
         self._store.load_snapshot(snapshot=snapshot)
 
@@ -470,8 +480,18 @@ class LoomClient:
         # Empty when the daemon ignored ``include`` — bootstrap then falls
         # back to the per-channel data-point fetch (older-daemon path).
         dp_map = _channel_dp_map(device_channels=snapshot.device_channels) if fetch_data_points else {}
+        channel_map = _channel_map(device_channels=snapshot.device_channels)
 
         for device_summary in snapshot.devices:
+            if (channels := channel_map.get(device_summary.address)) is not None:
+                self._attach_device_from_snapshot(
+                    summary=device_summary,
+                    channels=channels,
+                    channel_data_points=dp_map.get(device_summary.address) if fetch_data_points else None,
+                )
+                continue
+            # The daemon returned no nested channels for this device — read it
+            # the long way round.
             await self._fetch_device_into_store(
                 address=device_summary.address,
                 fetch_data_points=fetch_data_points,
@@ -642,6 +662,33 @@ class LoomClient:
         task = asyncio.create_task(coro, name=name)
         self._bg_tasks.add(task)
         task.add_done_callback(self._bg_tasks.discard)
+
+    def _attach_device_from_snapshot(
+        self,
+        *,
+        summary: DeviceSummary,
+        channels: list[Channel],
+        channel_data_points: Mapping[int, list[DataPointSummary]] | None,
+    ) -> None:
+        """
+        Attach one device's graph from the snapshot alone — no REST call.
+
+        ``DeviceDetail`` extends ``DeviceSummary`` by exactly one field,
+        ``channels``, and a snapshot expanded with ``include=channels``
+        carries those. So the detail response can be assembled here rather
+        than fetched, which is what turns an N+1-request bootstrap into a
+        single request.
+        """
+        detail = DeviceDetail(**summary.model_dump(), channels=channels)
+        self._store.attach_device_detail(detail=detail)
+        if channel_data_points is None:
+            return
+        for channel in channels:
+            self._store.attach_channel_data_points(
+                device_address=summary.address,
+                channel_number=channel.number,
+                data_points=list(channel_data_points.get(channel.number, ())),
+            )
 
     async def _fetch_device_into_store(
         self,

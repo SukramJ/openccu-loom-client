@@ -57,6 +57,33 @@ Currently `xfail`. Each needs harness work rather than production code.
 
 ## Open in this repository
 
+### Architecture review, 2026-08-28 — sequenced work
+
+A two-round review measured the six coupled repositories against the four
+deployment goals and recorded its result as a decision document. The
+**sequenced** work lives in issues, not here — a step's state is open / in
+progress / done, and a Markdown list cannot carry that without going stale the
+way this repository's three previous implementation plans did.
+
+Immediate, no dependency: #114 (five disproved statements in this repo),
+#115 (`CustomDpGarage` hierarchy), #116 (two light-capability aliases),
+#117 (13 unreachable compat modules, −492 LOC), #118 (six caller-less admin
+facades, −595 LOC), #119 (turn off the types auto-tag and count for four weeks).
+
+Sequenced: #120 (store delegates to the facades) → #121 (daemon checkout in the
+PR gate) → #122 (fold `openccu-loom-types` in as `wire/`) → #123 (generate
+`events/types.py`) → #124 (contract test for `operations/`) → #125 (invert the
+surface guard) → #126 (sysvar rekey plus the CUxD rule, one wave).
+
+Cross-repo: SukramJ/openccu-loom#637, #638, #639 · SukramJ/homematicip_local#1264,
+#1265, #1266 · SukramJ/aiohomematic#3367.
+
+The measured baseline, so a later reader can tell whether it held: the package
+is 22,663 LOC, `compat/` 10,439 of them (46.1 %), up from 34.5 % three months
+earlier. After the deletions and the fold: 27,578 LOC in one wheel against
+28,689 in two, and — the number that matters — **maintained, non-generated LOC
+20,750 against 22,663, −8.4 %**.
+
 - **`hs_color` double-scales saturation (read path, not write).** Decidable
   from the daemon's code, so it does not need hardware — and the direction is
   the opposite of what this entry assumed while it sat under "verify against a
@@ -250,3 +277,134 @@ they are things that changed underneath it. Verified against
   alternative to the compat shim. It would mean rebuilding the production
   aiohomematic integration for unclear gain, so it is pursued only if
   `homematicip_local` grows such a layer for its own reasons.
+
+### From the architecture review, 2026-08-28
+
+Each of these was worked out as a full proposal and then failed a measurement.
+The measurement is given so the entry can be reopened by a better one rather
+than by a fresh opinion.
+
+- **Move the compat shim (10,439 LOC) into `homematicip_local`.** No. It trades
+  a narrow informal seam for a broad formal one. The shim→core import surface
+  grew from 36 to 71 symbols across 69 tags — 13 transitions, and in every one
+  `removed = 0`. That is a new symbol to publish every 6,8 days, each of which
+  would need an SDK release before the HA-side commit could land. 28 to 34 of
+  68 release diffs touch `compat/` and the imported core surface _together_;
+  those stay two-repo changes and gain an ordering constraint they do not have
+  today. Only the 19 to 22 compat-only diffs come free. Footprint effect: zero.
+- **Make the daemon's north surface an HA entity projection.** No — recorded as
+  `openccu-loom` ADR 0067 rather than only here, because the daemon is where the
+  question kept being answered twice. The contract carries none of the seven
+  descriptor fields (each `0×` in 14,384 lines of `assets/openapi.yaml`), the
+  cited precedent (`AlarmPanelEntity`) has 10 fields and no descriptor among
+  them, it would produce three projections rather than one, and the platform
+  reassignments it implies (`WEEK_PROFILE` sensor→select, `TEXT_DISPLAY`
+  notify→text) have no migration path in HA's registry — unlike a changed
+  `unique_id`, a changed domain orphans the entity.
+- **Generate `operations/` (3,539 LOC) from `assets/openapi.yaml`.** No; a
+  contract test instead (#124). Only 82 of 224 public method names match
+  `snake_case(operationId)` — the ids were minted for the TypeScript side. Code
+  generation renames 142 public methods and breaks 125 in-package call sites, or
+  the emitter carries a hand-kept 142-line name table. The precedent inside this
+  ecosystem points the same way: the daemon's own SPA writes its facade by hand
+  (2,660 LOC, 249 methods) and pins it with a 246-LOC contract test. The input
+  everyone assumed was the blocker is not one: of 99 `allow_retry` call sites
+  exactly 6 are real overrides, the rest repeat the verb default from
+  `transport/http.py:60`.
+- **Drop the `aiohomematic` runtime import to cut footprint or the release
+  cascade.** Both reasons are disproved. In the HA process the saving is 0 bytes
+  and 0 ms, because `homematicip_local` loads `aiohomematic` backend-independently
+  at module level (`generic_entity.py:9`, `backend_types.py:23-36`); the only
+  two-digit MiB lever is `openccu-data`, eagerly loaded by
+  `aiohomematic/ccu_translations.py:171-174` (54.3 MiB RSS, 98 ms), and it falls
+  only if this client _and_ `homematicip_local` both stop importing. Cascade:
+  5 of 460 releases since June. A case about code surface and type identity
+  remains available — but it is not a deployment case and must not be sold as
+  one.
+- **Port the routing-key algorithm out of `aiohomematic` into this client.**
+  Doubly moot: no footprint gain (above) and no cascade gain (3 of 18
+  `aiohomematic` pin bumps forced a release). The ecosystem coupling would
+  survive regardless — `openccu-loom` pins `aiohomematic` in its own parity gate
+  (`script/requirements/reference-stack.txt`, ADR 0038) and measures the Go
+  model against it on every pull request.
+- **Have the daemon serve the hub singletons as entities.** No. The wire DTOs
+  carry no `unique_id` at all (`HubCountDataPoint` is
+  `required [legacy_name, value]`), and for the same entities the daemon already
+  stamps a _different_ key in the MQTT namespace — numeric `ise_id` where this
+  client takes the slug, `openccu-loom_` where it takes `loom_`. Adopting it
+  would put a third namespace beside the two that BD-Identity-RoutingKeyNamespaces
+  deliberately keeps apart.
+- **Set `?central=` server-side to drop the `_matches_central` post-filters.**
+  Not performable. None of the six endpoints behind those five REST filter sites
+  carries the parameter — `/sysvars`, `/programs`, `/interfaces`,
+  `/hub/data-points`, `/service-messages`, `/system/update` were each checked
+  against the spec with `$ref` resolution. Only `/devices` and `/snapshot` carry
+  it, and those do not run through `_matches_central`; setting it there changes
+  the _set_ of devices, and with it the set of HA entities. The store holds
+  `central_name` (the HA instance name, which `store.py:128-132` says may differ
+  from `central_id`), so a mismatch would answer with an empty list.
+- **A shared contract package between `aiohomematic` and this client.** Built on
+  2026-06-04, withdrawn on 2026-06-10. The introducing PR's own
+  `docs/drop-in-optimizations.md` had already deferred it — "drift between the
+  three parties is already guarded without a physical split" — and the costs are
+  on record: a forced release ordering, an untidy transitive hull
+  (`generate_unique_id` needs `ConfigProviderProtocol` out of the heavily coupled
+  `interfaces/central.py`), and real downstream damage — this client sat with
+  latent `ImportError`s for seven days after adopting it.
+- **Virtual subclassing via `ABCMeta.register`.** Measured impossible, and in
+  the most dangerous way: `register()` returns without error and `isinstance`
+  stays `False`. Two independent measurements in the HA venv. The obvious
+  fallback is worthless too — on a subclass that skips `__init__`, 93 of 153
+  members raise on access, 42 of them public, including the ones HA reads.
+  (Note that the accompanying claim in `homematicip_local`'s
+  `backend_types.py:5-8` is half wrong: subclassing works for 15 of 15 dispatch
+  classes. Correcting it is #1264 there.)
+- **Trim the wire generation to its reachable subset.** The tool cannot:
+  `datamodel-code-generator` offers `--openapi-scopes` over categories, not
+  individual schemas. A pruner with a `$ref` reachability hull would have to be
+  written, and it would be brittle — 36 of 73 enums are unreferenced by name but
+  reached through string values, among them the security and update vocabularies.
+  Gain against all four deployment goals: nil.
+- **Generate `capabilities.py` from the daemon's `enums.json`.** Points at the
+  wrong file. The 17 tokens here are daemon _subsystem_ identifiers (`rest.v1`,
+  `alarm.v1`) for `connect(required_capabilities=…)`; the drift that prompted the
+  idea is in an entirely different vocabulary, `CustomDPSummary.capabilities`, an
+  open bool map. And this file states its own reason for being hand-written — "a
+  convenience for the tokens we act on, not an allowlist to validate against" —
+  while the generated enums reject unknown values outright.
+- **Keep `openccu_loom_types` as a top-level import path inside this
+  distribution.** No, and this is the one thing #122 must not get wrong. Home
+  Assistant never uninstalls abandoned requirements
+  (`homeassistant/requirements.py:115-126`), and `openccu_loom_types-0.5.9.dist-info`
+  is in every HA venv today. Two distributions owning one top-level package:
+  reinstalling the orphan silently reverts `wire/`, uninstalling it deletes the
+  package this client ships. Reproduced in a throwaway venv.
+
+Decided the same day, and recorded because the code cannot show them:
+
+- **`CustomDPSummary.kind` stays the SPA widget hint of daemon ADR 0016** and
+  does not become the HA dispatch anchor. It has a reachable empty value
+  (`KindUnknown = ""`), so a closed enum would have to contain it and this
+  client's `_CATEGORY_FALLBACK` would survive anyway. The 22 tokens get
+  documented as a vocabulary block instead, without `required` — `openccu-loom`
+  #637.
+- **The CUxD central-scoping rule is landed in `aiohomematic`**
+  (SukramJ/aiohomematic#3369), which is the retirement condition
+  `by_design.md:118-166` names for the divergence. Until it lands,
+  `canonical.py` may not be described as bit-identical (#114) and may not be
+  proposed for deletion — the daemon's own closure index says otherwise in two
+  places and is itself out of date.
+
+  It reaches further than this repository, which the first draft of #126 missed:
+  landing it re-keys CUxD entities on the **direct-CCU** backend as well, so
+  `homematicip_local` needs a third registry pass beside
+  `_async_migrate_loom_unique_ids` and `_async_migrate_aiohomematic_hub_unique_ids`.
+  And the divergence is pinned on both sides in the daemon
+  (`cuxd_scoping_golden.json`, `script/routing_key_parity.py`): each guard fails
+  once the two stop differing, so a companion PR has to fold the CUxD cases into
+  the shared fixtures in the same wave, or the daemon's CI goes red on the day
+  aiohomematic ships the rule.
+
+- **`openccu-loom` stays MIT.** ADR 0066 would have made every move of code into
+  the daemon one-way. This keeps that direction open; it does not schedule any
+  such move.

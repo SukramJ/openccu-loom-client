@@ -72,6 +72,14 @@ _SNAPSHOT = {
             "update_available": False,
             "master_pushes_config_pending": False,
             "has_sub_devices": False,
+            "firmware": {"Current": "1.0.0", "Available": "", "Updatable": False, "UpdateState": "UP_TO_DATE"},
+            "availability": {
+                "IsReachable": True,
+                "LastUpdated": None,
+                "BatteryLevel": None,
+                "LowBattery": None,
+                "SignalStrength": None,
+            },
         }
     ],
     "interfaces": [
@@ -227,11 +235,17 @@ class TestNestedSnapshotBootstrap:
             dps = list(client.store.get_device(address="VCU0001").channels)[0].data_points  # type: ignore[union-attr]
             assert {dp.parameter for dp in dps} == {"STATE", "LEVEL"}
 
-        # The snapshot was requested with ?include=data_points …
+        # The snapshot was requested with both nested expansions …
         snapshot_reqs = [r for r in mock_daemon.requests if r.path == "/api/v1/snapshot"]
-        assert snapshot_reqs and snapshot_reqs[0].query.get("include") == "data_points"
-        # … and no per-channel data-points endpoint was ever called.
+        assert snapshot_reqs and snapshot_reqs[0].query.get("include") == "channels,data_points"
+        # … no per-channel data-points endpoint was ever called …
         assert not [r for r in mock_daemon.requests if r.path.endswith("/data-points")]
+        # … and no per-device detail call either. Since daemon api 7.23.0 the
+        # summary carries `firmware` and `availability`, and the snapshot's
+        # `Channel` is a `ChannelSummary` with data points attached, so the
+        # whole graph comes out of the one snapshot response.
+        assert not [r for r in mock_daemon.requests if r.path.startswith("/api/v1/devices/")]
+        assert len(snapshot_reqs) == 1
 
 
 class TestWsBridge:

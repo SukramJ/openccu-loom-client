@@ -22,7 +22,13 @@ import pytest
 # imports today. Each one MUST resolve from the compat namespace; if a
 # name disappears from the daemon side, this test is the first to fail.
 _HOMEMATICIP_LOCAL_IMPORTS: list[tuple[str, list[str]]] = [
-    ("openccu_loom_client.compat.aiohomematic", ["__version__", "ccu_translations"]),
+    (
+        "openccu_loom_client.compat.aiohomematic",
+        [
+            "__version__",
+            "ccu_translations",
+        ],
+    ),
     (
         "openccu_loom_client.compat.aiohomematic.const",
         [
@@ -75,17 +81,13 @@ _HOMEMATICIP_LOCAL_IMPORTS: list[tuple[str, list[str]]] = [
         ],
     ),
     (
-        "openccu_loom_client.compat.aiohomematic.exceptions",
-        [
-            "AuthFailure",
-            "BaseHomematicException",
-            "NoConnectionException",
-            "ValidationException",
-        ],
-    ),
-    (
         "openccu_loom_client.compat.aiohomematic.central",
-        ["CentralConfig", "CentralUnit", "check_config", "list_ccus"],
+        [
+            "CentralConfig",
+            "CentralUnit",
+            "check_config",
+            "list_ccus",
+        ],
     ),
     (
         "openccu_loom_client.compat.aiohomematic.central.events",
@@ -103,22 +105,6 @@ _HOMEMATICIP_LOCAL_IMPORTS: list[tuple[str, list[str]]] = [
             "SystemStatusChangedEvent",
         ],
     ),
-    ("openccu_loom_client.compat.aiohomematic.client", ["InterfaceConfig"]),
-    (
-        "openccu_loom_client.compat.aiohomematic.interfaces",
-        [
-            "ChannelEventGroupProtocol",
-            "ClimateWeekProfileDataPointProtocol",
-            "CombinedDataPointProtocol",
-            "DeviceProtocol",
-            "ScheduleChannelSwitchProtocol",
-        ],
-    ),
-    (
-        "openccu_loom_client.compat.aiohomematic.model.data_point",
-        ["CallParameterCollector", "CallbackDataPoint"],
-    ),
-    ("openccu_loom_client.compat.aiohomematic.model.event", ["ClickEvent"]),
     (
         "openccu_loom_client.compat.aiohomematic.model.custom",
         [
@@ -134,10 +120,6 @@ _HOMEMATICIP_LOCAL_IMPORTS: list[tuple[str, list[str]]] = [
             "CustomDpTextDisplay",
             "LockState",
         ],
-    ),
-    (
-        "openccu_loom_client.compat.aiohomematic.model.custom.text_display",
-        ["CustomDpTextDisplay"],
     ),
     (
         "openccu_loom_client.compat.aiohomematic.model.generic",
@@ -167,17 +149,18 @@ _HOMEMATICIP_LOCAL_IMPORTS: list[tuple[str, list[str]]] = [
             "SysvarDpText",
         ],
     ),
-    ("openccu_loom_client.compat.aiohomematic.model.schedule_models", ["ClimateWeekdaySchedule"]),
-    ("openccu_loom_client.compat.aiohomematic.model.update", ["DpUpdate"]),
     (
-        "openccu_loom_client.compat.aiohomematic.model.week_profile_data_point",
-        ["WeekProfileDataPoint"],
+        "openccu_loom_client.compat.aiohomematic.model.update",
+        [
+            "DpUpdate",
+        ],
     ),
-    ("openccu_loom_client.compat.aiohomematic.store.persistent", ["cleanup_files"]),
-    ("openccu_loom_client.compat.aiohomematic.support", ["find_free_port", "to_bool"]),
-    ("openccu_loom_client.compat.aiohomematic.support.address", ["get_device_address"]),
-    ("openccu_loom_client.compat.aiohomematic.type_aliases", ["UnsubscribeCallback"]),
-    ("openccu_loom_client.compat.aiohomematic.ccu_translations", ["get_device_icon"]),
+    (
+        "openccu_loom_client.compat.aiohomematic.ccu_translations",
+        [
+            "get_device_icon",
+        ],
+    ),
 ]
 
 
@@ -222,12 +205,6 @@ class TestIdentities:
         assert isinstance(central, CentralUnit)
         assert central.name == "home"
 
-    def test_callback_data_point_is_data_point(self) -> None:
-        from openccu_loom_client.compat.aiohomematic.model.data_point import CallbackDataPoint
-        from openccu_loom_client.model import DataPoint
-
-        assert CallbackDataPoint is DataPoint
-
     def test_data_point_state_changed_is_distinct_uniform_event(self) -> None:
         """
         ``DataPointStateChangedEvent`` is the uniform refresh event.
@@ -248,54 +225,6 @@ class TestIdentities:
         from openccu_loom_client.events import SubscriptionGroup as RealGroup
 
         assert SubscriptionGroup is RealGroup
-
-    def test_auth_failure_is_loom_auth_error(self) -> None:
-        from openccu_loom_client import LoomAuthError
-        from openccu_loom_client.compat.aiohomematic.exceptions import AuthFailure
-
-        assert AuthFailure is LoomAuthError
-
-
-class TestSupportHelpers:
-    def test_find_free_port_returns_usable_port(self) -> None:
-        import socket
-
-        from openccu_loom_client.compat.aiohomematic.support import find_free_port
-
-        port = find_free_port()
-        assert isinstance(port, int)
-        assert 0 < port <= 65535
-        # The port must be genuinely free: binding it must succeed. The
-        # probe itself binds loopback only (never a wildcard bind — see
-        # the helper's docstring), so verify on loopback too.
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.bind(("127.0.0.1", port))
-
-    @pytest.mark.parametrize(
-        ("value", "expected"),
-        [
-            (True, True),
-            (False, False),
-            (1, True),
-            (0, False),
-            ("true", True),
-            ("YES", True),
-            ("1", True),
-            ("no", False),
-            ("", False),
-            (None, False),
-        ],
-    )
-    def test_to_bool(self, value: object, expected: bool) -> None:
-        from openccu_loom_client.compat.aiohomematic.support import to_bool
-
-        assert to_bool(value=value) is expected
-
-    def test_get_device_address_strips_channel(self) -> None:
-        from openccu_loom_client.compat.aiohomematic.support.address import get_device_address
-
-        assert get_device_address(address="VCU0001:3") == "VCU0001"
-        assert get_device_address(address="VCU0001") == "VCU0001"
 
 
 class TestCheckConfig:
@@ -363,52 +292,6 @@ class TestListCcus:
         client.close.assert_awaited_once()
 
 
-class TestCallParameterCollector:
-    async def test_collector_flushes_as_one_paramset_put(self) -> None:
-        from openccu_loom_client.compat.aiohomematic.model.data_point import CallParameterCollector
-
-        class _StubOps:
-            def __init__(self) -> None:
-                self.put_paramset_calls: list[dict] = []
-
-            async def put_paramset(self, *, address, paramset_key, values):  # type: ignore[no-untyped-def]
-                self.put_paramset_calls.append({"address": address, "paramset_key": paramset_key, "values": values})
-
-        ops = _StubOps()
-        async with CallParameterCollector(
-            datapoints_ops=ops,  # type: ignore[arg-type]
-            address="VCU0001",
-            channel=1,
-        ) as c:
-            c.add_data(parameter="LEVEL", value=0.5)
-            c.add_data(parameter="STATE", value=True)
-
-        assert len(ops.put_paramset_calls) == 1
-        call = ops.put_paramset_calls[0]
-        assert call["address"] == "VCU0001"
-        assert call["paramset_key"] == "VALUES"
-        assert call["values"] == {"LEVEL": 0.5, "STATE": True}
-
-    async def test_collector_no_op_on_empty(self) -> None:
-        from openccu_loom_client.compat.aiohomematic.model.data_point import CallParameterCollector
-
-        class _StubOps:
-            def __init__(self) -> None:
-                self.calls = 0
-
-            async def put_paramset(self, **_kwargs):  # type: ignore[no-untyped-def]
-                self.calls += 1
-
-        ops = _StubOps()
-        c = CallParameterCollector(
-            datapoints_ops=ops,  # type: ignore[arg-type]
-            address="VCU0001",
-            channel=1,
-        )
-        await c.send_data()
-        assert ops.calls == 0
-
-
 class TestCustomDpMarkers:
     """The CustomDp* subclasses must extend CustomDataPoint so isinstance dispatches."""
 
@@ -418,14 +301,22 @@ class TestCustomDpMarkers:
 
         assert issubclass(CustomDpSwitch, CustomDataPoint)
 
-    def test_cover_blind_garage_share_lineage(self) -> None:
+    def test_cover_blind_garage_lineage_matches_aiohomematic(self) -> None:
         from openccu_loom_client.compat.aiohomematic.model.custom import (
             CustomDpBlind,
             CustomDpCover,
             CustomDpGarage,
             CustomDpIpBlind,
+            _CoverSurface,
         )
 
         assert issubclass(CustomDpBlind, CustomDpCover)
         assert issubclass(CustomDpIpBlind, CustomDpBlind)
-        assert issubclass(CustomDpGarage, CustomDpCover)
+        # A garage is a *sibling* of a cover, exactly as in aiohomematic
+        # (`CustomDpGarage(PositionMixin, CustomDataPoint, ...)`), not a
+        # subclass. homematicip_local checks its cover tuple before its
+        # garage tuple, so a garage that were a cover would never reach the
+        # garage branch.
+        assert not issubclass(CustomDpGarage, CustomDpCover)
+        assert issubclass(CustomDpGarage, _CoverSurface)
+        assert issubclass(CustomDpCover, _CoverSurface)

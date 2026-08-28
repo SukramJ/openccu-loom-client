@@ -25,10 +25,23 @@ plain ``central_id`` string instead, so the thin adapters here wrap it
 in a minimal stub provider.
 
 This module is the Python side of the daemon's Go
-``internal/routingkey`` (``SerialSuffix`` / ``CanonicalUniqueID``); both
-run the same routing-key algorithm underneath, so the two produce
-bit-identical output. See
-``docs/external-clients/ha-unique-id-migration.md`` in the daemon repo.
+``internal/routingkey`` (``SerialSuffix`` / ``CanonicalUniqueID``). Both run
+the same routing-key algorithm underneath, and their output agrees
+everywhere except for CUxD addresses.
+
+That exception is deliberate and pinned on both sides. The daemon scopes
+``CUX*`` addresses by central (``internal/routingkey/uniqueid.go:28-34``)
+because CUxD hands out the same synthetic addresses on every CCU, so two
+bridged CCUs would otherwise declare identical unique ids and Home Assistant
+would drop one CCU's entities. The reference implementation does not scope
+them (``aiohomematic/model/support.py``). The daemon documents the divergence
+as ``BD-Identity-CUxDCentralScoping`` in ``notes/parity/by_design.md``,
+together with its retirement condition — land the same rule in the reference
+implementation — which is tracked as SukramJ/aiohomematic#3369. Until that
+lands, this module must not be described as bit-identical, and must not be
+proposed for deletion on the grounds that the daemon already stamps the key.
+
+See ``docs/external-clients/ha-unique-id-migration.md`` in the daemon repo.
 """
 
 from __future__ import annotations

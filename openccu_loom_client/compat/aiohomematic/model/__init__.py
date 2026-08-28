@@ -4,10 +4,10 @@
 """
 ``aiohomematic.model``-compatible model surface.
 
-Contains alias modules for ``data_point``, ``event``, ``custom``,
-``generic``, ``hub``, ``schedule_models``, ``update`` and
-``week_profile_data_point``. Each ships type markers and minimal
-behavioural shims so HA-side ``isinstance`` checks and property
-reads keep resolving against the new openccu-loom-client model
-classes.
+Contains the modules ``homematicip_local`` imports by their explicit path:
+``alarm_panel``, ``custom``, ``generic`` and ``hub``, plus ``update``,
+``calculated``, ``combined``, ``event_group``, ``naming`` and
+``week_profile`` for this package's own use. Each ships type markers and
+minimal behavioural shims so HA-side ``isinstance`` checks and property
+reads keep resolving against the openccu-loom-client model classes.
 """

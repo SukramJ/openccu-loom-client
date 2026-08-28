@@ -41,7 +41,9 @@ from openccu_loom_types.rest import (
     ChannelSummary,
     CustomDPSummary,
     DataPointSummary,
+    DeviceAvailability,
     DeviceDetail,
+    DeviceFirmware,
     DeviceSummary,
     ProgramSummary,
     Snapshot,
@@ -1101,6 +1103,13 @@ class LoomStore:
             update_available=False,
             master_pushes_config_pending=False,
             has_sub_devices=False,
+            # Required on the summary since daemon api 7.23.0, and unknown
+            # until the device is read: the push carries neither. An empty
+            # firmware record and a reachability that mirrors ``available``
+            # are the only honest stand-ins — both are replaced wholesale by
+            # the next ``attach_device_detail``.
+            firmware=DeviceFirmware(),
+            availability=DeviceAvailability(IsReachable=True),
         )
         self._devices[payload.device_address] = Device(summary=stub, store=self)
 
