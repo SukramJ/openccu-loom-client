@@ -55,65 +55,44 @@ Currently `xfail`. Each needs harness work rather than production code.
 
 ## Open in this repository
 
-- **The onboarding release hold is not applied to the REST/WS surface (daemon
-  0.66.0).** The intent is settled — a device must stay invisible to _this_
-  backend until it is released, exactly as it does for MQTT, while the Config
-  UI keeps seeing it throughout, because that is where it is named. What is
-  missing is the implementation on the REST/WS side. It needs a daemon change;
-  this client cannot compensate, because nothing on the wire tells it which
-  state a device is in.
+- **Adopt the onboarding release state (daemon 0.66.1 / api 7.19.0).** The
+  daemon closed its half; this client has not consumed it yet. Blocked only on
+  an `openccu-loom-types` release for 7.19.0 — `DeviceReleasedPayload` is its
+  own schema, so the event cannot be bound against 0.5.8.
 
-  Traced end to end, because the daemon's own wording ("fully visible and
-  configurable in this daemon's own REST / WebSocket surfaces") reads as though
-  the exposure were intended:
+  Background: 0.66.0 made pairing a wizard so a device is named and placed
+  before any ecosystem sees it, but enforced the hold on MQTT, Matter and the
+  webhook only — REST/WS was left showing unreleased devices because the Config
+  UI has to see them. That conflated transport with role, and this backend is
+  the case it misses: an ecosystem reached over the configuration channel. A
+  device therefore arrived in Home Assistant un-named, the outcome the release
+  step exists to prevent. 0.66.1 fixes it by putting the state on the device
+  rather than inferring it from the channel.
 
-  1. Accepting takes the device out of the first hold and into the model —
-     `TakeDelayedDeviceDescriptions` says it outright: "The device stops being
-     held out of the model … and starts being held out of the ecosystems
-     instead" (`internal/central/coordinators/device.go:1140-1145`). It must
-     materialise, or the wizard would have no ise_id and no channels to
-     configure.
-  2. From there `DevicesAdapter.Devices()` returns the whole ModelRegistry
-     unfiltered (`internal/central/adapter/devices.go:41-51`), which is what
-     `GET /snapshot` walks — so the device is in the snapshot.
-  3. `HandleAcceptedDevices` publishes a `DeviceCreatedEvent`, and the WS
-     lifecycle subscriber broadcasts it ungated
-     (`internal/north/rest/ws/device_lifecycle.go:114`) — so the device also
-     arrives as a live push.
-  4. The second hold is enforced in exactly two places, both outside REST/WS:
-     `publishDeviceSnapshot` for MQTT
-     (`internal/central/adapter/eventbridge.go:852`) and the outbound webhook
-     (`internal/north/webhook/outbound.go:433`). `IsReleased` has no caller
-     under `internal/north/rest/` at all. (Matter has none either, which may be
-     a separate gap.)
-  5. Releasing publishes `DeviceReleasedEvent`, whose only handler returns
-     immediately unless MQTT is wired
-     (`internal/central/adapter/eventbridge.go:455-458`). There is no
-     `device.released` entry in `assets/wsapi.json`, so no WS client ever
-     learns a hold ended.
+  What to consume, all of it additive — `released` is `true` for every device
+  that never entered the wizard, so an installation not using it behaves
+  exactly as before:
 
-  Net effect over this backend: the device reaches Home Assistant the moment it
-  is accepted, un-named — the outcome the release step exists to prevent, with
-  the entity-id consequence the daemon's changelog names. (The wizard's first
-  state is fine: those devices are held out of the model entirely.)
-
-  What the daemon needs is a way to tell a configuration reader from an
-  ecosystem reader on the same routes. There is precedent for shaping a
-  response by caller: `hideCCUCoordinates`
-  (`internal/north/rest/handlers/ccu_coordinates.go:31`) already narrows
-  `GET /system/ccu` by role. Role is the wrong axis here — the Config UI and an
-  integration can hold the same one — so the likelier shapes are an explicit
-  opt-in on the snapshot (the SPA asks for withheld devices; everyone else gets
-  released ones only) or a distinction by auth scheme. Either way the device
-  and its lifecycle push must be withheld together, and `device.released` has
-  to become a broadcast, or a client that connected before the release never
-  learns the device appeared.
-
-  Second-order once the above is settled: the inbox entry's `awaiting_release`
-  flag does not survive the conversion into aiohomematic's `InboxDeviceData`
-  (`compat/…/adapter.py:616`), which has no field for it, so HA offers _accept_
-  for a device that is already accepted and needs _release_. That fix needs a
-  field on aiohomematic's record.
+  1. **`DeviceSummary.released`** on `GET /devices`, `GET /devices/{addr}` and
+     `GET /snapshot` — skip unreleased devices in `bootstrap()` so they never
+     enter the store.
+  2. **`released` on the `device.created` payload** — ignore the frame when it
+     is false: no store stub, no reconcile. The daemon put the flag on the
+     frame deliberately, because looking it up separately is a race the
+     consumer cannot win: the push can arrive before a snapshot read completes.
+  3. **The new `device.released` broadcast**, on the same
+     `device.{address}.lifecycle` topic — bind it, then load and announce the
+     device through the path `_reconcile_new_device` already provides. This is
+     the piece that cannot be compensated for locally: the consumer that needs
+     it is exactly the one that was connected and filtered the device out.
+  4. **`datapoint.value_changed` is deliberately NOT filtered** by release
+     state — the Config UI needs those values to verify a device before
+     releasing it — so an unreleased device streams values at us. No work
+     needed: with the device kept out of the store the frames find no
+     data-point and `apply_value_changed` drops them at DEBUG
+     (`store.py:1047`). Worth a test pinning that, since the contract states
+     the requirement explicitly and the current behaviour satisfies it by
+     accident rather than by design.
 
 ### Reconnect / recovery — closed (2026-08-27)
 

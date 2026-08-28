@@ -23,11 +23,13 @@ stays quiet about contract drift.
   named. (Devices in the wizard's first state are unaffected: those are held
   out of the model entirely.)
 
-  Nothing is fixed here, because nothing can be fixed here alone. The snapshot
-  carries no flag saying a device is still held, and no WebSocket event
-  announces a release, so this client cannot tell the two states apart even if
-  it wanted to. `notes/open-work.md` traces it end to end and records what the
-  daemon would need.
+  Nothing is fixed here, because against this daemon nothing can be: the
+  snapshot carries no flag saying a device is still held, and no WebSocket
+  event announces a release, so this client cannot tell the two states apart
+  even if it wanted to. Daemon 0.66.1 adds both — a `released` field on the
+  device and on the `device.created` push, plus a `device.released` broadcast —
+  and this client will consume them once a matching `openccu-loom-types`
+  release exists. `notes/open-work.md` records what that involves.
 
 - `ruff` 0.16.4 → 0.16.5 (hook pin and pre-commit requirement in lock-step).
 
