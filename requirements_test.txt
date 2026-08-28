@@ -13,3 +13,6 @@ pytest-aiohttp==1.1.1
 pytest-asyncio==1.4.0
 pytest-cov==7.1.0
 pylint==4.0.7
+# tests/unit/test_operations_contract.py reads the daemon's assets/openapi.yaml
+# to check every URL operations/ builds against the documented contract.
+pyyaml==6.0.3
