@@ -1,3 +1,88 @@
+# Version 2026.8.33 (2026-08-28)
+
+- **This release requires a daemon at api 7.23.0 or newer.** It adopts
+  `openccu-loom-types` 0.5.10, whose stamped `DAEMON_API_VERSION` is what
+  `connect()` compares the daemon's own against — same major, minor at or
+  above. A daemon below 7.23.0 is refused with `LoomIncompatibleVersionError`
+  rather than half-working, so upgrade the daemon and this package together.
+
+  The types bump is not a drop-in on the way in, either. The daemon hoisted
+  two schemas that had been defined inline onto named components, because
+  `firmware` and `availability` are now referenced from two places instead of
+  one. Nothing changed on the wire — which is why the daemon's own check
+  classified it as a minor — but generated class names follow component
+  names, so `rest.Firmware` and `rest.Availability` are `rest.DeviceFirmware`
+  and `rest.DeviceAvailability`. `model.device.AvailabilityInfo` is unrelated
+  and keeps its name: it is this package's own structural twin of
+  aiohomematic's type, not a wire model.
+
+- **A bootstrap is one request.** It used to be one snapshot plus one
+  `GET /devices/{address}` per device — on a 200-device CCU, 201 requests
+  before the first entity appeared. Daemon api 7.23.0 puts `firmware` and
+  `availability` on the device summary, and the snapshot's channel objects
+  already carry their data points, so `GET /snapshot?include=channels,data_points`
+  yields the entire graph and the detail response can be assembled locally.
+
+  The per-device path stays as a fallback for a daemon that ignores
+  `include`, and `GET /devices/{address}` is still the right call to refresh
+  a single device — which is what the `device.created` reconcile does.
+
+- **The custom data-point twins satisfy aiohomematic's new category
+  protocols.** aiohomematic 2026.8.7 adds one `@runtime_checkable` protocol
+  per category so a consumer can dispatch on what a device can do rather than
+  on what class it is. Four of the eleven twins here did not match, and the
+  most consequential was the garage door: it subclassed the cover twin, while
+  in aiohomematic the two are siblings. Since Home Assistant checks its cover
+  tuple before its garage tuple, a garage that is also a cover never reaches
+  the garage branch.
+
+  Latent rather than live, to be accurate about it: both Home Assistant
+  entity classes are empty subclasses of the same base, and the garage device
+  class is assigned by device model rather than by entity class, so a
+  misrouted garage currently produces an identical entity. It stops being
+  latent the moment either class grows a body.
+
+  Also closed: `hs_color` and `color_temperature`, which Home Assistant reads
+  and the daemon spells `color` and `color_temp`. The capability view answers
+  False for any name it does not know, so an unaliased name was
+  indistinguishable from an absent capability.
+
+- **Six admin façades are gone from the wheel** — `auth`, `users`,
+  `centrals`, `config_admin`, `groups` and `matter`, 595 lines with no caller
+  in any repository or language that goes through this package. `client.matter`
+  and its five siblings now raise `AttributeError`.
+
+  The surfaces are not withdrawn. The daemon serves every one of those
+  endpoints, and `node-red-contrib-openccu-loom` drives five of them through
+  its own client. What goes is the hand-maintained Python façade in front of
+  them, which cost a review on every daemon API change and paid for nothing.
+
+- **Thirteen compat modules are gone, and the docstring that invented them.**
+  `compat/aiohomematic/__init__.py` claimed the shim exists so
+  `from aiohomematic.* import …` resolves against it. That mechanism does not
+  exist anywhere in the package, and Home Assistant imports the explicit
+  `openccu_loom_client.compat.aiohomematic.*` path at every call site — it
+  reads `to_bool` and `find_free_port` from the real `aiohomematic.support`
+  while this shim carried unreachable copies of both. So those modules were
+  not unused, they were unreachable, and the tests covering them pinned a
+  contract no importer could exercise.
+
+- **Four more claims in this repository were measurably false and are
+  corrected.** `canonical.py` described its output as bit-identical to the
+  daemon's; the two agree everywhere except CUxD addresses, which the daemon
+  scopes by central and the reference implementation does not — a deliberate
+  divergence whose retirement is now tracked upstream. The default port was
+  8080/8443, citing a file that does not exist in the daemon repository; the
+  daemon defaults to 8119 and serves one listener, so both constants now hold 8119. And `CLAUDE.md` described a bootstrap cost that two daemon releases
+  had already closed.
+
+- **The broadcast drift guard runs.** It compares the event registry against
+  the daemon's `assets/wsapi.json`, and the pull-request job never checked
+  the daemon out — so the guard skipped on every run. It now runs, and in
+  both directions: a binding with no broadcast is as much of a drift signal
+  as a broadcast with no binding, and it is the one that catches an event
+  being removed.
+
 # Version 2026.8.32 (2026-08-28)
 
 - **A sensor for the latency between this client and the daemon.** There was
