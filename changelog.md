@@ -1,3 +1,34 @@
+# Version 2026.8.30 (2026-08-28)
+
+Two adjustments to how the reconnect work behaves for the consumer above it.
+Both were recorded as things to watch after 2026.8.27 shipped, and both belong
+here rather than in the integration, because the cause is here.
+
+- **A short connection drop is no longer announced as a state change.** The
+  central reaches its degraded state on an ordinary WebSocket drop now, where
+  before it effectively never did — and most drops are over before anything
+  above could act on one: the first reconnect attempt is half a second away.
+  Reporting each of them cost more than it told. Home Assistant fires a bus
+  event on the way back, which automations can subscribe to, so a five-second
+  outage nobody noticed produced a pair of transitions.
+
+  A disconnect is now reported only after it has stayed down fifteen seconds,
+  and reconnecting inside that window cancels the pending report entirely — the
+  state never moves.
+
+  Coming back is still announced at once. That asymmetry is deliberate:
+  staleness ending is news the moment it happens, and by then the connection
+  has proven itself. Delaying it would leave a consumer treating live data as
+  stale, which is the worse of the two errors.
+
+- **How long the bootstrap waits for the CCU is configurable.** It waits for
+  the daemon to finish reaching the CCU before reading the snapshot, because
+  reading earlier succeeds into an empty model and produces no entities at all.
+  But how long a caller can afford to block is the caller's question — Home
+  Assistant, for one, reports a config entry that takes minutes to set up.
+  `LoomConfig.readiness_wait_seconds` sets that ceiling; `0` skips the wait for
+  a caller that would rather start fast and possibly empty.
+
 # Version 2026.8.29 (2026-08-28)
 
 **Fixes a broken 2026.8.28.** That release declared
