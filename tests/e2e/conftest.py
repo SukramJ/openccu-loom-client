@@ -64,6 +64,11 @@ def _write_config(tmp: Path, *, rest_port: int, ui_port: int, centrals_block: st
     ready-to-use top-level block (``"centrals: []"`` or a full list), so
     no dedent/indent juggling can corrupt the YAML nesting.
     """
+    # SQLite cannot create its database inside a directory that does not
+    # exist: the daemon then boots into "unable to open database file (14)"
+    # and every fixture fails with a wall of daemon log. Create it here, the
+    # way the daemon's own callers do.
+    (tmp / "var").mkdir(parents=True, exist_ok=True)
     cfg = (
         "locale: en\n"
         f"data_dir: {tmp / 'var'}\n"

@@ -64,7 +64,7 @@ async def test_batch_read_returns_requested_keys(client_with_ccu: LoomClient) ->
     await client_with_ccu.bootstrap()
     dp = find_writable_bool_dp(client_with_ccu)
     key = (dp.device_address, dp.channel_number, "STATE")
-    result = await client_with_ccu.datapoints.batch_read([key])
+    result = await client_with_ccu.datapoints.batch_read(queries=[key])
     assert key in result
 
 
@@ -73,7 +73,7 @@ async def test_set_value_roundtrip(client_with_ccu: LoomClient) -> None:
     dp = find_writable_bool_dp(client_with_ccu)
     target = not bool(dp.value)
     # Write-back through the store → daemon PUT → CCU. Should not raise.
-    await dp.send_value(target)
+    await dp.send_value(value=target)
 
 
 async def test_list_custom_data_points(client_with_ccu: LoomClient) -> None:
@@ -90,7 +90,7 @@ async def test_build_configurable_devices(client_with_ccu: LoomClient) -> None:
     from openccu_loom_client.compat.aiohomematic.central.configurable_devices import build_configurable_devices
 
     await client_with_ccu.bootstrap()
-    devices = build_configurable_devices(client_with_ccu.store)
+    devices = build_configurable_devices(store=client_with_ccu.store)
     assert devices, "expected configurable devices from the seeded set"
     device = devices[0]
     assert device.channels, "expected channels with paramsets"
@@ -111,5 +111,9 @@ async def test_build_event_groups(client_with_ccu: LoomClient) -> None:
     # The seeded HmIP-BSM exposes KEY_TRANSCEIVER channels with PRESS_* params.
     assert groups, "expected device-trigger event groups from the seeded devices"
     group = groups[0]
-    assert group.unique_id.startswith("event_group_")
+    # Canonical HA routing key: the `loom_` prefix and the central-id slot
+    # are what the registry migration keys off, so assert the whole shape
+    # rather than the bare kind — a plain "event_group_" prefix would pass
+    # for an id that lost its namespace.
+    assert group.unique_id.startswith("loom_event_group_")
     assert group.event_types  # lower-cased PRESS_* names
