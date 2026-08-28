@@ -1,0 +1,46 @@
+name: "Unreleased package changes"
+
+# Reports package code that is merged but not tagged.
+#
+# Scheduled rather than per-PR, deliberately: every pull request adds
+# unreleased commits by definition, so a per-PR gate would be red on merge by
+# design and read as noise within a week. What is worth knowing is that
+# user-visible changes have been sitting on main for a while, which is a
+# question only time can answer.
+#
+# yamllint disable-line rule:truthy
+on:
+  schedule:
+    # 07:00 UTC daily — early enough that a release can still be cut the same day.
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+    inputs:
+      grace_hours:
+        description: "Hours merged package code may sit untagged before it is reported"
+        required: false
+        default: "24"
+
+permissions:
+  contents: read
+
+jobs:
+  unreleased:
+    if: github.repository_owner == 'SukramJ'
+    name: Check for unreleased package changes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # Full history and tags: the check compares HEAD against the most
+          # recent tag reachable from it, and a shallow clone has neither.
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: Check
+        run: python script/check_unreleased_changes.py --grace-hours "${{ github.event.inputs.grace_hours || 24 }}"
