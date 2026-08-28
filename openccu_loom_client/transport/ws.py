@@ -177,6 +177,12 @@ class WsTransport:
         """
         Configure the transport; the connection opens on :meth:`start`.
 
+        Whether unfinished-onboarding devices are filtered out comes from
+        :attr:`LoomConfig.released_only`, so the WS subscribe option and the
+        REST snapshot query cannot disagree — the daemon's contract asks for
+        them to be paired, since one without the other yields a snapshot
+        missing a device that live pushes then talk about (or the reverse).
+
         ``classify`` opts into the daemon's inline classification (api ≥
         5.34.0): every ``subscribe`` frame carries ``classify: true``, and
         ``datapoint.value_changed`` payloads then include ``category`` and
@@ -187,6 +193,11 @@ class WsTransport:
         """
         self._config: Final = config
         self._classify: Final = classify
+        # Rides every subscribe frame, initial and runtime alike, because the
+        # daemon applies it per connection: a reconnect that omitted it would
+        # silently start delivering withheld devices again, and the drop would
+        # be invisible — the stream still works, it just carries more.
+        self._released_only: Final = config.released_only
         self._external_session: Final = session
         self._session: aiohttp.ClientSession | None = session
         self._ws: aiohttp.ClientWebSocketResponse | None = None
@@ -302,6 +313,8 @@ class WsTransport:
             frame: dict[str, object] = {"op": "subscribe", "topics": new}
             if self._classify:
                 frame["classify"] = True
+            if self._released_only:
+                frame["released_only"] = True
             await self._send(frame=frame)
 
     async def unsubscribe(self, *, topics: list[str]) -> None:
@@ -459,6 +472,8 @@ class WsTransport:
         }
         if self._classify:
             frame["classify"] = True
+        if self._released_only:
+            frame["released_only"] = True
         if self._last_seq is not None:
             frame["since"] = self._last_seq
         await self._send(frame=frame)

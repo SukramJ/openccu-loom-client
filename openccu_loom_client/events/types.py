@@ -44,6 +44,7 @@ from openccu_loom_types.ws import (
     DeviceAvailabilityChangedPayload,
     DeviceCreatedPayload,
     DeviceMetadataChangedPayload,
+    DeviceReleasedPayload,
     DeviceRemovedPayload,
     DeviceTriggerPayload,
     HubConnectivityChangedPayload,
@@ -412,6 +413,29 @@ class DeviceCreatedEvent(LoomEvent):
 
     payload: DeviceCreatedPayload
     type_id: ClassVar[str] = "device.created"
+
+    def __post_init__(self) -> None:
+        """Default the routing key to the payload's central name."""
+        if self.event_key is None:
+            self.event_key = self.payload.central
+
+
+@dataclass(slots=True, kw_only=True)
+class DeviceReleasedEvent(LoomEvent):
+    """
+    An operator finished onboarding a device, so it may now be adopted.
+
+    Rides the same ``device.{address}.lifecycle`` topic as
+    ``device.created``; subscribers route on the envelope ``type``.
+
+    This is the frame that lifts the ``released_only`` filter, and the
+    daemon never withholds it — the consumer that needs it is precisely the
+    one that filtered the device out on its ``device.created`` frame and
+    would otherwise never learn the device became adoptable.
+    """
+
+    payload: DeviceReleasedPayload
+    type_id: ClassVar[str] = "device.released"
 
     def __post_init__(self) -> None:
         """Default the routing key to the payload's central name."""
@@ -882,6 +906,7 @@ _EVENT_REGISTRY: Final[dict[str, tuple[Callable[..., LoomEvent], type[BaseModel]
     HubSystemUpdateChangedEvent.type_id: (HubSystemUpdateChangedEvent, HubSystemUpdateChangedPayload),
     AddonUpdateStateChangedEvent.type_id: (AddonUpdateStateChangedEvent, AddonUpdateStatus),
     DeviceCreatedEvent.type_id: (DeviceCreatedEvent, DeviceCreatedPayload),
+    DeviceReleasedEvent.type_id: (DeviceReleasedEvent, DeviceReleasedPayload),
     DeviceRemovedEvent.type_id: (DeviceRemovedEvent, DeviceRemovedPayload),
     DeviceAvailabilityChangedEvent.type_id: (
         DeviceAvailabilityChangedEvent,

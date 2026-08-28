@@ -12,7 +12,9 @@ replacement. Runtime reuse of `aiohomematic` is deliberate, and the
 rationale lives in `CLAUDE.md` → "What this is".
 
 Every claim below was re-verified against the tree on 2026-08-08 (daemon
-0.55.0, API 5.8.0, `openccu-loom-types` 0.3.5).
+0.55.0, API 5.8.0, `openccu-loom-types` 0.3.5). The daemon-facing claims were
+re-checked against daemon 0.66.1 / API 7.21.0 / wsapi 1.7 on 2026-08-28; where
+that changed an entry, it says so inline.
 
 ---
 
@@ -30,12 +32,15 @@ close them. None is blocked on code.
 - **Sysvar `extended` marker.** Wired end-to-end
   (`compat/aiohomematic/model/hub/__init__.py`); confirm an extended variable
   surfaces as the writable flavour.
-- **HS colour round-trip.** `CustomDpDimmer.hs_color` reads nested
-  `color:{h,s}` and scales saturation `[0,1] → [0,100]` for HA, but the write
-  path (`turn_on` → `set_color`) sends HA's `[0,100]` through unscaled.
-  Confirm the daemon's `set_color` scale; a write-path fix may follow.
-- **`rename_device(ise_id)`.** Implemented and unit-tested, but godevccu
-  assigns no `ise_id`, so it cannot be exercised against the simulator.
+- **`rename_device(ise_id)`.** Implemented and unit-tested. The recorded
+  blocker no longer holds: godevccu assigns ReGa object ids when
+  `Realism{RegaIDs: true}` is set (`internal/jsonrpc/handlers.go` `objectID` →
+  `RegisterAddress`, emitted as a string because that is what a CCU sends). The
+  daemon's own integration tests already drive `godevccu.Realism` for
+  `BatchEvents`, `FaultCodes` and `ErrorModel`, so the switch is available
+  rather than merely present. This is harness work here, not a daemon gap —
+  and it means the entry no longer belongs under "only real hardware can close
+  them".
 
 ## Verification gaps in the e2e suite
 
@@ -55,61 +60,50 @@ Currently `xfail`. Each needs harness work rather than production code.
 
 ## Open in this repository
 
-- **Adopt the onboarding release state (daemon 0.66.1+ / api 7.20.0).** The
-  daemon closed its half across #632-#634; this client has not consumed it yet.
-  Blocked on an `openccu-loom-types` release for 7.20.0 —
-  `DeviceReleasedPayload` is its own schema and cannot be bound against 0.5.8.
-  The drift guard already says so: with the daemon checked out beside this
-  repo, `TestRegistryCoverage::test_every_daemon_broadcast_has_a_python_binding`
-  fails on `['device.released']`. It is skipped where the daemon repo is
-  absent, so CI stays green — the reminder is deliberate, and binding the event
-  is the fix, not silencing it.
+- **`hs_color` double-scales saturation (read path, not write).** Decidable
+  from the daemon's code, so it does not need hardware — and the direction is
+  the opposite of what this entry assumed while it sat under "verify against a
+  real CCU".
 
-  Background: 0.66.0 held a newly paired device back from MQTT, Matter and the
-  webhook until an operator finished onboarding, but left REST/WS showing it,
-  because the Config UI must see it to configure it. That conflated transport
-  with role, and this backend is the case it missed — an ecosystem reached over
-  the configuration channel — so a device arrived in HA un-named. 0.66.1 put
-  the state on the device (`released` on `DeviceSummary` and on the
-  `device.created` payload, plus a `device.released` broadcast), and 0.66.2's
-  #634 went further: the daemon will do the filtering.
+  The daemon's custom-data-point plane already reports HA's scale.
+  `ColorLight.Color()` returns `s * 100` (`internal/model/custom/light/color.go:159`)
+  and `set_color` divides by 100 again (`:212`) — the only two scaling sites in
+  its light package, and they are inverse. `state.color.s` is therefore
+  **0..100**, not the wire fraction. The 0..1 is real but lives on the other
+  plane: the raw `SATURATION` data point, where the daemon reports whatever the
+  CCU sent.
 
-  What to implement, once the types exist:
+  So `hs_color`
+  (`compat/aiohomematic/model/custom/__init__.py:347-360`) multiplies an
+  already-scaled value: `sat * 100.0` on a value that arrives as 0..100. Half
+  saturation becomes 5000, HA clamps to 100, and every colour renders fully
+  saturated. The docstring names the cause — it assumes `color.s` carries the
+  wire value.
 
-  1. **`GET /snapshot?released_only=true`** in `bootstrap()`. No client-side
-     filtering of the device list — and it closes the race the flag alone left
-     open, where a `device.created` push arrives before the snapshot read
-     completes.
-  2. **`released_only: true` on the subscribe frame** in `WsTransport`. Applies
-     per connection, so it must ride `_send_initial_subscribe` as `classify`
-     already does, or a reconnect silently drops the filter.
-  3. **Bind `device.released`** and announce through the path
-     `_reconcile_new_device` already provides. The daemon never withholds this
-     frame — it is what lifts the filter — so it arrives even while filtering.
-  4. Both defaults are off, so an older daemon ignores the unknown field and
-     behaves exactly as today. Worth a test that the client still works against
-     one.
+  The write path needs no change: passing HA's `[0,100]` through unscaled is
+  exactly what `set_color` expects.
 
-  **Not covered by the daemon's filter (raised, not fixed here).**
-  `deviceAddressOf` (`internal/north/rest/ws/client.go:205-219`) says "Only the
-  device-scoped payloads are listed" and then lists five of ten. Still delivered
-  for a withheld device to a `released_only` subscriber:
+  Fix: drop the `* 100.0` in the read path and correct the docstring. Worth a
+  regression test at a middle saturation, where the bug is visible and a
+  full-saturation fixture would hide it. Daemon 0.66.1 states both scales in
+  `openapi.yaml` (`CustomDataPointStateChangedPayload.state`) and `wsapi.json`
+  (`cdp.invoke`); they lived only in Go comments before, which is what made the
+  assumption possible.
 
-  - `CustomDataPointStateChangedPayload` (`ws/payloads.go:86`) — the custom-DP
-    plane: covers, climate, lights;
-  - `DeviceTriggerPayload` (`ws/device_trigger.go:25`) — the worst of them for
-    this backend, since the refresh bridge turns a trigger into an HA event, so
-    a filtered-out device would still fire keypress automations;
-  - `OptimisticRollbackPayload` (`ws/optimistic_rollback.go:23`);
-  - `device.metadata_changed` and `schedules.changed`, whose payload structs
-    live in the adapter package (`central/adapter/eventbridge.go:504`, `:2985`)
-    and are therefore outside the switch's reach entirely.
+### Onboarding release state — closed (2026-08-28)
 
-  The last two suggest the shape of a durable fix: a small interface
-  (`DeviceAddr() string`) that any device-scoped payload satisfies, rather than
-  a type list that the next payload silently escapes — with a contract test
-  asserting that every payload carrying a `device_address` JSON field
-  implements it.
+Consumed in full against daemon 0.66.1 / api 7.21.0 (`openccu-loom-types`
+0.5.9). `LoomConfig.released_only` (default on) drives both planes from one
+flag, because the daemon's contract asks for the REST query and the WS
+subscribe option to be paired or "the two drift"; it rides every subscribe
+frame, initial and runtime alike, since the daemon applies it per connection
+and a reconnect that dropped it would silently resume delivering withheld
+devices. `DeviceReleasedEvent` is bound and adopts the device through the same
+reconcile a fresh pairing uses. A consumer that wants the Config UI's role sets
+the flag False.
+
+The daemon closed its own half across #632-#635, including the five payloads
+its first filter missed; nothing is left on either side.
 
 ### Reconnect / recovery — closed (2026-08-27)
 

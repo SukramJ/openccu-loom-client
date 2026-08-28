@@ -15,12 +15,18 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from dataclasses import replace
 from datetime import UTC, datetime
 from unittest.mock import patch
 
 from openccu_loom_types import DAEMON_API_VERSION
 from openccu_loom_types.rest import Kind2 as Kind
-from openccu_loom_types.ws import DataPointValueChangedPayload, DeviceAvailabilityChangedPayload, DeviceCreatedPayload
+from openccu_loom_types.ws import (
+    DataPointValueChangedPayload,
+    DeviceAvailabilityChangedPayload,
+    DeviceCreatedPayload,
+    DeviceReleasedPayload,
+)
 import pytest
 
 from openccu_loom_client import LoomClient
@@ -33,6 +39,7 @@ from openccu_loom_client.events import (
     DataPointValueChangedEvent,
     DeviceAvailabilityChangedEvent,
     DeviceCreatedEvent,
+    DeviceReleasedEvent,
 )
 from openccu_loom_client.exceptions import LoomIncompatibleVersionError, LoomTransportError
 from tests.helpers import MockDaemon
@@ -381,6 +388,20 @@ def _device_created_event(*, address: str, source: str = "NEW") -> DeviceCreated
     )
 
 
+def _device_released_event(*, address: str) -> DeviceReleasedEvent:
+    """Build the typed event the dispatch loop emits for a device.released push."""
+    return DeviceReleasedEvent(
+        seq=101,
+        kind=Kind.change,
+        ts=datetime(2026, 8, 28, 9, 0, 0, tzinfo=UTC),
+        topic=f"device.{address}.lifecycle",
+        type="device.released",
+        payload=DeviceReleasedPayload.model_validate(
+            {"central": "home", "interface_id": "home:HmIP-RF", "device_address": address}
+        ),
+    )
+
+
 class TestDeviceCreatedReconcile:
     """B1: a live device.created push must spawn HA entities without a full re-bootstrap."""
 
@@ -633,6 +654,58 @@ class TestStartEventsIsRestartable:
             assert client.events.subscription_count() == first
         finally:
             await client.close()
+
+
+class TestReleasedOnly:
+    """Onboarding release state (daemon 0.66.1+): adopt a device only once released."""
+
+    async def test_bootstrap_asks_the_daemon_to_filter(self, mock_daemon: MockDaemon) -> None:
+        _wire_endpoints(mock_daemon)
+        async with LoomClient(config=mock_daemon.config) as client:
+            await client.bootstrap()
+        snap = next(r for r in mock_daemon.requests if r.path.endswith("/snapshot"))
+        assert snap.query.get("released_only") == "true"
+
+    async def test_config_can_turn_the_filter_off(self, mock_daemon: MockDaemon) -> None:
+        """A consumer building a configuration surface needs to see everything."""
+        _wire_endpoints(mock_daemon)
+        cfg = replace(mock_daemon.config, released_only=False)
+        async with LoomClient(config=cfg) as client:
+            await client.bootstrap()
+        snap = next(r for r in mock_daemon.requests if r.path.endswith("/snapshot"))
+        assert "released_only" not in snap.query
+
+    async def test_device_released_adopts_the_device(self, mock_daemon: MockDaemon) -> None:
+        """
+        The release frame is what lifts the filter, so it must load the device.
+
+        With released_only on there was no device.created for it and no store
+        stub — the whole graph has to be fetched, exactly as for a new pairing.
+        """
+        _wire_endpoints(mock_daemon)
+        mock_daemon.get("/api/v1/devices/VCU0002", payload=_NEW_DEVICE_DETAIL)
+        mock_daemon.get(
+            "/api/v1/devices/VCU0002/channels/1/data-points",
+            payload=_NEW_DEVICE_DATA_POINTS,
+        )
+        async with LoomClient(config=mock_daemon.config) as client:
+            await client.bootstrap()
+            assert client.store.get_device(address="VCU0002") is None
+            await client._on_device_released(_device_released_event(address="VCU0002"))
+            await asyncio.sleep(0.1)
+            device = client.store.get_device(address="VCU0002")
+            assert device is not None
+            assert [dp.summary.parameter for ch in device.channels for dp in ch.data_points]
+
+    async def test_device_released_for_a_known_device_is_a_no_op(self, mock_daemon: MockDaemon) -> None:
+        """Without the filter the device was adopted at device.created already."""
+        _wire_endpoints(mock_daemon)
+        async with LoomClient(config=mock_daemon.config) as client:
+            await client.bootstrap()
+            before = len(mock_daemon.requests)
+            await client._on_device_released(_device_released_event(address="VCU0001"))
+            await asyncio.sleep(0.05)
+            assert len(mock_daemon.requests) == before
 
 
 class TestReadinessGate:

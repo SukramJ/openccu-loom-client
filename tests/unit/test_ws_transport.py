@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
+import dataclasses
 import json
 
 import aiohttp
@@ -293,6 +294,52 @@ class TestReplayLost:
             # Highest seq seen on the wire, not the -1 the overflow path passes
             # to the resync callback.
             assert transport.last_seq == 13
+
+
+class TestReleasedOnlySubscribe:
+    """The onboarding filter is per connection, so it must ride every subscribe."""
+
+    async def test_initial_subscribe_carries_released_only(self, fake_daemon) -> None:
+        async def script(ws: web.WebSocketResponse, _rx: list[dict]) -> None:
+            await asyncio.sleep(0.2)
+
+        cfg, rx = await fake_daemon(script)
+        async with WsTransport(config=cfg, initial_subscriptions=["device.*"]):
+            await asyncio.sleep(0.15)
+        assert rx and rx[0]["op"] == "subscribe"
+        assert rx[0].get("released_only") is True
+
+    async def test_runtime_subscribe_carries_it_too(self, fake_daemon) -> None:
+        """
+        A topic added later opens a second subscribe frame.
+
+        The daemon applies the option per connection, but a frame that omits it
+        is the one that would look like an opt-out.
+        """
+
+        async def script(ws: web.WebSocketResponse, _rx: list[dict]) -> None:
+            await asyncio.sleep(0.3)
+
+        cfg, rx = await fake_daemon(script)
+        async with WsTransport(config=cfg, initial_subscriptions=["device.*"]) as transport:
+            await asyncio.sleep(0.1)
+            await transport.subscribe(topics=["hub.*"])
+            await asyncio.sleep(0.1)
+        frames = [f for f in rx if f.get("op") == "subscribe"]
+        assert len(frames) == 2
+        assert all(f.get("released_only") is True for f in frames)
+
+    async def test_opt_out_sends_no_field(self, fake_daemon) -> None:
+        """Off must mean absent, not `false` — an older daemon reads neither."""
+
+        async def script(ws: web.WebSocketResponse, _rx: list[dict]) -> None:
+            await asyncio.sleep(0.2)
+
+        cfg, rx = await fake_daemon(script)
+        cfg = dataclasses.replace(cfg, released_only=False)
+        async with WsTransport(config=cfg, initial_subscriptions=["device.*"]):
+            await asyncio.sleep(0.15)
+        assert rx and "released_only" not in rx[0]
 
 
 class TestReconnectBackoff:
