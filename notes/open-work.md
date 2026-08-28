@@ -55,55 +55,61 @@ Currently `xfail`. Each needs harness work rather than production code.
 
 ## Open in this repository
 
-- **Adopt the onboarding release state (daemon 0.66.1 / api 7.19.0).** The
-  daemon closed its half; this client has not consumed it yet. Blocked only on
-  an `openccu-loom-types` release for 7.19.0 — `DeviceReleasedPayload` is its
-  own schema, so the event cannot be bound against 0.5.8.
-
+- **Adopt the onboarding release state (daemon 0.66.1+ / api 7.20.0).** The
+  daemon closed its half across #632-#634; this client has not consumed it yet.
+  Blocked on an `openccu-loom-types` release for 7.20.0 —
+  `DeviceReleasedPayload` is its own schema and cannot be bound against 0.5.8.
   The drift guard already says so: with the daemon checked out beside this
-  repo, `tests/unit/test_events_dispatcher.py::TestRegistryCoverage::test_every_daemon_broadcast_has_a_python_binding`
-  fails with "missing bindings for: ['device.released']". It is skipped where
-  the daemon repo is absent, so CI stays green — the reminder is deliberate and
-  should not be silenced; binding the event is the fix. Its payload
-  (`central`, `interface_id`, `device_address`) is identical in shape to
-  `DeviceRemovedPayload`, which makes borrowing that model tempting: don't. Wire
-  types come from `openccu-loom-types` (see `CLAUDE.md`), and a binding whose
-  type name names the wrong event is worse than a guard that stays red until
-  the real one exists.
+  repo, `TestRegistryCoverage::test_every_daemon_broadcast_has_a_python_binding`
+  fails on `['device.released']`. It is skipped where the daemon repo is
+  absent, so CI stays green — the reminder is deliberate, and binding the event
+  is the fix, not silencing it.
 
-  Background: 0.66.0 made pairing a wizard so a device is named and placed
-  before any ecosystem sees it, but enforced the hold on MQTT, Matter and the
-  webhook only — REST/WS was left showing unreleased devices because the Config
-  UI has to see them. That conflated transport with role, and this backend is
-  the case it misses: an ecosystem reached over the configuration channel. A
-  device therefore arrived in Home Assistant un-named, the outcome the release
-  step exists to prevent. 0.66.1 fixes it by putting the state on the device
-  rather than inferring it from the channel.
+  Background: 0.66.0 held a newly paired device back from MQTT, Matter and the
+  webhook until an operator finished onboarding, but left REST/WS showing it,
+  because the Config UI must see it to configure it. That conflated transport
+  with role, and this backend is the case it missed — an ecosystem reached over
+  the configuration channel — so a device arrived in HA un-named. 0.66.1 put
+  the state on the device (`released` on `DeviceSummary` and on the
+  `device.created` payload, plus a `device.released` broadcast), and 0.66.2's
+  #634 went further: the daemon will do the filtering.
 
-  What to consume, all of it additive — `released` is `true` for every device
-  that never entered the wizard, so an installation not using it behaves
-  exactly as before:
+  What to implement, once the types exist:
 
-  1. **`DeviceSummary.released`** on `GET /devices`, `GET /devices/{addr}` and
-     `GET /snapshot` — skip unreleased devices in `bootstrap()` so they never
-     enter the store.
-  2. **`released` on the `device.created` payload** — ignore the frame when it
-     is false: no store stub, no reconcile. The daemon put the flag on the
-     frame deliberately, because looking it up separately is a race the
-     consumer cannot win: the push can arrive before a snapshot read completes.
-  3. **The new `device.released` broadcast**, on the same
-     `device.{address}.lifecycle` topic — bind it, then load and announce the
-     device through the path `_reconcile_new_device` already provides. This is
-     the piece that cannot be compensated for locally: the consumer that needs
-     it is exactly the one that was connected and filtered the device out.
-  4. **`datapoint.value_changed` is deliberately NOT filtered** by release
-     state — the Config UI needs those values to verify a device before
-     releasing it — so an unreleased device streams values at us. No work
-     needed: with the device kept out of the store the frames find no
-     data-point and `apply_value_changed` drops them at DEBUG
-     (`store.py:1047`). Worth a test pinning that, since the contract states
-     the requirement explicitly and the current behaviour satisfies it by
-     accident rather than by design.
+  1. **`GET /snapshot?released_only=true`** in `bootstrap()`. No client-side
+     filtering of the device list — and it closes the race the flag alone left
+     open, where a `device.created` push arrives before the snapshot read
+     completes.
+  2. **`released_only: true` on the subscribe frame** in `WsTransport`. Applies
+     per connection, so it must ride `_send_initial_subscribe` as `classify`
+     already does, or a reconnect silently drops the filter.
+  3. **Bind `device.released`** and announce through the path
+     `_reconcile_new_device` already provides. The daemon never withholds this
+     frame — it is what lifts the filter — so it arrives even while filtering.
+  4. Both defaults are off, so an older daemon ignores the unknown field and
+     behaves exactly as today. Worth a test that the client still works against
+     one.
+
+  **Not covered by the daemon's filter (raised, not fixed here).**
+  `deviceAddressOf` (`internal/north/rest/ws/client.go:205-219`) says "Only the
+  device-scoped payloads are listed" and then lists five of ten. Still delivered
+  for a withheld device to a `released_only` subscriber:
+
+  - `CustomDataPointStateChangedPayload` (`ws/payloads.go:86`) — the custom-DP
+    plane: covers, climate, lights;
+  - `DeviceTriggerPayload` (`ws/device_trigger.go:25`) — the worst of them for
+    this backend, since the refresh bridge turns a trigger into an HA event, so
+    a filtered-out device would still fire keypress automations;
+  - `OptimisticRollbackPayload` (`ws/optimistic_rollback.go:23`);
+  - `device.metadata_changed` and `schedules.changed`, whose payload structs
+    live in the adapter package (`central/adapter/eventbridge.go:504`, `:2985`)
+    and are therefore outside the switch's reach entirely.
+
+  The last two suggest the shape of a durable fix: a small interface
+  (`DeviceAddr() string`) that any device-scoped payload satisfies, rather than
+  a type list that the next payload silently escapes — with a contract test
+  asserting that every payload carrying a `device_address` JSON field
+  implements it.
 
 ### Reconnect / recovery — closed (2026-08-27)
 
