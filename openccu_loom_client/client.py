@@ -121,12 +121,9 @@ _DEFAULT_WS_SUBSCRIPTIONS: Final = (
 # collapses to at most one walk per (walk duration + cooldown).
 _REBOOTSTRAP_COOLDOWN_SECONDS: Final = 30.0
 
-# How long wait_until_ready() polls before giving up, and how often. A CCU
-# bring-up on a large installation is a minutes-long affair, and the cost of
-# waiting is nil compared to bootstrapping an empty model — but the wait must
-# be bounded, because a daemon whose CCU never appears would otherwise hold a
-# consumer's setup open forever.
-_READINESS_WAIT_TIMEOUT_SECONDS: Final = 180.0
+# How often wait_until_ready() polls. The ceiling it polls against is
+# LoomConfig.readiness_wait_seconds, because how long a caller can afford to
+# block is the caller's question, not this module's.
 _READINESS_POLL_SECONDS: Final = 3.0
 
 
@@ -383,7 +380,7 @@ class LoomClient:
             return None
         return getattr(entry, "readiness", None)
 
-    async def wait_until_ready(self, *, timeout_seconds: float = _READINESS_WAIT_TIMEOUT_SECONDS) -> bool:
+    async def wait_until_ready(self, *, timeout_seconds: float | None = None) -> bool:
         """
         Poll the daemon's readiness until its bring-up has latched, or give up.
 
@@ -393,12 +390,18 @@ class LoomClient:
         the bootstrap "succeeds", the store is empty, and a consumer announces
         no entities at all.
 
+        ``timeout_seconds`` defaults to :attr:`LoomConfig.readiness_wait_seconds`,
+        so a caller that cares about its own startup latency sets it once on the
+        config rather than at every call site. A value of 0 skips the wait.
+
         Returns ``True`` when readiness latched (or the daemon does not report
         readiness at all, which is the older-daemon case and must not block
         anyone), ``False`` on timeout. A ``False`` is not fatal: the caller may
         bootstrap anyway and rely on the daemon's resync push when the CCU
         arrives — this only avoids paying for a walk that is known to be empty.
         """
+        if timeout_seconds is None:
+            timeout_seconds = self._config.readiness_wait_seconds
         deadline = asyncio.get_running_loop().time() + timeout_seconds
         logged = False
         while True:

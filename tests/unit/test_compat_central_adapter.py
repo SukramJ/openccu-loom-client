@@ -21,13 +21,15 @@ from typing import Any
 from aiohomematic.central.events import EventBus as AioEventBus
 from openccu_loom_types import DAEMON_API_VERSION
 from openccu_loom_types.enums import DataPointCategory
-from openccu_loom_types.rest import AlarmMessage, DataPointSummary, Link, ServiceMessage, Snapshot
+from openccu_loom_types.rest import AlarmMessage, DataPointSummary, Kind2 as Kind, Link, ServiceMessage, Snapshot
 import pytest
 
 from openccu_loom_client import BasicAuth, BearerAuth
 from openccu_loom_client.compat.aiohomematic._upstream import BackupData, ParamsetKey
 from openccu_loom_client.compat.aiohomematic.central import CentralConfig, check_config
+import openccu_loom_client.compat.aiohomematic.central.adapter as adapter_module
 from openccu_loom_client.compat.aiohomematic.central.adapter import (
+    CentralState,
     _ClientCoordinator,
     _Configuration,
     _IncidentStore,
@@ -35,6 +37,7 @@ from openccu_loom_client.compat.aiohomematic.central.adapter import (
     _LinkCoordinator,
     _ui_schema_to_parameter_data,
 )
+from openccu_loom_client.events import ConnectionStateChangedEvent as LoomConnectionStateChangedEvent
 from openccu_loom_client.exceptions import LoomConflictError, LoomNotFoundError
 from tests.helpers import MockDaemon
 
@@ -84,6 +87,70 @@ def _make_config(*, mock_daemon: MockDaemon | None = None, **overrides) -> Centr
         base["port"] = mock_daemon.port
     base.update(overrides)
     return CentralConfig(**base)
+
+
+def _conn_event(*, connected: bool) -> LoomConnectionStateChangedEvent:
+    """Build the client-side connection transition the adapter subscribes to."""
+    return LoomConnectionStateChangedEvent(
+        seq=0,
+        kind=Kind.change,
+        ts=datetime.now(tz=UTC),
+        topic=None,
+        type=LoomConnectionStateChangedEvent.type_id,
+        connected=connected,
+    )
+
+
+class TestDegradedGrace:
+    """A short WS flap must not be announced as a state change."""
+
+    async def test_brief_drop_is_not_reported(self, monkeypatch) -> None:
+        """
+        The transport retries 0.5 s after a drop; most are over before that.
+
+        Reporting each one costs more than it tells — a consumer that renders
+        the transition would show a pair of them for an outage nobody noticed.
+        """
+        monkeypatch.setattr(adapter_module, "_DEGRADED_GRACE_SECONDS", 0.2)
+        central = await _make_config().create_central()
+        central._state = CentralState.Running
+
+        await central._on_connection_state_changed(_conn_event(connected=False))
+        await asyncio.sleep(0.05)
+        assert central._state is CentralState.Running, "reported before the grace window elapsed"
+
+        await central._on_connection_state_changed(_conn_event(connected=True))
+        await asyncio.sleep(0.3)
+        assert central._state is CentralState.Running, "a reconnect must cancel the pending report"
+
+    async def test_sustained_drop_is_reported(self, monkeypatch) -> None:
+        monkeypatch.setattr(adapter_module, "_DEGRADED_GRACE_SECONDS", 0.05)
+        central = await _make_config().create_central()
+        central._state = CentralState.Running
+
+        await central._on_connection_state_changed(_conn_event(connected=False))
+        await asyncio.sleep(0.2)
+        assert central._state is CentralState.Degraded
+
+    async def test_recovery_is_immediate(self, monkeypatch) -> None:
+        """Staleness ending is news at once; by then the connection has proven itself."""
+        monkeypatch.setattr(adapter_module, "_DEGRADED_GRACE_SECONDS", 5.0)
+        central = await _make_config().create_central()
+        central._state = CentralState.Degraded
+
+        await central._on_connection_state_changed(_conn_event(connected=True))
+        assert central._state is CentralState.Running
+
+    async def test_stop_cancels_a_pending_report(self, monkeypatch) -> None:
+        monkeypatch.setattr(adapter_module, "_DEGRADED_GRACE_SECONDS", 0.05)
+        central = await _make_config().create_central()
+        central._state = CentralState.Running
+        await central._on_connection_state_changed(_conn_event(connected=False))
+        pending = central._degraded_task
+        assert pending is not None
+        central._degraded_task.cancel()
+        await asyncio.sleep(0.1)
+        assert central._state is CentralState.Running
 
 
 class TestCentralConfigAuthResolution:
