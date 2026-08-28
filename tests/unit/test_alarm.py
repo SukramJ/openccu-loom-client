@@ -96,7 +96,15 @@ def _zone_status(*, zone_id: str = "erdgeschoss", **overrides: Any) -> AlarmZone
 
 
 class _FakeTransport:
-    """Records every call so assertions can match against URL + body."""
+    """
+    Records every call so assertions can match against URL + body.
+
+    Answers `/arm` with an `AlarmArmAccepted` record, because that is what the
+    daemon answers: `POST /alarm/zones/{id}/arm` returns 200 with a body
+    (`internal/north/rest/handlers/alarm.go:169`, documented in the spec).
+    Returning `None` here modelled a response the daemon never sends, which
+    is why the store could discard the record without anything noticing.
+    """
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, dict | None]] = []
@@ -112,6 +120,8 @@ class _FakeTransport:
         allow_retry: Any = None,
     ) -> Any:
         self.calls.append((method, path, json_body))
+        if path.endswith("/arm"):
+            return {"state": "armed", "bypassed": [], "exit_delay_s": 0}
         return None
 
 

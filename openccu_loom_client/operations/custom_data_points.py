@@ -58,9 +58,15 @@ class CustomDataPointsOperations(_OperationsBase):
             body["params"] = params
         if priority is not None:
             body["priority"] = priority
+        # Always send a JSON body, even an empty one: the daemon parses the
+        # body strictly and answers a bodyless POST with 400 "Invalid JSON:
+        # EOF", so `body or None` broke every operation that takes no
+        # parameters — turn_on, a cover's open, a siren's stop. Nothing
+        # noticed because nothing called this until the store started
+        # delegating to it; the store had always sent `{}` and said why.
         await self._transport.request(
             method="POST",
             path=f"/devices/{address}/cdps/{quote(name, safe='')}/{quote(operation, safe='')}",
-            json_body=body or None,
+            json_body=body,
             allow_retry=False,
         )
