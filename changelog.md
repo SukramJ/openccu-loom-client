@@ -1,3 +1,69 @@
+# Version 2026.8.29 (2026-08-28)
+
+**Fixes a broken 2026.8.28.** That release declared
+`openccu-loom-types==0.5.8` in `pyproject.toml` while its code imports
+`DeviceReleasedPayload`, which the types package only carries from 0.5.9. A
+clean `pip install openccu-loom-client==2026.8.28` therefore resolves 0.5.8 and
+fails on import:
+
+    ImportError: cannot import name 'DeviceReleasedPayload' from 'openccu_loom_types.ws'
+
+Anyone on 2026.8.28 should upgrade; there is no workaround short of pinning the
+types package by hand.
+
+The pin is kept in two files, and only `requirements.txt` was moved to 0.5.9.
+That file is the CI pin, so every test ran against the right version and
+nothing failed — the declared dependency, which is what an installer reads, was
+the one left behind. `CLAUDE.md` says to bump both together for exactly this
+reason.
+
+2026.8.28 also carried more than its entry described: it was written for the
+types sync, and the work below landed on the same branch afterwards. It is
+recorded here for the record — **all of it is in 2026.8.28** and needs no
+upgrade of its own, only the working dependency above.
+
+That entry additionally states that the daemon's onboarding hold could not be
+honoured by this backend and that nothing was fixed. True when written, not
+when shipped: the fix is in the release it describes.
+
+- **Colours no longer render fully saturated.** The read path multiplied the
+  daemon's saturation by 100 on the way to Home Assistant, but the
+  custom-data-point plane already reports HA's 0..100 scale — half saturation
+  became 5000 and Home Assistant clamped it to 100. The 0..1 fraction the old
+  code scaled for is real; it lives on the raw `SATURATION` data point rather
+  than here. The write path was already correct.
+
+  The existing test could not catch it: it fed a 0..1 value and asserted the
+  scaled result, encoding the same assumption the code made. Its replacement
+  sits at a middle saturation, because at full saturation the clamp lands on
+  the value correct code returns anyway and the bug stays invisible.
+
+- **A device is adopted only once its onboarding is finished** (daemon ≥
+  0.66.1). A freshly paired device is named and placed before any ecosystem
+  sees it — one shown a device first and corrected afterwards keeps the
+  identity it saw, in Home Assistant's case the entity ids of the unnamed
+  device. The daemon can now be asked to withhold such devices, and this client
+  asks by default, on both the snapshot and the event stream from a single
+  setting so the two cannot disagree. When the operator finishes onboarding,
+  the daemon announces it and the device is adopted then.
+
+  A consumer that wants the opposite — a configuration surface, which has to
+  see a device in order to configure it — sets `LoomConfig.released_only` to
+  False. Against a daemon older than 0.66.1 nothing changes: it ignores the
+  request and delivers everything.
+
+- **The end-to-end suite runs again.** It had stopped booting the daemon at
+  all: the fixtures wrote a data directory into its config without creating it,
+  and SQLite cannot create a database inside a directory that does not exist.
+  Behind that were six call sites left behind by conventions this repository
+  adopted after the suite was last exercised. None was a production defect —
+  the suite simply never ran against the current API, which is also why the
+  missing directory went unnoticed.
+
+  It now covers renaming a device by its CCU object id, recorded until now as
+  testable only against real hardware. The simulator assigns those ids when
+  asked, so the gap was in the harness rather than the daemon.
+
 # Version 2026.8.28 (2026-08-27)
 
 Syncs the client to daemon 0.66.0 / api 7.17.0 (`openccu-loom-types` 0.5.8).
