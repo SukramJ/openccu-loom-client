@@ -60,6 +60,17 @@ Currently `xfail`. Each needs harness work rather than production code.
   an `openccu-loom-types` release for 7.19.0 — `DeviceReleasedPayload` is its
   own schema, so the event cannot be bound against 0.5.8.
 
+  The drift guard already says so: with the daemon checked out beside this
+  repo, `tests/unit/test_events_dispatcher.py::TestRegistryCoverage::test_every_daemon_broadcast_has_a_python_binding`
+  fails with "missing bindings for: ['device.released']". It is skipped where
+  the daemon repo is absent, so CI stays green — the reminder is deliberate and
+  should not be silenced; binding the event is the fix. Its payload
+  (`central`, `interface_id`, `device_address`) is identical in shape to
+  `DeviceRemovedPayload`, which makes borrowing that model tempting: don't. Wire
+  types come from `openccu-loom-types` (see `CLAUDE.md`), and a binding whose
+  type name names the wrong event is worse than a guard that stays red until
+  the real one exists.
+
   Background: 0.66.0 made pairing a wizard so a device is named and placed
   before any ecosystem sees it, but enforced the hold on MQTT, Matter and the
   webhook only — REST/WS was left showing unreleased devices because the Config
