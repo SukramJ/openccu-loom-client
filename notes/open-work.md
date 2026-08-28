@@ -12,7 +12,9 @@ replacement. Runtime reuse of `aiohomematic` is deliberate, and the
 rationale lives in `CLAUDE.md` → "What this is".
 
 Every claim below was re-verified against the tree on 2026-08-08 (daemon
-0.55.0, API 5.8.0, `openccu-loom-types` 0.3.5).
+0.55.0, API 5.8.0, `openccu-loom-types` 0.3.5). The daemon-facing claims were
+re-checked against daemon 0.66.1 / API 7.21.0 / wsapi 1.7 on 2026-08-28; where
+that changed an entry, it says so inline.
 
 ---
 
@@ -30,14 +32,14 @@ close them. None is blocked on code.
 - **Sysvar `extended` marker.** Wired end-to-end
   (`compat/aiohomematic/model/hub/__init__.py`); confirm an extended variable
   surfaces as the writable flavour.
-- **HS colour round-trip.** `CustomDpDimmer.hs_color` reads nested
-  `color:{h,s}` and scales saturation `[0,1] → [0,100]` for HA, but the write
-  path (`turn_on` → `set_color`) sends HA's `[0,100]` through unscaled.
-  Confirm the daemon's `set_color` scale; a write-path fix may follow.
-- **`rename_device(ise_id)`.** Implemented and unit-tested, but godevccu
-  assigns no `ise_id`, so it cannot be exercised against the simulator.
 
 ## Verification gaps in the e2e suite
+
+`rename_device(ise_id)` is covered as of 2026-08-28 and no longer sits under
+"only real hardware": the missing piece was `Realism{RegaIDs: true}` on the
+`godevccu-e2e` helper (daemon PR #636), without which every `ise_id` is `None`.
+The suite itself had stopped running altogether — see the same day's
+`test(e2e): make the suite runnable again`.
 
 Currently `xfail`. Each needs harness work rather than production code.
 
@@ -55,29 +57,50 @@ Currently `xfail`. Each needs harness work rather than production code.
 
 ## Open in this repository
 
-- **The device inbox does not model the onboarding middle state (daemon
-  0.66.0).** `GET /hub/inbox` now flags entries with `awaiting_release`: the
-  device is already accepted and fully materialised — it has its ise*id,
-  channels and data points, and can be renamed and assigned rooms — but is
-  withheld from MQTT, the Matter bridge and outbound webhooks until an operator
-  finishes onboarding with `POST /devices/{addr}/release`
-  (`internal/north/rest/handlers/hub.go:263-269`, `:1089`). The daemon lists
-  those entries in the same inbox as the ones genuinely awaiting a decision,
-  and its schema says outright that a client must not offer \_accept* for them,
-  because they are already accepted.
+- **`hs_color` double-scales saturation (read path, not write).** Decidable
+  from the daemon's code, so it does not need hardware — and the direction is
+  the opposite of what this entry assumed while it sat under "verify against a
+  real CCU".
 
-  This client flattens the entry into aiohomematic's `InboxDeviceData`
-  (`compat/aiohomematic/central/adapter.py:616`), which carries only
-  `device_id`/`address`/`name`/`device_type`/`interface` — neither
-  `awaiting_release` nor `pending_creation` survives the conversion, so HA
-  offers `accept_device_in_inbox` for every entry alike. There is also no
-  client call for the release route.
+  The daemon's custom-data-point plane already reports HA's scale.
+  `ColorLight.Color()` returns `s * 100` (`internal/model/custom/light/color.go:159`)
+  and `set_color` divides by 100 again (`:212`) — the only two scaling sites in
+  its light package, and they are inverse. `state.color.s` is therefore
+  **0..100**, not the wire fraction. The 0..1 is real but lives on the other
+  plane: the raw `SATURATION` data point, where the daemon reports whatever the
+  CCU sent.
 
-  Two-sided: carrying the flag through needs a field on aiohomematic's record,
-  so it is a coordinated change rather than a local one. Establish first what
-  the daemon does with an accept against an already-accepted device — if it is
-  a harmless no-op the gap is cosmetic, if it errors then HA surfaces a failure
-  for an action it should not have offered.
+  So `hs_color`
+  (`compat/aiohomematic/model/custom/__init__.py:347-360`) multiplies an
+  already-scaled value: `sat * 100.0` on a value that arrives as 0..100. Half
+  saturation becomes 5000, HA clamps to 100, and every colour renders fully
+  saturated. The docstring names the cause — it assumes `color.s` carries the
+  wire value.
+
+  The write path needs no change: passing HA's `[0,100]` through unscaled is
+  exactly what `set_color` expects.
+
+  Fix: drop the `* 100.0` in the read path and correct the docstring. Worth a
+  regression test at a middle saturation, where the bug is visible and a
+  full-saturation fixture would hide it. Daemon 0.66.1 states both scales in
+  `openapi.yaml` (`CustomDataPointStateChangedPayload.state`) and `wsapi.json`
+  (`cdp.invoke`); they lived only in Go comments before, which is what made the
+  assumption possible.
+
+### Onboarding release state — closed (2026-08-28)
+
+Consumed in full against daemon 0.66.1 / api 7.21.0 (`openccu-loom-types`
+0.5.9). `LoomConfig.released_only` (default on) drives both planes from one
+flag, because the daemon's contract asks for the REST query and the WS
+subscribe option to be paired or "the two drift"; it rides every subscribe
+frame, initial and runtime alike, since the daemon applies it per connection
+and a reconnect that dropped it would silently resume delivering withheld
+devices. `DeviceReleasedEvent` is bound and adopts the device through the same
+reconcile a fresh pairing uses. A consumer that wants the Config UI's role sets
+the flag False.
+
+The daemon closed its own half across #632-#635, including the five payloads
+its first filter missed; nothing is left on either side.
 
 ### Reconnect / recovery — closed (2026-08-27)
 

@@ -373,11 +373,34 @@ class TestCustomDeepParity:
             kind="light_color",
             category="light",
             capabilities={"color": True, "brightness": True},
-            state={"state": "ON", "color_mode": "hs", "color": {"h": 210, "s": 0.8}},
+            state={"state": "ON", "color_mode": "hs", "color": {"h": 210, "s": 80}},
         )
         assert isinstance(dp, CustomDpDimmer)
-        # hue passthrough (degrees); daemon saturation [0,1] → HA [0,100].
+        # Both values pass through: the custom-data-point plane already
+        # reports HA's units (hue in degrees, saturation 0..100).
         assert dp.hs_color == (210.0, 80.0)
+
+    def test_light_hs_color_does_not_rescale_saturation(self) -> None:
+        """
+        Saturation arrives on HA's scale and must not be multiplied again.
+
+        The read path used to scale for the 0..1 wire fraction, which lives on
+        the raw SATURATION data point rather than here: the daemon's
+        custom-data-point plane normalises to 0..100 once
+        (`internal/model/custom/light/color.go:159`) and divides back on write
+        (`:212`). The double scaling turned this 50 into 5000, and HA clamps to
+        100 — so every colour rendered fully saturated.
+
+        Deliberately at a middle saturation. At 100 the bug is invisible: the
+        clamp lands on the value the correct code returns anyway.
+        """
+        dp, _ = _cdp_instance(
+            kind="light_color",
+            category="light",
+            capabilities={"color": True, "brightness": True},
+            state={"state": "ON", "color_mode": "hs", "color": {"h": 30, "s": 50}},
+        )
+        assert dp.hs_color == (30.0, 50.0)
 
     def test_light_hs_color_ignores_flat_keys(self) -> None:
         """

@@ -7,24 +7,29 @@ generated models moved by a single optional field, because the daemon ties its
 carry. The schema digest matches the new daemon build exactly, so `connect()`
 stays quiet about contract drift.
 
-- **The device inbox gained a state this client cannot yet tell apart.** The
-  daemon's new `awaiting_release` flag marks a device that is already accepted
-  and fully materialised — it has its CCU ise*id, its channels and its data
-  points, and can be renamed and assigned rooms — but is deliberately withheld
-  from the ecosystems (MQTT and therefore Home Assistant, the Matter bridge,
-  outbound webhooks) until an operator finishes onboarding it. Such entries are
-  listed in the same inbox as the ones genuinely waiting for a decision, and
-  the daemon's schema says a client must not offer \_accept* for them: they are
-  already accepted, and what they need is the new release call.
+- **The daemon's onboarding hold does not yet apply to this backend.** From
+  0.66.0 a freshly paired device is named and placed before any ecosystem sees
+  it, which is the right order: an ecosystem shown a device first and corrected
+  afterwards keeps the identity it saw — in Home Assistant's case the entity
+  ids of the still-unnamed device. The daemon holds the device back until the
+  operator finishes onboarding, then releases it.
 
-  Nothing here reads the flag yet. Inbox entries are flattened into
-  aiohomematic's record, which has no field to carry it, so Home Assistant is
-  offered the same accept action for every entry alike — and there is no client
-  call for the release route either. Closing that needs a change on the
-  aiohomematic side as well, so it is recorded in `notes/open-work.md` rather
-  than half-done here, together with the question to settle first: what the
-  daemon actually does with an accept against a device that is already
-  accepted.
+  That hold is enforced for MQTT and the outbound webhook, but not on the REST
+  and WebSocket surfaces this backend uses. Accepting a device materialises it
+  in the daemon's model — it has to, or there would be no ise_id and no
+  channels to name — and from that moment it is in the snapshot and in the live
+  `device.created` push alike. So over this backend a device still mid-wizard
+  arrives in Home Assistant as soon as it is accepted, before it has been
+  named. (Devices in the wizard's first state are unaffected: those are held
+  out of the model entirely.)
+
+  Nothing is fixed here, because against this daemon nothing can be: the
+  snapshot carries no flag saying a device is still held, and no WebSocket
+  event announces a release, so this client cannot tell the two states apart
+  even if it wanted to. Daemon 0.66.1 adds both — a `released` field on the
+  device and on the `device.created` push, plus a `device.released` broadcast —
+  and this client will consume them once a matching `openccu-loom-types`
+  release exists. `notes/open-work.md` records what that involves.
 
 - `ruff` 0.16.4 → 0.16.5 (hook pin and pre-commit requirement in lock-step).
 

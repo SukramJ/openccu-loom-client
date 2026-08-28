@@ -53,7 +53,7 @@ async def test_value_changed_pushed_over_ws(client_with_ccu: LoomClient) -> None
     await client_with_ccu.start_events()
     await asyncio.sleep(_WS_SETTLE_S)
 
-    await dp.send_value(target)
+    await dp.send_value(value=target)
 
     await asyncio.wait_for(seen.wait(), timeout=_EVENT_TIMEOUT_S)
     assert captured["value"] == target
@@ -69,7 +69,7 @@ async def test_store_reflects_value_change(client_with_ccu: LoomClient) -> None:
 
     await client_with_ccu.start_events()
     await asyncio.sleep(_WS_SETTLE_S)
-    await dp.send_value(target)
+    await dp.send_value(value=target)
 
     loop = asyncio.get_running_loop()
     deadline = loop.time() + _EVENT_TIMEOUT_S

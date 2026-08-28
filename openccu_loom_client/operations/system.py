@@ -53,7 +53,7 @@ class SystemOperations(_OperationsBase):
 
     # ---- snapshot ----
 
-    async def get_snapshot(self, *, include: str | None = None) -> Snapshot:
+    async def get_snapshot(self, *, include: str | None = None, released_only: bool = False) -> Snapshot:
         """
         One-shot dump of every device / program / sysvar / interface.
 
@@ -69,12 +69,25 @@ class SystemOperations(_OperationsBase):
         fan-out. With ``include=None`` the flat summary shape is returned
         (devices / programs / sysvars / interfaces only), unchanged.
 
+        ``released_only`` asks the daemon to omit devices whose onboarding
+        the operator has not finished (daemon ≥ 0.66.1). Opt-in and never
+        the default on the wire, because the same endpoint serves the
+        daemon's Config UI, which must see such a device in order to
+        configure it. An ecosystem consumer wants it on — see
+        :attr:`LoomConfig.released_only`, which is what
+        :meth:`LoomClient.bootstrap` passes. An older daemon ignores the
+        unknown parameter and returns everything.
+
         (The daemon additionally offers NDJSON streaming via
         ``Accept: application/x-ndjson``; this client consumes the
         nested JSON envelope, not the stream.)
         """
-        params = {"include": include} if include else None
-        payload = await self._transport.request(method="GET", path="/snapshot", params=params)
+        params: dict[str, Any] = {}
+        if include:
+            params["include"] = include
+        if released_only:
+            params["released_only"] = "true"
+        payload = await self._transport.request(method="GET", path="/snapshot", params=params or None)
         return Snapshot.model_validate(payload)
 
     # ---- interfaces ----

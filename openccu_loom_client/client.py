@@ -47,6 +47,7 @@ from openccu_loom_client.bridge import bind_ws_events_to_store
 from openccu_loom_client.capabilities import Capability
 from openccu_loom_client.events import (
     DeviceCreatedEvent,
+    DeviceReleasedEvent,
     EventBus,
     SubscriptionGroup,
     event_from_envelope,
@@ -455,7 +456,7 @@ class LoomClient:
         detail-only, not carried by the snapshot's device summaries.
         """
         include = "data_points" if fetch_data_points else None
-        snapshot = await self.system.get_snapshot(include=include)
+        snapshot = await self.system.get_snapshot(include=include, released_only=self._config.released_only)
         self._store.load_snapshot(snapshot=snapshot)
 
         # load_snapshot derives the central id from the interface list.
@@ -585,6 +586,12 @@ class LoomClient:
         # announce) because it — unlike the store — knows the bus. Subscribed
         # after the bridge so the stub exists before the reconcile spawns.
         self._wire_group.subscribe(event_type=DeviceCreatedEvent, handler=self._on_device_created)
+        # Onboarding release (daemon ≥ 0.66.1). With released_only on, the
+        # device.created frame for a withheld device never arrives — this is
+        # the frame that says it became adoptable, and the daemon never
+        # withholds it. Same reconcile as a fresh pairing: the device is
+        # complete on the daemon side by now, we simply have not loaded it.
+        self._wire_group.subscribe(event_type=DeviceReleasedEvent, handler=self._on_device_released)
 
         # Dispatch loop: WsEnvelope → typed event → bus.publish.
         self._dispatch_task = asyncio.create_task(self._dispatch_loop(), name="openccu-loom-dispatch")
@@ -720,6 +727,30 @@ class LoomClient:
         self._spawn_background(
             coro=self._reconcile_new_device(address=event.payload.device_address),
             name="openccu-loom-reconcile-device",
+        )
+
+    async def _on_device_released(self, event: DeviceReleasedEvent, /) -> None:
+        """
+        Adopt a device whose onboarding the operator just finished.
+
+        Reached only in the ``released_only`` mode this client defaults to;
+        without the filter the device was adopted at ``device.created`` and is
+        already complete, which the guard below detects either way.
+
+        Unlike ``device.created`` there is no store stub to build on — the wire
+        bridge never saw the device — so the reconcile fetches the whole graph,
+        which is what it does for a new pairing anyway.
+        """
+        if self._closing:
+            return
+        address = event.payload.device_address
+        if self._store_holds_complete_device(address=address):
+            _LOGGER.debug("device.released for %s, already complete in the store — nothing to adopt", address)
+            return
+        _LOGGER.info("device %s finished onboarding — adopting it", address)
+        self._spawn_background(
+            coro=self._reconcile_new_device(address=address),
+            name="openccu-loom-adopt-released-device",
         )
 
     def _store_holds_complete_device(self, *, address: str) -> bool:

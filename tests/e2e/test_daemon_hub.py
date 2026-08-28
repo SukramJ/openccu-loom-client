@@ -72,7 +72,7 @@ async def test_set_sysvar_via_store_wrapper(client_with_ccu: LoomClient) -> None
     sysvar = client_with_ccu.store.get_sysvar(name="TargetTemperature")
     assert sysvar is not None
     target = round(float(sysvar.value or 0) + 2.0, 1)
-    await sysvar.set_value(target)
+    await sysvar.set_value(value=target)
     after = await client_with_ccu.hub.get_sysvar(name="TargetTemperature")
     assert abs(float(after.value) - target) < 0.01
 
@@ -100,12 +100,16 @@ async def test_sysvar_changed_event(client_with_ccu: LoomClient) -> None:
     await asyncio.wait_for(seen.wait(), timeout=_EVENT_TIMEOUT_S)
 
 
-@pytest.mark.xfail(
-    reason="daemon does not broadcast hub.program_executed for a client-initiated "
-    "execute against the simulator; needs a CCU-side trigger to drive it",
-    strict=False,
-)
 async def test_program_executed_event(client_with_ccu: LoomClient) -> None:
+    """
+    A client-initiated execute does reach the WS plane.
+
+    This was xfail on the premise that the daemon only broadcasts
+    `hub.program_executed` for a CCU-side trigger, so it could not be driven
+    from here. It passes against the current daemon, which makes the premise
+    stale rather than the test unreliable — verified over repeated runs before
+    the marker was dropped.
+    """
     await client_with_ccu.bootstrap()
     programs = await client_with_ccu.hub.list_programs()
     seen = asyncio.Event()
