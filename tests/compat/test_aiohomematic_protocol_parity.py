@@ -43,6 +43,7 @@ import pytest
 aiohomematic = pytest.importorskip("aiohomematic")
 
 from aiohomematic.interfaces.model import (  # noqa: E402 — after importorskip
+    CallbackDataPointProtocol,
     CustomDataPointProtocol,
     GenericDataPointProtocol,
     GenericProgramDataPointProtocol,
@@ -148,6 +149,18 @@ _CASES: list[tuple[str, Any, Any]] = [
         )
     ),
     *((n, _program_instance, GenericProgramDataPointProtocol) for n in ("ProgramDpButton", "ProgramDpSwitch")),
+    # `CallbackDataPointProtocol` is checked four times in the integration, on
+    # data points of both kinds, and was not covered here. It is the
+    # subscription surface — a twin that failed it would take its entity's
+    # state updates with it.
+    *(
+        (n, _generic_instance, CallbackDataPointProtocol)
+        for n in ("DpSwitch", "DpBinarySensor", "DpSensor", "DpSelect")
+    ),
+    *(
+        (n, _custom_instance, CallbackDataPointProtocol)
+        for n in ("CustomDpSwitch", "CustomDpDimmer", "CustomDpCover", "CustomDpIpThermostat")
+    ),
 ]
 
 
