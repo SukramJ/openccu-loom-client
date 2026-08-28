@@ -348,17 +348,26 @@ class CustomDpDimmer(_CustomEntitySurface):
         """
         Return the ``(hue, saturation)`` colour, or ``None`` if unavailable.
 
-        The daemon emits a nested ``color: {h, s}`` object (hue in degrees
-        [0,360], saturation in [0,1]); HA's ``hs_color`` convention is
-        saturation [0,100], so scale it up. The scaling is the only
-        conversion here — the values themselves come from the daemon.
+        The daemon emits a nested ``color: {h, s}`` object with hue in degrees
+        [0,360] and **saturation already on HA's [0,100] scale** — no
+        conversion is needed in either direction.
+
+        That is worth stating, because the 0..1 fraction is real and this
+        property used to scale for it. It lives on the other plane: the raw
+        ``SATURATION`` data point carries what the CCU sent, while the
+        custom-data-point plane normalises it once
+        (``internal/model/custom/light/color.go:159`` multiplies by 100 so
+        every north-bound consumer shares one unit, and ``:212`` divides by
+        100 again on the way back). Multiplying here turned half saturation
+        into 5000, which HA clamps to 100 — so every colour rendered fully
+        saturated, and a full-saturation test could not see it.
         """
         color = self._state.get("color")
         if not isinstance(color, dict):
             return None
         hue = _as_float(value=color.get("h"))
         sat = _as_float(value=color.get("s"))
-        return (hue, sat * 100.0) if hue is not None and sat is not None else None
+        return (hue, sat) if hue is not None and sat is not None else None
 
     @property
     def effect(self) -> str | None:
