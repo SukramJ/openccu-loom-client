@@ -26,7 +26,7 @@ dependencies = [
     # not widen anything in practice either; it would only disagree with the
     # consumer about which version is in play. Bump this, requirements.txt and
     # the drift-guard snapshot together.
-    "aiohomematic>=2026.8.6",
+    "aiohomematic==2026.8.6",
     # Floors match the CI-pinned versions in requirements.txt so a fresh
     # `pip install` resolves a tested-compatible set, not an ancient one.
     "aiohttp>=3.12.0",
