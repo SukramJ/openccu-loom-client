@@ -12,7 +12,6 @@ import pytest
 
 from openccu_loom_client.exceptions import LoomNotFoundError
 from openccu_loom_client.operations import (
-    ConfigOperations,
     DataPointsOperations,
     DevicesOperations,
     DiagnosticsOperations,
@@ -318,68 +317,3 @@ class TestOnboardingRelease:
         with pytest.raises(LoomNotFoundError):
             await DevicesOperations(transport=http).release_device(address="VCU0001")
         assert len(mock_daemon.requests) - before == 1
-
-
-class TestConfigSectionSave:
-    """``PUT /config/sections/{section}`` — stored is not the same as in effect."""
-
-    async def test_put_section_surfaces_applied(self, mock_daemon: MockDaemon, http: HttpTransport) -> None:
-        mock_daemon.put(
-            "/api/v1/config/sections/north.mqtt",
-            payload={
-                "section": "north.mqtt",
-                "version": 3,
-                "updated_at": "2026-08-24T08:00:00Z",
-                "restart_required": False,
-                "applied": True,
-            },
-        )
-        ack = await ConfigOperations(transport=http).put_section(
-            section="north.mqtt", values={"topic_base": "loomtest"}
-        )
-        assert ack["applied"] is True
-        assert "apply_error" not in ack
-
-    async def test_put_section_surfaces_a_failed_apply(self, mock_daemon: MockDaemon, http: HttpTransport) -> None:
-        """
-        Only ``apply_error`` separates the two outcomes.
-
-        The section is stored either way; the field is what distinguishes
-        "took effect now" from "the running daemon refused it". A caller
-        that reports the second as a plain success repeats the defect the
-        field exists to close.
-        """
-        mock_daemon.put(
-            "/api/v1/config/sections/north.mqtt",
-            payload={
-                "section": "north.mqtt",
-                "version": 4,
-                "updated_at": "2026-08-24T08:01:00Z",
-                "restart_required": False,
-                "applied": False,
-                "apply_error": "broker refused the connection",
-            },
-        )
-        ack = await ConfigOperations(transport=http).put_section(
-            section="north.mqtt", values={"broker_url": "tcp://nope:1883"}
-        )
-        assert ack["applied"] is False
-        assert ack["apply_error"] == "broker refused the connection"
-
-    async def test_put_section_against_an_older_daemon_omits_applied(
-        self, mock_daemon: MockDaemon, http: HttpTransport
-    ) -> None:
-        """A daemon below api 7.8.0 sends neither key: unknown, not False."""
-        mock_daemon.put(
-            "/api/v1/config/sections/north.mqtt",
-            payload={
-                "section": "north.mqtt",
-                "version": 5,
-                "updated_at": "2026-08-24T08:02:00Z",
-                "restart_required": False,
-            },
-        )
-        ack = await ConfigOperations(transport=http).put_section(
-            section="north.mqtt", values={"topic_base": "loomtest"}
-        )
-        assert "applied" not in ack

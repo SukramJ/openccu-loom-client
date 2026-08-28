@@ -59,24 +59,17 @@ from openccu_loom_client.events import (
 from openccu_loom_client.exceptions import BaseLoomException, LoomIncompatibleVersionError, LoomNotFoundError
 from openccu_loom_client.operations import (
     AlarmOperations,
-    AuthOperations,
     BackupOperations,
-    CentralsOperations,
-    ConfigOperations,
     CustomDataPointsOperations,
     DataPointsOperations,
     DevicesOperations,
     DiagnosticsOperations,
-    GroupsOperations,
     HubOperations,
     I18nOperations,
     LinksOperations,
-    MatterOperations,
     SchedulesOperations,
     SecurityOperations,
-    SessionsOperations,
     SystemOperations,
-    UsersOperations,
     VisibilityOperations,
 )
 from openccu_loom_client.store import LoomStore
@@ -222,7 +215,6 @@ class LoomClient:
         self.system: Final = SystemOperations(transport=self._http)
         self.schedules: Final = SchedulesOperations(transport=self._http)
         self.links: Final = LinksOperations(transport=self._http)
-        self.groups: Final = GroupsOperations(transport=self._http)
         self.alarm: Final = AlarmOperations(transport=self._http)
         # The Security & Safety domain runs with or without the alarm
         # engine, so it is wired unconditionally next to it rather than
@@ -235,14 +227,8 @@ class LoomClient:
         self.i18n: Final = I18nOperations(transport=self._http)
         # Admin / ops surface — present for completeness; HA typically
         # touches only auth (token provisioning) and diagnostics.
-        self.auth: Final = AuthOperations(transport=self._http)
-        self.users: Final = UsersOperations(transport=self._http)
-        self.centrals: Final = CentralsOperations(transport=self._http)
-        self.config_admin: Final = ConfigOperations(transport=self._http)
         self.diagnostics: Final = DiagnosticsOperations(transport=self._http)
         self.backup: Final = BackupOperations(transport=self._http)
-        self.sessions: Final = SessionsOperations(transport=self._http)
-        self.matter: Final = MatterOperations(transport=self._http)
         self.visibility: Final = VisibilityOperations(transport=self._http)
 
     # ---- public state access ----

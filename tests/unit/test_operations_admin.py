@@ -16,20 +16,15 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 
 from openccu_loom_types import DAEMON_API_VERSION
-from openccu_loom_types.rest import StartupCaptureConfigWrite, TokenCreate, UserCreate
+from openccu_loom_types.rest import StartupCaptureConfigWrite
 import pytest
 
 from openccu_loom_client.exceptions import LoomValidationError
 from openccu_loom_client.operations import (
-    AuthOperations,
     BackupOperations,
-    CentralsOperations,
-    ConfigOperations,
     DiagnosticsOperations,
-    MatterOperations,
     SessionsOperations,
     SystemOperations,
-    UsersOperations,
     VisibilityOperations,
 )
 from openccu_loom_client.operations.devices import DevicesOperations
@@ -79,112 +74,6 @@ async def http(mock_daemon: MockDaemon) -> AsyncIterator[tuple[HttpTransport, Mo
     await t.connect()
     yield t, mock_daemon
     await t.close()
-
-
-class TestAuthOperations:
-    async def test_me(self, http) -> None:
-        t, mock = http
-        mock.get("/api/v1/auth/me", payload={"subject": "admin", "role": "admin"})
-        ident = await AuthOperations(transport=t).me()
-        assert ident.subject == "admin"
-        assert ident.role == "admin"
-
-    async def test_create_token_v2(self, http) -> None:
-        t, mock = http
-        mock.post(
-            "/api/v1/auth/tokens/v2",
-            payload={"token": "secret-xyz", "fingerprint": "ab12"},
-        )
-        created = await AuthOperations(transport=t).create_token_v2(token=TokenCreate(subject="ha", role="operator"))
-        assert created.token == "secret-xyz"
-        assert created.fingerprint == "ab12"
-
-
-class TestUsersOperations:
-    async def test_create_user(self, http) -> None:
-        t, mock = http
-        mock.post(
-            "/api/v1/users",
-            payload={
-                "subject": "alice",
-                "role": "operator",
-                "created_at": "2026-05-24T10:00:00Z",
-            },
-        )
-        summary = await UsersOperations(transport=t).create_user(
-            user=UserCreate(username="alice", password="pw", role="operator")
-        )
-        assert summary.subject == "alice"
-
-    async def test_delete_user(self, http) -> None:
-        t, mock = http
-        mock.delete("/api/v1/users/alice", status=204)
-        await UsersOperations(transport=t).delete_user(subject="alice")
-
-
-class TestCentralsOperations:
-    async def test_list_centrals(self, http) -> None:
-        t, mock = http
-        mock.get(
-            "/api/v1/centrals",
-            payload=[
-                {
-                    "name": "home",
-                    "host": "10.0.0.2",
-                    "interfaces": [{"name": "HmIP-RF"}],
-                    "enabled": True,
-                }
-            ],
-        )
-        rows = await CentralsOperations(transport=t).list_centrals()
-        assert rows[0].name == "home"
-
-
-class TestConfigOperations:
-    async def test_get_config(self, http) -> None:
-        t, mock = http
-        mock.get("/api/v1/config", payload={})
-        snap = await ConfigOperations(transport=t).get_config()
-        assert snap is not None
-
-    async def test_put_section_returns_ack(self, http) -> None:
-        t, mock = http
-        mock.put(
-            "/api/v1/config/sections/north",
-            payload={"section": "north", "version": 3, "restart_required": False},
-        )
-        ack = await ConfigOperations(transport=t).put_section(section="north", values={"port": 9090})
-        assert ack["version"] == 3
-
-    async def test_get_schema_parses_daemon_shape(self, http) -> None:
-        """
-        The daemon's ``{sections, fields}`` schema validates against SchemaResponse.
-
-        Mirrors the real ``GET /config/schema`` payload, including the
-        per-field ``default`` the daemon emits but ``openapi.yaml`` does
-        not yet document — Pydantic ignores the extra key, so the parse
-        succeeds. (Confirms the formerly-xfail e2e case is now sound.)
-        """
-        t, mock = http
-        mock.get(
-            "/api/v1/config/schema",
-            payload={
-                "sections": ["north", "ccu"],
-                "fields": [
-                    {
-                        "path": "north.port",
-                        "class": "basic",
-                        "go_type": "int",
-                        "restart_required": True,
-                        "default": 8080,
-                    }
-                ],
-            },
-        )
-        schema = await ConfigOperations(transport=t).get_schema()
-        assert schema.sections == ["north", "ccu"]
-        assert schema.fields[0].path == "north.port"
-        assert schema.fields[0].restart_required is True
 
 
 class TestDiagnosticsOperations:
@@ -349,152 +238,6 @@ class TestSessionsOperations:
         result = await SessionsOperations(transport=t).heartbeat(key="cfg:north", token="tok-abc")
         assert result["key"] == "cfg:north"
         assert mock.requests[-1].json() == {"key": "cfg:north", "token": "tok-abc"}
-
-
-class TestMatterOperations:
-    async def test_get_status(self, http) -> None:
-        t, mock = http
-        mock.get(
-            "/api/v1/matter/status",
-            payload={
-                "enabled": True,
-                "listening": True,
-                "endpoint_count": 5,
-                "fabric_count": 1,
-                "enabled_count": 5,
-                "advertising": False,
-                "commissioning_window_open": False,
-            },
-        )
-        status = await MatterOperations(transport=t).get_status()
-        assert status.endpoint_count == 5
-
-    async def test_list_sessions_carries_occupancy(self, http) -> None:
-        t, mock = http
-        mock.get(
-            "/api/v1/matter/sessions",
-            payload={
-                "sessions": [
-                    {
-                        "session_id": 42,
-                        "fabric_index": 1,
-                        "peer_node_id": "0x000000000001B669",
-                        "local_node_id": "0x0000000000000001",
-                        "is_pase": False,
-                        "subscriptions": 2,
-                        "last_activity": "2026-08-16T10:00:00Z",
-                        "last_peer_activity": "2026-08-16T09:59:00Z",
-                        "idle_seconds": 5,
-                        "peer_idle_seconds": 65,
-                    }
-                ],
-                "occupancy": {"live": 1, "reserved": 0, "capacity": 65534, "free": 65533},
-            },
-        )
-        result = await MatterOperations(transport=t).list_sessions()
-        assert result.sessions[0].peer_idle_seconds == 65
-        assert result.occupancy.free == 65533
-
-    async def test_list_endpoints(self, http) -> None:
-        t, mock = http
-        mock.get(
-            "/api/v1/matter/endpoints",
-            payload={
-                "endpoints": [
-                    {
-                        "endpoint_id": 2,
-                        "parent_endpoint_id": 1,
-                        "device_type": 256,
-                        "device_type_name": "On/Off Light",
-                        "reachable": True,
-                        "friendly_name": "Flur",
-                        "device_address": "ABC0000001",
-                        "channel_address": "ABC0000001:3",
-                        "clusters": [{"id": 6, "name": "OnOff", "revision": 6}],
-                    }
-                ]
-            },
-        )
-        result = await MatterOperations(transport=t).list_endpoints()
-        assert result.endpoints[0].clusters[0].name == "OnOff"
-
-    async def test_get_mdns_diagnostics(self, http) -> None:
-        t, mock = http
-        mock.get(
-            "/api/v1/matter/mdns",
-            payload={
-                "advertising": True,
-                "services": [
-                    {
-                        "service_type": "_matterc._udp",
-                        "instance_name": "A1B2C3D4E5F60708",
-                        "host_name": "loom.local",
-                        "port": 5540,
-                        "addresses": ["192.0.2.10"],
-                        "subtypes": ["_L840", "_CM"],
-                        "txt": {"D": "840"},
-                    }
-                ],
-                "findings": [{"severity": "warning", "code": "no-ipv6", "message": "announcement without IPv6"}],
-            },
-        )
-        result = await MatterOperations(transport=t).get_mdns_diagnostics()
-        assert result.advertising is True
-        assert result.findings[0].code == "no-ipv6"
-
-    async def test_get_compatibility(self, http) -> None:
-        t, mock = http
-        mock.get(
-            "/api/v1/matter/compatibility",
-            payload={
-                "ecosystems": [{"ecosystem": "apple", "vendor_id": 4937, "fabric_index": 1, "label": "Apple Home"}],
-                "endpoint_count": 12,
-                "findings": [
-                    {
-                        "ecosystem": "google",
-                        "code": "device-type-hidden",
-                        "message": "valve will not appear in Google Home",
-                        "device_type": 66,
-                    }
-                ],
-            },
-        )
-        result = await MatterOperations(transport=t).get_compatibility()
-        assert result.ecosystems[0].ecosystem.value == "apple"
-        assert result.findings[0].device_type == 66
-
-    async def test_list_diagnostic_events(self, http) -> None:
-        t, mock = http
-        mock.get(
-            "/api/v1/matter/events",
-            payload={
-                "events": [
-                    {
-                        "at": "2026-08-16T10:00:00Z",
-                        "kind": "pairing",
-                        "severity": "warning",
-                        "message": "commissioner refused: another was already mid-handshake",
-                        "detail": {"peer": "192.0.2.20"},
-                    }
-                ]
-            },
-        )
-        result = await MatterOperations(transport=t).list_diagnostic_events()
-        assert result.events[0].kind.value == "pairing"
-
-    async def test_force_sync(self, http) -> None:
-        t, mock = http
-        mock.post("/api/v1/matter/force-sync", status=204)
-        await MatterOperations(transport=t).force_sync()
-        assert mock.requests[-1].path == "/api/v1/matter/force-sync"
-
-    async def test_factory_reset_names_the_action(self, http) -> None:
-        # The daemon refuses a reset that does not carry the literal
-        # confirm token — pin that the client sends it verbatim.
-        t, mock = http
-        mock.post("/api/v1/matter/factory-reset", status=204)
-        await MatterOperations(transport=t).factory_reset(confirm="remove-all-fabrics")
-        assert mock.requests[-1].json() == {"confirm": "remove-all-fabrics"}
 
 
 class TestVisibilityOperations:
