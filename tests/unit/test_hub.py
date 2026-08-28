@@ -72,6 +72,14 @@ def _attach_device_with_channel(*, store: LoomStore, address: str = "VCU0001", n
             "update_available": False,
             "master_pushes_config_pending": False,
             "has_sub_devices": False,
+            "firmware": {"Current": "1.0.0", "Available": "", "Updatable": False, "UpdateState": "UP_TO_DATE"},
+            "availability": {
+                "IsReachable": True,
+                "LastUpdated": None,
+                "BatteryLevel": None,
+                "LowBattery": None,
+                "SignalStrength": None,
+            },
         }
     )
     store.load_snapshot(

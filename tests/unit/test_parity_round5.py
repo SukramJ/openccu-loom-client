@@ -114,6 +114,19 @@ def _store_with_device(
                         "update_available": False,
                         "master_pushes_config_pending": False,
                         "has_sub_devices": False,
+                        "firmware": {
+                            "Current": "1.0.0",
+                            "Available": "",
+                            "Updatable": False,
+                            "UpdateState": "UP_TO_DATE",
+                        },
+                        "availability": {
+                            "IsReachable": True,
+                            "LastUpdated": None,
+                            "BatteryLevel": None,
+                            "LowBattery": None,
+                            "SignalStrength": None,
+                        },
                     }
                 ],
             }
@@ -987,6 +1000,19 @@ class TestLocalePlumbing:
                             "update_available": False,
                             "master_pushes_config_pending": False,
                             "has_sub_devices": False,
+                            "firmware": {
+                                "Current": "1.0.0",
+                                "Available": "",
+                                "Updatable": False,
+                                "UpdateState": "UP_TO_DATE",
+                            },
+                            "availability": {
+                                "IsReachable": True,
+                                "LastUpdated": None,
+                                "BatteryLevel": None,
+                                "LowBattery": None,
+                                "SignalStrength": None,
+                            },
                         }
                     ],
                 }

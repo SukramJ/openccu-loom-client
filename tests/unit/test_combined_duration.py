@@ -68,6 +68,14 @@ def _store_with_duration_pair(*, unit_value: Any = 1) -> tuple[LoomStore, Device
                 "update_available": False,
                 "master_pushes_config_pending": False,
                 "has_sub_devices": False,
+                "firmware": {"Current": "1.0.0", "Available": "", "Updatable": False, "UpdateState": "UP_TO_DATE"},
+                "availability": {
+                    "IsReachable": True,
+                    "LastUpdated": None,
+                    "BatteryLevel": None,
+                    "LowBattery": None,
+                    "SignalStrength": None,
+                },
             }
         )
     )

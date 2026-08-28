@@ -344,6 +344,19 @@ class TestCustomTranslatedName:
                             "update_available": False,
                             "master_pushes_config_pending": False,
                             "has_sub_devices": False,
+                            "firmware": {
+                                "Current": "1.0.0",
+                                "Available": "",
+                                "Updatable": False,
+                                "UpdateState": "UP_TO_DATE",
+                            },
+                            "availability": {
+                                "IsReachable": True,
+                                "LastUpdated": None,
+                                "BatteryLevel": None,
+                                "LowBattery": None,
+                                "SignalStrength": None,
+                            },
                         }
                     ],
                 }
@@ -439,6 +452,14 @@ class TestUpdateDataPoint:
             "update_available": False,
             "master_pushes_config_pending": False,
             "has_sub_devices": False,
+            "firmware": {"Current": "1.0.0", "Available": "", "Updatable": False, "UpdateState": "UP_TO_DATE"},
+            "availability": {
+                "IsReachable": True,
+                "LastUpdated": None,
+                "BatteryLevel": None,
+                "LowBattery": None,
+                "SignalStrength": None,
+            },
         }
         if update_status is not None:
             device_entry["update_status"] = update_status
@@ -767,6 +788,14 @@ class TestHubDeviceLinkRouting:
                 "update_available": False,
                 "master_pushes_config_pending": False,
                 "has_sub_devices": False,
+                "firmware": {"Current": "1.0.0", "Available": "", "Updatable": False, "UpdateState": "UP_TO_DATE"},
+                "availability": {
+                    "IsReachable": True,
+                    "LastUpdated": None,
+                    "BatteryLevel": None,
+                    "LowBattery": None,
+                    "SignalStrength": None,
+                },
             }
         )
         store.load_snapshot(
