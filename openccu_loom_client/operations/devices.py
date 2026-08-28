@@ -264,8 +264,33 @@ class DevicesOperations(_OperationsBase):
         Promote a pending pairing candidate into the registry.
 
         Wire: ``POST /devices/{addr}/accept``.
+
+        Accepting materialises the device — it gains its ise_id, channels and
+        data points, so it can be named and placed — but does not publish it to
+        the ecosystems. That is :meth:`release_device`, and the separation is
+        the point: a consumer that adopts a device keeps the identity it first
+        saw, so the naming has to be settled first.
         """
         await self._transport.request(method="POST", path=f"/devices/{address}/accept", allow_retry=False)
+
+    async def release_device(self, *, address: str) -> None:
+        """
+        Finish onboarding a device so the ecosystems may adopt it.
+
+        Wire: ``POST /devices/{addr}/release`` (daemon ≥ 0.66.0). Ends the hold
+        an accepted-but-unreleased device is under, after which the daemon
+        broadcasts ``device.released`` and publishes it to MQTT, the Matter
+        bridge and this API's ``released_only`` subscribers alike.
+
+        Raises :class:`LoomNotFoundError` when nothing withholds the address —
+        it was released already, or it never went through the wizard. The
+        daemon answers 404 there deliberately, so a stale view refreshes
+        instead of retrying.
+
+        Not retried: it is a POST with an effect, and the 404 above makes a
+        blind repeat indistinguishable from a genuine miss.
+        """
+        await self._transport.request(method="POST", path=f"/devices/{address}/release", allow_retry=False)
 
     # ---- UI schema / config snapshots ----
 

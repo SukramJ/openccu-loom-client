@@ -621,10 +621,20 @@ def _to_alarm_message(*, message: Any) -> AlarmMessageData:
 
 
 def _to_inbox_device(*, entry: Any) -> InboxDeviceData:
-    """Convert a daemon inbox entry into aiohomematic's ``InboxDeviceData``."""
+    """
+    Convert a daemon inbox entry into aiohomematic's ``InboxDeviceData``.
+
+    ``awaiting_release`` is carried through because the two states share one
+    listing: an entry flagged here is already accepted and needs a *release*,
+    while the rest are waiting for an *accept*. Dropping the flag left a
+    consumer with one action for both, and for half of them it was the wrong
+    one. Absent on a daemon older than 0.66.0, where the state does not exist
+    and ``False`` is the truth rather than a placeholder.
+    """
     data = _as_dict(entry=entry)
     address = data.get("address") or ""
     return InboxDeviceData(
+        awaiting_release=bool(data.get("awaiting_release")),
         # The daemon's inbox DTO carries no ise_id; the serial is the stable
         # identity it does ship (the address is the fallback).
         device_id=data.get("serial") or address,
@@ -667,6 +677,24 @@ class _JsonRpcClient:
     async def accept_device_in_inbox(self, *, device_address: str) -> bool:
         """Accept a device out of the inbox. The transport raises on refusal, so reaching the return means success."""
         await self._client.devices.accept_device(address=device_address)
+        return True
+
+    async def release_device_in_inbox(self, *, device_address: str) -> bool:
+        """
+        Finish onboarding an accepted device so it may be adopted.
+
+        The second half of the wizard, and the action an entry with
+        ``awaiting_release`` needs — offering *accept* for one of those asks an
+        operator to accept a device that is already accepted.
+
+        The transport raises on refusal, so reaching the return means success.
+        A 404 means nothing withholds the address any more (released already,
+        or it never went through the wizard) and surfaces as
+        :class:`LoomNotFoundError`, which is inside the aiohomematic exception
+        hierarchy and therefore renders as a typed error rather than a generic
+        failure.
+        """
+        await self._client.devices.release_device(address=device_address)
         return True
 
     async def acknowledge_message(self, *, message_id: str) -> bool:
