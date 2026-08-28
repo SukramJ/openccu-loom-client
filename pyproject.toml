@@ -15,7 +15,7 @@ dependencies = [
     # stable public API), so cap the calendar-versioned minor until a new
     # series is validated against the drift-guard test
     # (tests/compat/test_aiohomematic_protocol_parity.py) — bump both together.
-    "aiohomematic>=2026.8.5,<2026.9",
+    "aiohomematic>=2026.8.6,<2026.9",
     # Floors match the CI-pinned versions in requirements.txt so a fresh
     # `pip install` resolves a tested-compatible set, not an ancient one.
     "aiohttp>=3.12.0",

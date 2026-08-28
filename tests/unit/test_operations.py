@@ -10,6 +10,7 @@ from collections.abc import AsyncIterator
 from openccu_loom_types import DAEMON_API_VERSION
 import pytest
 
+from openccu_loom_client.exceptions import LoomNotFoundError
 from openccu_loom_client.operations import (
     ConfigOperations,
     DataPointsOperations,
@@ -272,6 +273,38 @@ class TestWiringManifest:
         """Empty is a valid answer — "wired none of them", not an error."""
         mock_daemon.get("/api/v1/diagnostics/wiring", payload=[])
         assert await DiagnosticsOperations(transport=http).get_wiring() == []
+
+
+class TestOnboardingRelease:
+    """`POST /devices/{addr}/release` — the second half of the onboarding wizard."""
+
+    async def test_release_posts_to_the_device(self, mock_daemon: MockDaemon, http: HttpTransport) -> None:
+        mock_daemon.post("/api/v1/devices/VCU0001/release", status=204)
+        await DevicesOperations(transport=http).release_device(address="VCU0001")
+        sent = mock_daemon.requests[-1]
+        assert (sent.method, sent.path) == ("POST", "/api/v1/devices/VCU0001/release")
+
+    async def test_release_is_not_retried(self, mock_daemon: MockDaemon, http: HttpTransport) -> None:
+        """
+        A blind repeat cannot be told from a genuine miss.
+
+        The daemon answers 404 when nothing withholds the address — released
+        already, or never in the wizard — so a retry would turn a stale view
+        into what looks like a failure against a healthy daemon.
+        """
+        mock_daemon.post(
+            "/api/v1/devices/VCU0001/release",
+            status=404,
+            payload={
+                "type": "https://openccu-loom.dev/errors/not_found",
+                "title": "Device not awaiting release",
+                "status": 404,
+            },
+        )
+        before = len(mock_daemon.requests)
+        with pytest.raises(LoomNotFoundError):
+            await DevicesOperations(transport=http).release_device(address="VCU0001")
+        assert len(mock_daemon.requests) - before == 1
 
 
 class TestConfigSectionSave:

@@ -1043,12 +1043,25 @@ class TestJsonRpcClientRecords:
         hub = SimpleNamespace(
             list_service_messages=lambda: ret([service]),
             list_alarm_messages=lambda: ret([alarm]),
-            list_inbox=lambda: ret([{"central": "home", "address": "NEW1", "model": "HmIP-PS", "serial": "SER1"}]),
+            list_inbox=lambda: ret(
+                [
+                    {"central": "home", "address": "NEW1", "model": "HmIP-PS", "serial": "SER1"},
+                    # Accepted, not released: same listing, different action.
+                    {
+                        "central": "home",
+                        "address": "MID1",
+                        "model": "HmIP-BSM",
+                        "serial": "SER2",
+                        "awaiting_release": True,
+                    },
+                ]
+            ),
             ack_service_message=ack_service,
             ack_alarm_message=ack_alarm,
         )
         devices = SimpleNamespace(
             accept_device=lambda **_kw: ret(None),
+            release_device=lambda **_kw: ret(None),
             patch_device=lambda **_kw: ret(None),
         )
         store = SimpleNamespace(devices=[SimpleNamespace(address="VCU1", ise_id=4711)])
@@ -1092,7 +1105,26 @@ class TestJsonRpcClientRecords:
             "name": "NEW1",
             "device_type": "HmIP-PS",
             "interface": "",
+            "awaiting_release": False,
         }
+
+    async def test_awaiting_release_survives_the_conversion(self) -> None:
+        """
+        The two inbox states share one listing and need different actions.
+
+        An entry flagged here is already accepted and needs a release; the rest
+        are waiting for an accept. The flag used to be dropped in the
+        conversion, leaving a consumer one action for both — wrong for half of
+        them.
+        """
+        json_rpc, _ = self._client()
+        by_address = {d.address: d for d in await json_rpc.get_inbox_devices()}
+        assert by_address["MID1"].awaiting_release is True
+        assert by_address["NEW1"].awaiting_release is False
+
+    async def test_release_is_offered_as_its_own_mutation(self) -> None:
+        json_rpc, _ = self._client()
+        assert await json_rpc.release_device_in_inbox(device_address="MID1") is True
 
     async def test_mutations_return_true(self) -> None:
         """A None return made every accept/ack report failure to the panel."""

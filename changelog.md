@@ -1,3 +1,29 @@
+# Version 2026.8.31 (2026-08-28)
+
+Completes the onboarding wizard on this backend. 2026.8.30 already kept an
+unreleased device out of Home Assistant; what was missing was the other half —
+telling a consumer which of the two inbox states a device is in, and letting it
+finish the onboarding.
+
+- **The inbox now says which action a device needs.** A device waiting for a
+  decision and one that is accepted but not yet released appear in the same
+  listing, and until now they arrived here indistinguishable: the flag the
+  daemon sends did not survive the conversion into aiohomematic's record. A
+  consumer therefore offered _accept_ for both, which for the second is asking
+  an operator to accept a device that is already accepted.
+
+  `InboxDeviceData.awaiting_release` (aiohomematic 2026.8.6) carries it
+  through. It is absent on a daemon older than 0.66.0, where the state does not
+  exist and `False` is the truth rather than a placeholder.
+
+- **A device can be released from here.** `release_device` /
+  `release_device_in_inbox` end the hold, after which the daemon publishes the
+  device to every ecosystem — including this client's own event stream. It is
+  not retried: the daemon answers 404 when nothing withholds the address, so a
+  blind repeat cannot be told from a genuine miss.
+
+Requires `aiohomematic` 2026.8.6.
+
 # Version 2026.8.30 (2026-08-28)
 
 Two adjustments to how the reconnect work behaves for the consumer above it.
