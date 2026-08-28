@@ -68,6 +68,19 @@ class LoomConfig:
     # Older daemons ignore the unknown query parameter and the unknown frame
     # field, so this is inert against them.
     released_only: bool = True
+    # How long bootstrap waits for the daemon to finish its southbound
+    # bring-up before walking the snapshot anyway. Waiting matters because
+    # `GET /snapshot` answers 200 with empty lists while the central is still
+    # in `waiting_for_ccu` and never 5xx — bootstrapping early "succeeds" into
+    # an empty model, and a consumer spawns no entities at all.
+    #
+    # It is bounded, and a timeout is not an error: the walk runs regardless
+    # and the daemon's resync re-bootstraps once the CCU arrives. So the only
+    # thing this trades is how long a caller's own setup blocks — Home
+    # Assistant, for one, logs a config entry that takes minutes. Lower it
+    # where a fast, possibly-empty start beats a slow, complete one; 0 skips
+    # the wait entirely.
+    readiness_wait_seconds: float = 180.0
 
     def __post_init__(self) -> None:
         """Default the port from the TLS flag when not explicitly set."""

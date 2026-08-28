@@ -749,6 +749,23 @@ class TestReadinessGate:
             with patch.object(client_module, "_READINESS_POLL_SECONDS", 0.01):
                 assert await client.wait_until_ready(timeout_seconds=2.0) is True
 
+    async def test_timeout_comes_from_the_config(self, mock_daemon: MockDaemon) -> None:
+        """How long a caller can afford to block is the caller's question."""
+        mock_daemon.get("/api/v1/info", payload=_INFO)
+        mock_daemon.get("/api/v1/system/ccu", payload=self._ccu_entry(phase="waiting_for_ccu", ready=False))
+        cfg = replace(mock_daemon.config, readiness_wait_seconds=0.05)
+        async with LoomClient(config=cfg) as client:
+            with patch.object(client_module, "_READINESS_POLL_SECONDS", 0.01):
+                assert await client.wait_until_ready() is False
+
+    async def test_zero_timeout_skips_the_wait(self, mock_daemon: MockDaemon) -> None:
+        """A caller that wants a fast, possibly-empty start sets 0."""
+        mock_daemon.get("/api/v1/info", payload=_INFO)
+        mock_daemon.get("/api/v1/system/ccu", payload=self._ccu_entry(phase="waiting_for_ccu", ready=False))
+        cfg = replace(mock_daemon.config, readiness_wait_seconds=0.0)
+        async with LoomClient(config=cfg) as client:
+            assert await client.wait_until_ready() is False
+
     async def test_wait_gives_up_without_blocking_forever(self, mock_daemon: MockDaemon) -> None:
         """
         A daemon whose CCU never appears must not hold a consumer's setup open.
