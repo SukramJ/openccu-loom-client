@@ -39,3 +39,13 @@ async def mock_daemon() -> AsyncIterator[MockDaemon]:
         yield daemon
     finally:
         await daemon.stop()
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    """Register the snapshot-refresh flags the contract tests read."""
+    parser.addoption(
+        "--update-adapter-surface",
+        action="store_true",
+        default=False,
+        help="rewrite tests/compat/adapter_surface_snapshot.json from the current adapter",
+    )

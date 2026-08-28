@@ -40,10 +40,13 @@ from typing import Any
 
 import pytest
 
+from openccu_loom_client.compat.aiohomematic.model.week_profile import ClimateWeekProfileDp, WeekProfileDp
+
 aiohomematic = pytest.importorskip("aiohomematic")
 
 from aiohomematic.interfaces.model import (  # noqa: E402 — after importorskip
     CallbackDataPointProtocol,
+    ClimateWeekProfileDataPointProtocol,
     CustomDataPointProtocol,
     GenericDataPointProtocol,
     GenericProgramDataPointProtocol,
@@ -270,4 +273,38 @@ def test_aiohomematic_model_protocol_surface_has_not_drifted() -> None:
         "compat twins / parity cases need to follow, then update the snapshot.\n"
         f"  added (new upstream protocols): {sorted(added)}\n"
         f"  removed (gone upstream): {sorted(removed)}"
+    )
+
+
+def test_climate_week_profile_twin_satisfies_its_protocol() -> None:
+    """
+    The climate twin must satisfy the protocol the integration gates on.
+
+    `homematicip_local` reads `device.week_profile_data_point` and keeps it
+    only when it satisfies `ClimateWeekProfileDataPointProtocol`
+    (`climate.py:141-144`, `sensor.py:329`) — nine `isinstance` sites, the most
+    of any protocol there. A twin that failed it would leave the climate entity
+    without its week-profile surface, silently.
+
+    Two classes serve that attribute and only one is supposed to match:
+    `central/adapter.py` hands out `ClimateWeekProfileDp` for a climate
+    schedule and the plain `WeekProfileDp` for a simple one, mirroring the
+    reference's own split. This pins that split rather than assuming it —
+    measuring the base class against the climate protocol and concluding
+    something is broken is a mistake that has already been made once.
+    """
+    climate_missing = sorted(
+        name for name in _protocol_attrs(ClimateWeekProfileDataPointProtocol) if not hasattr(ClimateWeekProfileDp, name)
+    )
+    assert climate_missing == [], (
+        f"ClimateWeekProfileDp misses {climate_missing} — homematicip_local would drop the week-profile "
+        "surface for every climate device on this backend, without an error"
+    )
+    base_missing = sorted(
+        name for name in _protocol_attrs(ClimateWeekProfileDataPointProtocol) if not hasattr(WeekProfileDp, name)
+    )
+    assert base_missing, (
+        "WeekProfileDp now satisfies the climate protocol too, so the isinstance split the adapter and the "
+        "integration rely on no longer discriminates. Either that is intended and both sides need a new "
+        "discriminator, or a climate-only member leaked onto the base class."
     )
