@@ -347,11 +347,22 @@ class TestCustomDataPointDetailShape:
         assert detail.channel_no == 12
         assert detail.state == {"is_on": False}
 
-    async def test_a_missing_state_is_not_an_error(self, mock_daemon: MockDaemon, http: HttpTransport) -> None:
-        """The daemon may answer without a state; the caller decides what that means."""
+    async def test_a_null_state_is_not_an_error(self, mock_daemon: MockDaemon, http: HttpTransport) -> None:
+        """
+        A Custom-DP that reports no state answers ``"state": null``, which is valid.
+
+        This used to assert that an *absent* ``state`` was tolerated too, which
+        the hand-written model allowed. The daemon has never produced that: the
+        handler declares ``State any `json:"state"``` with no ``omitempty``
+        (`internal/north/rest/handlers/custom_data_points.go`, unchanged since
+        the initial release), and api 7.24.0 now lists ``state`` in the
+        schema's ``required``. The generated model follows the contract, so an
+        absent field is a daemon that broke it — worth raising on, not
+        absorbing.
+        """
         mock_daemon.get(
             "/api/v1/devices/VCU0001/cdps/SWITCH",
-            payload={"name": "SWITCH", "category": "switch", "channel_no": 1},
+            payload={"name": "SWITCH", "category": "switch", "channel_no": 1, "state": None},
         )
         detail = await CustomDataPointsOperations(transport=http).get(address="VCU0001", name="SWITCH")
         assert detail.state is None
