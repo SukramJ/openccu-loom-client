@@ -248,6 +248,123 @@ class TestNestedSnapshotBootstrap:
         assert len(snapshot_reqs) == 1
 
 
+class TestTheSnapshotIsScopedToThisCentral:
+    """
+    A daemon may mediate several CCUs; this consumer is bound to one.
+
+    Unscoped, every Home Assistant entry pulls, parses and then discards the
+    other CCUs' whole device tree — measured on a maintainer's own two-CCU
+    installation, which is what moved this from a footnote to a defect.
+    `GET /snapshot` and `GET /devices` both take `?central=` (openapi.yaml),
+    and the client did not pass it.
+
+    The resolution rule is `LoomStore._infer_central_id`'s, on purpose: the
+    configured name when the daemon knows it, the sole entry when there is
+    only one, nothing otherwise. Scoping the request by one rule and filtering
+    the store by another is how a consumer ends up with half a fleet.
+    """
+
+    @staticmethod
+    def _ccu_entries(*names: str) -> dict[str, object]:
+        """Build `GET /system/ccu` entries with every field the model requires."""
+        return {
+            "entries": [
+                {
+                    "name": name,
+                    "host": f"{name}.local",
+                    "available": True,
+                    "is_ha_app": False,
+                    "configured_interfaces": ["BidCos-RF"],
+                    "readiness": {
+                        "phase": "ready",
+                        "ready": True,
+                        "interfaces_loaded": 1,
+                        "interfaces_total": 1,
+                    },
+                }
+                for name in names
+            ]
+        }
+
+    @staticmethod
+    def _snapshot_query(mock_daemon: MockDaemon) -> dict[str, str]:
+        requests = [r for r in mock_daemon.requests if r.path == "/api/v1/snapshot"]
+        assert len(requests) == 1, f"expected exactly one snapshot request, got {len(requests)}"
+        return requests[0].query
+
+    async def test_the_configured_central_scopes_the_request(self, mock_daemon: MockDaemon) -> None:
+        """With several CCUs, the configured name is the only safe pick — and it is sent."""
+        mock_daemon.get("/api/v1/info", payload=_INFO)
+        mock_daemon.get("/api/v1/system/ccu", payload=self._ccu_entries("ccu-attic", "ccu-cellar"))
+        mock_daemon.get("/api/v1/snapshot", payload=_SNAPSHOT_NESTED)
+
+        async with LoomClient(config=mock_daemon.config) as client:
+            client.store.set_central_name(central_name="ccu-cellar")
+            await client.bootstrap()
+
+        assert self._snapshot_query(mock_daemon).get("central") == "ccu-cellar"
+
+    async def test_the_daemon_central_count_is_recorded(self, mock_daemon: MockDaemon) -> None:
+        """
+        How many centrals the daemon mediates, kept for a diagnostics dump.
+
+        Whether multi-CCU deployments exist was an open question no repository
+        could answer. This is the one place that already knows, and recording
+        it lets a consumer surface it in a diagnostics dump the user attaches
+        to a bug report — no reporting, no telemetry.
+        """
+        mock_daemon.get("/api/v1/info", payload=_INFO)
+        mock_daemon.get("/api/v1/system/ccu", payload=self._ccu_entries("ccu-attic", "ccu-cellar"))
+        mock_daemon.get("/api/v1/snapshot", payload=_SNAPSHOT_NESTED)
+
+        async with LoomClient(config=mock_daemon.config) as client:
+            assert client.store.daemon_central_count == 0, "nothing is known before the lookup"
+            client.store.set_central_name(central_name="ccu-cellar")
+            await client.bootstrap()
+            assert client.store.daemon_central_count == 2
+
+    async def test_a_single_central_scopes_without_being_configured(self, mock_daemon: MockDaemon) -> None:
+        """One CCU is unambiguous, so the scope is free even with no name set."""
+        mock_daemon.get("/api/v1/info", payload=_INFO)
+        mock_daemon.get("/api/v1/system/ccu", payload=self._ccu_entries("ccu-only"))
+        mock_daemon.get("/api/v1/snapshot", payload=_SNAPSHOT_NESTED)
+
+        async with LoomClient(config=mock_daemon.config) as client:
+            await client.bootstrap()
+
+        assert self._snapshot_query(mock_daemon).get("central") == "ccu-only"
+
+    async def test_an_unresolvable_central_still_bootstraps_unscoped(self, mock_daemon: MockDaemon) -> None:
+        """
+        Several CCUs and no match: the old behaviour, not an error.
+
+        Sending a name the daemon does not know would filter the snapshot to
+        nothing and leave the consumer with no entities at all — strictly worse
+        than carrying a foreign device tree.
+        """
+        mock_daemon.get("/api/v1/info", payload=_INFO)
+        mock_daemon.get("/api/v1/system/ccu", payload=self._ccu_entries("ccu-attic", "ccu-cellar"))
+        mock_daemon.get("/api/v1/snapshot", payload=_SNAPSHOT_NESTED)
+
+        async with LoomClient(config=mock_daemon.config) as client:
+            client.store.set_central_name(central_name="ccu-that-moved-away")
+            await client.bootstrap()
+            assert client.store.get_device(address="VCU0001") is not None
+
+        assert "central" not in self._snapshot_query(mock_daemon)
+
+    async def test_a_daemon_without_the_ccu_endpoint_bootstraps_unscoped(self, mock_daemon: MockDaemon) -> None:
+        """An older daemon 404s on GET /system/ccu; that must not fail the bootstrap."""
+        mock_daemon.get("/api/v1/info", payload=_INFO)
+        mock_daemon.get("/api/v1/snapshot", payload=_SNAPSHOT_NESTED)
+
+        async with LoomClient(config=mock_daemon.config) as client:
+            await client.bootstrap()
+            assert client.store.get_device(address="VCU0001") is not None
+
+        assert "central" not in self._snapshot_query(mock_daemon)
+
+
 class TestWsBridge:
     async def test_value_changed_event_updates_store(self, mock_daemon: MockDaemon) -> None:
         """

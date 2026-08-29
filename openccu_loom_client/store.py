@@ -131,6 +131,13 @@ class LoomStore:
         # == ``payload.central``). Used to scope/annotate events, NOT as a
         # routing-key prefix.
         self._central_id: str = ""
+        # How many centrals the daemon reported when this client resolved its
+        # own. Zero until `LoomClient._pin_central_id` has looked. Kept because
+        # "does anyone run a multi-CCU daemon?" was an open question nobody
+        # could answer from the repositories, and this is the one place that
+        # already knows — a consumer can surface it in a diagnostics dump
+        # without the client reporting anything anywhere.
+        self._daemon_central_count: int = 0
         # The HA-facing central *name* (the integration's instance name, ==
         # the LoomCentralAdapter ``name``). HA links every device to this
         # central via ``Device.central_info.name``, so it must match the
@@ -222,6 +229,15 @@ class LoomStore:
     def central_id(self) -> str:
         """The daemon central *name* (for event scoping, not key prefixing)."""
         return self._central_id
+
+    @property
+    def daemon_central_count(self) -> int:
+        """How many centrals the daemon reported, or 0 if never looked."""
+        return self._daemon_central_count
+
+    def set_daemon_central_count(self, *, count: int) -> None:
+        """Record how many centrals the daemon mediates."""
+        self._daemon_central_count = count
 
     def set_central_id(self, *, central_id: str | None) -> None:
         """Record the daemon central name (from the bootstrap snapshot)."""
