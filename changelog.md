@@ -1,3 +1,26 @@
+# Version 2026.8.34 (2026-08-29)
+
+- **The aiohomematic floor tracks the tested version.** `pyproject.toml` now
+  requires `aiohomematic>=2026.8.8`, matching the CI pin instead of naming only
+  the oldest release that would import.
+
+  The reason is what 2026.8.8 changed. It keys system variables and programs
+  on the CCU's id rather than on the slug of a name the WebUI can edit, and
+  daemon 0.68.0 mirrors that. The old floor left an install free to pair a
+  current client with a reference old enough to key those entities the other
+  way — not broken, because this package computes its own hub routing keys and
+  reads the daemon's `unique_id` as the authority, but a combination nobody
+  wants to debug from a bug report.
+
+  Every other floor in that list already tracked its CI pin for the same
+  reason; this one was the exception. The cost is a release here whenever the
+  pin moves, and an install whose consumer pinned aiohomematic _older_ than the
+  floor would not resolve — a lag `homematicip_local` would have to choose
+  rather than fall into.
+
+  Nothing else changes. A user upgrading from 2026.8.33 gets the same package
+  code; what moves is which aiohomematic `pip` is allowed to bring with it.
+
 # Version 2026.8.33 (2026-08-29)
 
 - **Fix: a system-variable push without a `unique_id` no longer emits the wrong key.**
