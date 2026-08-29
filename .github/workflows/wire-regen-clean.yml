@@ -1,0 +1,86 @@
+name: "Wire: regeneration is reproducible"
+
+# Guards that the committed modules under openccu_loom_client/wire/ still match
+# what `make generate` produces from the daemon's contract assets — it catches a
+# hand-edit to enums.py / rest.py / ws.py or to the stamped block in const.py
+# that would otherwise drift silently from the daemon until a runtime failure.
+#
+# The daemon ref comes from the regeneration branch name (regen/daemon-<tag>);
+# on every other branch the check is a no-op success. It MUST stay a single job
+# that always runs, so it can be a required status check without leaving normal
+# pull requests waiting on a skipped job — hence the per-step `if`, not a
+# job-level one.
+# yamllint disable-line rule:truthy
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wire-regen-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  regen-clean:
+    if: github.repository_owner == 'SukramJ'
+    name: Regen clean
+    runs-on: ubuntu-latest
+    env:
+      HEAD_REF: ${{ github.head_ref }}
+    steps:
+      - name: Detect regeneration PR
+        id: detect
+        run: |
+          set -euo pipefail
+          if [[ "${HEAD_REF}" == regen/daemon-* ]]; then
+            TAG="${HEAD_REF#regen/daemon-}"
+            echo "is_regen=true" >> "$GITHUB_OUTPUT"
+            echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+            echo "Regeneration PR for daemon ${TAG} — will verify it is reproducible"
+          else
+            echo "is_regen=false" >> "$GITHUB_OUTPUT"
+            echo "Not a regen/daemon-* branch — nothing to verify"
+          fi
+
+      - name: Checkout client repo
+        if: steps.detect.outputs.is_regen == 'true'
+        uses: actions/checkout@v7
+
+      - name: Checkout daemon at the branch's tag
+        if: steps.detect.outputs.is_regen == 'true'
+        uses: actions/checkout@v7
+        with:
+          repository: SukramJ/openccu-loom
+          ref: ${{ steps.detect.outputs.tag }}
+          path: openccu-loom
+
+      - name: Set up Python
+        if: steps.detect.outputs.is_regen == 'true'
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.14"
+          cache: 'pip'
+          cache-dependency-path: pyproject.toml
+
+      - name: Install package + dev tooling
+        if: steps.detect.outputs.is_regen == 'true'
+        run: pip install -e '.[dev]'
+
+      - name: Regenerate and assert no drift
+        if: steps.detect.outputs.is_regen == 'true'
+        run: |
+          set -euo pipefail
+          make generate OPENCCU_LOOM_REPO=openccu-loom
+          # No timestamp exclusion here: the Makefile passes --disable-timestamp
+          # to datamodel-codegen precisely so the output is byte-stable, and two
+          # consecutive runs are identical. A diff is real drift.
+          if ! git diff --quiet -- openccu_loom_client/wire/; then
+            echo "::error::make generate from daemon ${{ steps.detect.outputs.tag }} produced a diff — the committed modules are not reproducible. Re-run 'make generate' and commit; do not hand-edit anything under wire/."
+            git --no-pager diff --stat -- openccu_loom_client/wire/
+            git --no-pager diff -- openccu_loom_client/wire/
+            exit 1
+          fi
+          echo "wire/ is reproducible from daemon ${{ steps.detect.outputs.tag }}"
