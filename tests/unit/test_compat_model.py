@@ -85,6 +85,7 @@ from openccu_loom_client.wire.rest import (
     ProgramSummary,
     SecuritySnapshot,
     Snapshot,
+    SysvarSummary,
 )
 from openccu_loom_client.wire.ws import (
     CentralStateChangedPayload,
@@ -1266,6 +1267,73 @@ class TestRefreshBridge:
         # ``loom_<serial>_sysvar_<hub_slug(name)>`` (space folds to a dash).
         await looper.block_till_done()
         assert seen == ["loom_vcu1_1", "loom_11a0001234_sysvar_my-var"]
+
+    async def test_sysvar_push_without_a_key_asks_the_store_first(self) -> None:
+        """
+        A push that carries no ``unique_id`` must not fall straight to the name slug.
+
+        Daemon 0.68.0 keys system variables on the CCU's variable id, and no
+        push payload carries that id — only the name. The store does hold it,
+        because the bootstrap summary was stamped by the same daemon, so it is
+        asked before the pre-id shape is guessed. Falling through to the slug
+        here would emit a key no entity is registered under, and the entity
+        would stop updating without anything failing.
+        """
+        bus = EventBus()
+        group = bus.create_subscription_group(name="t")
+        looper, ha_bus, seen = self._ha_setup()
+        store = LoomStore()
+        store.set_serial(serial="3014F711A0001234")  # serial suffix → 11a0001234
+        store._upsert_sysvar(
+            summary=SysvarSummary.model_validate(
+                {
+                    "central": "home",
+                    "name": "My Var",
+                    "value_type": "FLOAT",
+                    "observed": True,
+                    "unique_id": "loom_11a0001234_sysvar_4711",
+                }
+            )
+        )
+        install_refresh_bridge(group=group, store=store, ha_bus=ha_bus, central_name="home")
+        await bus.publish(
+            event=SysvarChangedEvent(
+                seq=1,
+                kind=Kind.change,
+                ts="2026-05-24T08:00:00Z",
+                payload=SysvarChangedPayload.model_validate(
+                    {"central": "home", "name": "My Var", "value": 1.0, "unique_id": ""}
+                ),
+            )
+        )
+        await looper.block_till_done()
+        assert seen == ["loom_11a0001234_sysvar_4711"]
+
+    async def test_sysvar_push_falls_back_to_the_slug_when_the_store_is_empty(self) -> None:
+        """
+        With no summary to consult, the pre-id shape is the right guess.
+
+        A daemon old enough to omit ``unique_id`` from a push predates the id
+        keying, so its entities are registered under the name slug.
+        """
+        bus = EventBus()
+        group = bus.create_subscription_group(name="t")
+        looper, ha_bus, seen = self._ha_setup()
+        store = LoomStore()
+        store.set_serial(serial="3014F711A0001234")  # serial suffix → 11a0001234
+        install_refresh_bridge(group=group, store=store, ha_bus=ha_bus, central_name="home")
+        await bus.publish(
+            event=SysvarChangedEvent(
+                seq=1,
+                kind=Kind.change,
+                ts="2026-05-24T08:00:00Z",
+                payload=SysvarChangedPayload.model_validate(
+                    {"central": "home", "name": "My Var", "value": 1.0, "unique_id": ""}
+                ),
+            )
+        )
+        await looper.block_till_done()
+        assert seen == ["loom_11a0001234_sysvar_my-var"]
 
     async def test_custom_wire_unique_id_is_channel_level(self) -> None:
         # Daemon ≥ 0.48.9 stamps the *channel-level* key on the custom-DP

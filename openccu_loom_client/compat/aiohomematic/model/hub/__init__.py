@@ -33,23 +33,32 @@ if TYPE_CHECKING:
     from openccu_loom_client.store import LoomStore
 
 
-def sysvar_unique_id(*, serial_suffix: str, name: str) -> str:
+def legacy_sysvar_unique_id(*, serial_suffix: str, name: str) -> str:
     """
-    Canonical HA unique id for a sysvar, matched by the refresh bridge.
+    Build the pre-id key for a sysvar: ``loom_<serial>_sysvar_<hub-slug(name)>``.
 
-    ``loom_<serial>_sysvar_<hub-slug(name)>``: the daemon ``name`` is the
-    CCU legacy name, ``hub_slug`` is python-slugify (the contract's slug
-    rule), and the serial suffix fills the central-id slot.
+    **Not the canonical key any more.** Daemon 0.68.0 keys system variables
+    on the CCU's numeric variable id, because the name is editable in the
+    WebUI and a key built from it re-keyed the entity on every rename. The
+    authoritative value is ``SysvarSummary.unique_id``, stamped by the
+    daemon; read that.
+
+    This shape survives for two narrow purposes: recognising an entity keyed
+    by a pre-0.68.0 daemon, and as the last fallback for a push payload that
+    carries no ``unique_id`` at all — a daemon old enough to omit it is also
+    old enough to have keyed on the name, so the slug is then the right
+    guess rather than a wrong one.
     """
     return canonical_unique_id(serial_suffix=serial_suffix, address=SYSVAR_ADDRESS, parameter=hub_slug(name=name))
 
 
-def program_unique_id(*, serial_suffix: str, name: str) -> str:
+def legacy_program_unique_id(*, serial_suffix: str, name: str) -> str:
     """
-    Canonical HA unique id for a program.
+    Build the pre-id key for a program: ``loom_<serial>_program_<hub-slug(name)>``.
 
-    Keyed on ``hub_slug(legacy_name)`` (not the program id), with the
-    serial suffix in the central-id slot — ``loom_<serial>_program_<slug>``.
+    Not the canonical key any more, for the reason given on
+    :func:`legacy_sysvar_unique_id` — daemon 0.68.0 keys programs on the CCU
+    program id. Read ``ProgramSummary.unique_id`` instead.
     """
     return canonical_unique_id(serial_suffix=serial_suffix, address=PROGRAM_ADDRESS, parameter=hub_slug(name=name))
 
@@ -301,6 +310,7 @@ def make_program_data_point(*, summary: Any, store: Any) -> Program:
 
 __all__ = [
     # General
+    "# General",
     "DataPointCategory",
     "HmUpdate",
     "Program",
@@ -315,10 +325,10 @@ __all__ = [
     "SysvarDpText",
     "canonical_unique_id",
     "hub_slug",
+    "legacy_program_unique_id",
+    "legacy_sysvar_unique_id",
     "make_program_data_point",
     "make_program_data_points",
     "make_sysvar_data_point",
-    "program_unique_id",
     "resolve_sysvar_class",
-    "sysvar_unique_id",
 ]
