@@ -434,12 +434,12 @@ class LoomStore:
         # and we drop this now-stale REST snapshot rather than overwrite the
         # newer pushed state (CDP state carries no wire timestamp to compare).
         generation = cdp._apply_generation
-        summary = await self._ops_cdps.get(address=address, name=name)
+        detail = await self._ops_cdps.get(address=address, name=name)
         cdp = self._cdps.get((address, name))
         if cdp is None or cdp._apply_generation != generation:
             return
-        if summary.state is not None:
-            cdp._replace_state(state=summary.state)
+        if detail.state is not None:
+            cdp._replace_state(state=detail.state)
 
     async def refresh_data_point(self, *, address: str, channel: int, parameter: str) -> None:
         """

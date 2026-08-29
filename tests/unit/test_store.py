@@ -714,15 +714,15 @@ class _RacingCdpTransport:
                 }
             )
         )
-        # A whole CustomDPSummary, because that is what the endpoint returns
-        # and what the operations façade validates. The old fixture answered
-        # with `{"state": …}` alone, which no daemon sends.
+        # Exactly the four fields `GET .../cdps/{name}` answers with — see
+        # the daemon's `CustomDPDetail`. An earlier version of this fixture
+        # returned a whole `CustomDPSummary` on the assumption that the detail
+        # endpoint answers like the list one. It does not, and that assumption
+        # is what let a façade validating `CustomDPSummary` reach production.
         return {
             "name": "SWITCH",
             "category": "switch",
             "channel_no": 1,
-            "supported_operations": ["turn_on", "turn_off"],
-            "unique_id": "loom_test_switch_1",
             "state": self._stale_state,
         }
 
