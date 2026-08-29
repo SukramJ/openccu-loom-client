@@ -1,3 +1,33 @@
+# Version 2026.8.36 (2026-08-29)
+
+- **Wire types regenerated from daemon 0.68.1 (api 7.24.0).** Purely additive:
+  17 new models and not one removed or renamed field, so nothing this package
+  reads changed shape. `SCHEMA_DIGEST` and `DAEMON_API_VERSION` move with it.
+
+  The additions are `CustomDPDetail`, `LinkParamset`, `CreatedNamedResource`
+  and the `UISchema*` family. Only the first has a consumer here; the rest
+  describe daemon surfaces this package does not serve, and are carried because
+  `wire/` mirrors the contract rather than this client's slice of it.
+
+- **The last hand-written model in the wire layer is gone.** `CustomDPDetail`
+  lived in `operations/custom_data_points.py` because the daemon declared no
+  schema for `GET /devices/{addr}/cdps/{name}` — the gap behind the 2026.8.35
+  regression. Daemon api 7.24.0 declares it (SukramJ/openccu-loom#648), so the
+  model is generated like everything else under `wire/` and the duplicate is
+  deleted. The rule holds again: nothing outside `wire/` is generated, nothing
+  inside it is hand-written.
+
+  One behavioural difference came with it, and it is the contract's. `state` is
+  required and nullable, where the hand-written model let it be absent — read
+  from the source rather than assumed: `assets/openapi.yaml` lists `state` in
+  the schema's `required`, and the daemon's handler declares
+  ``State any `json:"state"` `` with no `omitempty`, unchanged since its
+  initial release. So the field has always been on the wire, as `null` when the
+  custom data point reports no state. The test that tolerated an _absent_
+  `state` pinned a payload no daemon build has produced; it now pins the one
+  the daemon sends, and an absent field is left to raise — a daemon breaking
+  its own contract is worth failing on, not absorbing.
+
 # Version 2026.8.35 (2026-08-29)
 
 - **Fix: refreshing a custom data point raised instead of refreshing.** On a
