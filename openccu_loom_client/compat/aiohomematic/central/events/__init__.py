@@ -20,8 +20,6 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, ClassVar, Final
 
-from openccu_loom_types.rest import Kind2 as Kind
-
 from openccu_loom_client.events import (
     CentralStateChangedEvent,
     DataPointsCreatedEvent,
@@ -34,6 +32,7 @@ from openccu_loom_client.events import (
     SystemStatusChangedEvent,
     UnsubscribeCallback,
 )
+from openccu_loom_client.wire.rest import Kind2 as Kind
 
 
 @dataclass(slots=True, kw_only=True)

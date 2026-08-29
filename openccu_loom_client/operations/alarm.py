@@ -27,7 +27,8 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import quote
 
-from openccu_loom_types.rest import (
+from openccu_loom_client.operations._base import _OperationsBase
+from openccu_loom_client.wire.rest import (
     AlarmArmAccepted,
     AlarmCode,
     AlarmCodeRequest,
@@ -47,8 +48,6 @@ from openccu_loom_types.rest import (
     AlarmZoneCreate,
     AlarmZoneStatus,
 )
-
-from openccu_loom_client.operations._base import _OperationsBase
 
 
 class AlarmOperations(_OperationsBase):
@@ -271,7 +270,7 @@ class AlarmOperations(_OperationsBase):
         Arm one zone in the given mode.
 
         Wire: ``POST /alarm/zones/{id}/arm``. ``mode`` is an
-        :class:`~openccu_loom_types.enums.AlarmMode` value other than
+        :class:`~openccu_loom_client.wire.enums.AlarmMode` value other than
         ``disarmed`` (``perimeter``/``full``/``night``/``vacation``/
         ``custom``). ``code`` is passed through to the daemon's code
         check and never stored client-side. Not retried — arming has

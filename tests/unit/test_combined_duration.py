@@ -7,11 +7,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from openccu_loom_types.rest import DataPointSummary, DeviceSummary
-
 from openccu_loom_client.compat.aiohomematic.model.combined import CombinedDurationDp, channel_has_duration_pair
 from openccu_loom_client.model import Device
 from openccu_loom_client.store import LoomStore
+from openccu_loom_client.wire.rest import DataPointSummary, DeviceSummary
 
 _ADDRESS = "VCU0000001"
 _CHANNEL = 3

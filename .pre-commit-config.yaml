@@ -16,7 +16,10 @@ repos:
           - --skip="./.*,*.csv,*.json"
           - --quiet-level=2
         exclude_types: [csv, json]
-        exclude: ^tests/fixtures/
+        # openccu_loom_client/wire/ is generated: its identifiers are the
+        # daemon's wire vocabulary (`UpToDate`, `PASE`), not prose, and a
+        # spelling fix there is undone by the next `make generate`.
+        exclude: ^(tests/fixtures/|openccu_loom_client/wire/)
   - repo: https://github.com/PyCQA/bandit
     rev: 1.9.4
     hooks:
@@ -27,8 +30,12 @@ repos:
           - --configfile=tests/bandit.yaml
         # ruff `S` rules already guard production code; bandit double-checks the
         # transport/auth surface. Tests carry intentional fixtures (fake tokens)
-        # that bandit would flag as B105/B106, so they are excluded.
+        # that bandit would flag as B105/B106, so they are excluded — and so is
+        # openccu_loom_client/wire/, which is generated: its B105 hit is a wire
+        # field named `secret`, not a credential, and it returns on every
+        # regeneration.
         files: ^(openccu_loom_client|script)/.+\.py$
+        exclude: ^openccu_loom_client/wire/
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:

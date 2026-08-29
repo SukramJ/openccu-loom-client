@@ -8,8 +8,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
-from openccu_loom_types.rest import AddonUpdateStatus, AlarmMessage, ServiceMessage, SystemUpdateEntry
-
 from openccu_loom_client.compat.aiohomematic.model.hub.singletons import (
     MAX_ATTRIBUTE_SOURCES,
     AddonUpdateDp,
@@ -30,6 +28,7 @@ from openccu_loom_client.compat.aiohomematic.model.hub.singletons import (
     SystemUpdateDp,
 )
 from openccu_loom_client.store import LoomStore
+from openccu_loom_client.wire.rest import AddonUpdateStatus, AlarmMessage, ServiceMessage, SystemUpdateEntry
 
 
 def _store() -> LoomStore:

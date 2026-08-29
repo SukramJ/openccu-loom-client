@@ -14,16 +14,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from openccu_loom_types.rest import (
-    CustomDPSummary,
-    DataPointSummary,
-    DeviceDetail,
-    DeviceSummary,
-    ProgramSummary,
-    Snapshot,
-    SysvarSummary,
-)
-
 from openccu_loom_client.compat.aiohomematic.central.adapter import _is_creatable
 from openccu_loom_client.compat.aiohomematic.model.custom import (
     BaseCustomDpLock,
@@ -44,6 +34,15 @@ from openccu_loom_client.compat.aiohomematic.model.hub import (
     resolve_sysvar_class,
 )
 from openccu_loom_client.store import LoomStore
+from openccu_loom_client.wire.rest import (
+    CustomDPSummary,
+    DataPointSummary,
+    DeviceDetail,
+    DeviceSummary,
+    ProgramSummary,
+    Snapshot,
+    SysvarSummary,
+)
 
 
 def _dp_summary(**overrides: Any) -> DataPointSummary:
@@ -323,7 +322,7 @@ class TestCustomTranslatedName:
     """Custom DPs derive their display name from the CCU channel name."""
 
     def _store_with_channels(self) -> LoomStore:
-        from openccu_loom_types.rest import DeviceDetail, Snapshot
+        from openccu_loom_client.wire.rest import DeviceDetail, Snapshot
 
         store = LoomStore()
         store.set_custom_data_point_factory(factory=make_custom_data_point)
@@ -438,7 +437,7 @@ class TestUpdateDataPoint:
     def _device(
         self, store: LoomStore, firmware: dict[str, Any] | None = None, update_status: str | None = None
     ) -> Any:
-        from openccu_loom_types.rest import DeviceDetail, Snapshot
+        from openccu_loom_client.wire.rest import DeviceDetail, Snapshot
 
         device_entry: dict[str, Any] = {
             "address": "VCU9",
@@ -532,9 +531,8 @@ class TestCalculatedDataPoints:
         return store
 
     def test_binary_calculated(self) -> None:
-        from openccu_loom_types.rest import CalculatedDPSummary
-
         from openccu_loom_client.compat.aiohomematic.model.calculated import CalculatedDpBinarySensor
+        from openccu_loom_client.wire.rest import CalculatedDPSummary
 
         store = self._store()
         store.attach_channel_calculated_data_points(
@@ -561,9 +559,8 @@ class TestCalculatedDataPoints:
         assert dp.category.value == "binary_sensor"
 
     def test_sensor_calculated_unobserved_reads_none(self) -> None:
-        from openccu_loom_types.rest import CalculatedDPSummary
-
         from openccu_loom_client.compat.aiohomematic.model.calculated import CalculatedDpSensor
+        from openccu_loom_client.wire.rest import CalculatedDPSummary
 
         store = self._store()
         store.attach_channel_calculated_data_points(
@@ -587,8 +584,8 @@ class TestCalculatedDataPoints:
         assert dp.value is None  # unobserved reads unknown, not the wire default
 
     def test_value_changed_routes_to_calculated(self) -> None:
-        from openccu_loom_types.rest import CalculatedDPSummary
-        from openccu_loom_types.ws import DataPointValueChangedPayload
+        from openccu_loom_client.wire.rest import CalculatedDPSummary
+        from openccu_loom_client.wire.ws import DataPointValueChangedPayload
 
         store = self._store()
         store.attach_channel_calculated_data_points(
@@ -626,7 +623,7 @@ class TestCalculatedDataPoints:
         assert dp.value is True
 
     def _attach_dew_point(self, *, store: LoomStore, available: bool) -> Any:
-        from openccu_loom_types.rest import CalculatedDPSummary
+        from openccu_loom_client.wire.rest import CalculatedDPSummary
 
         store.attach_channel_calculated_data_points(
             device_address="VCU7",
@@ -667,7 +664,7 @@ class TestCalculatedDataPoints:
 
     def test_calculated_is_valid_requires_a_value(self) -> None:
         """An available-but-unobserved calc DP is still not valid — no value to read."""
-        from openccu_loom_types.rest import CalculatedDPSummary
+        from openccu_loom_client.wire.rest import CalculatedDPSummary
 
         store = self._store()
         store.attach_channel_calculated_data_points(
@@ -883,7 +880,7 @@ class TestProgramControls:
 
     @staticmethod
     def _program(*, active: bool, execute_available: bool) -> Any:
-        from openccu_loom_types.rest import ProgramSummary
+        from openccu_loom_client.wire.rest import ProgramSummary
 
         return ProgramSummary.model_validate(
             {
@@ -923,7 +920,7 @@ class TestProgramControls:
 
     def test_push_reaches_both_controls(self) -> None:
         """The live ``hub.program_changed`` push does the same without a poll."""
-        from openccu_loom_types.ws import ProgramChangedPayload
+        from openccu_loom_client.wire.ws import ProgramChangedPayload
 
         store = self._store()
         store._upsert_program(summary=self._program(active=False, execute_available=False))
@@ -945,7 +942,7 @@ class TestProgramControls:
         assert button.available is True
 
     def test_push_for_unknown_program_is_ignored(self) -> None:
-        from openccu_loom_types.ws import ProgramChangedPayload
+        from openccu_loom_client.wire.ws import ProgramChangedPayload
 
         store = self._store()
         store.apply_program_changed(
@@ -998,10 +995,9 @@ class TestSysvarStaysLive:
     """A sysvar push has to reach the object Home Assistant holds."""
 
     def test_push_updates_the_categorised_twin(self) -> None:
-        from openccu_loom_types.rest import SysvarSummary
-        from openccu_loom_types.ws import SysvarChangedPayload
-
         from openccu_loom_client.compat.aiohomematic.model.hub import make_program_data_points, make_sysvar_data_point
+        from openccu_loom_client.wire.rest import SysvarSummary
+        from openccu_loom_client.wire.ws import SysvarChangedPayload
 
         store = LoomStore()
         store.set_hub_data_point_factories(
@@ -1040,7 +1036,7 @@ class TestHubPollAnnouncesResults:
 
     @staticmethod
     def _sysvar(value: float) -> Any:
-        from openccu_loom_types.rest import SysvarSummary
+        from openccu_loom_client.wire.rest import SysvarSummary
 
         return SysvarSummary.model_validate(
             {
@@ -1055,7 +1051,7 @@ class TestHubPollAnnouncesResults:
 
     @staticmethod
     def _program(*, active: bool) -> Any:
-        from openccu_loom_types.rest import ProgramSummary
+        from openccu_loom_client.wire.rest import ProgramSummary
 
         return ProgramSummary.model_validate(
             {

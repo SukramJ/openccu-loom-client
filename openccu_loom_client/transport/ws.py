@@ -9,7 +9,7 @@ Implements the wire contract documented in
 
 - Subscribe / unsubscribe by topic-prefix patterns.
 - Server-pushed envelopes carry ``{topic, type, ts, seq, kind,
-  payload}`` (see ``openccu_loom_types.ws.WsEnvelope``).
+  payload}`` (see ``openccu_loom_client.wire.ws.WsEnvelope``).
 - Resume-after-reconnect via ``{"op":"subscribe", "since": <last_seq>}``
   per ADR-0022.
 - ``replay_lost`` control frame signals the buffer aged the missing
@@ -36,11 +36,11 @@ import random
 from typing import TYPE_CHECKING, Final, Self
 
 import aiohttp
-from openccu_loom_types.ws import WsEnvelope
 from pydantic import ValidationError
 
 from openccu_loom_client.auth import BearerAuth
 from openccu_loom_client.exceptions import LoomTransportError
+from openccu_loom_client.wire.ws import WsEnvelope
 
 if TYPE_CHECKING:
     from types import TracebackType

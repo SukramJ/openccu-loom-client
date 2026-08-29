@@ -28,15 +28,10 @@ dependencies = [
     # (tests/compat/test_aiohomematic_protocol_parity.py) running against the
     # exact version in requirements.txt. That is the CI pin, and it is where a
     # new aiohomematic series gets validated before anyone relies on it.
-    #
-    # (openccu-loom-types is pinned exactly and that is not a contradiction:
-    # nothing but this client consumes it, so an exact pin there cannot
-    # conflict with anybody.)
     "aiohomematic>=2026.8.7",
     # Floors match the CI-pinned versions in requirements.txt so a fresh
     # `pip install` resolves a tested-compatible set, not an ancient one.
     "aiohttp>=3.12.0",
-    "openccu-loom-types==0.5.10",
     "pydantic>=2.12.0",
     "python-slugify>=8.0.0",
 ]
@@ -62,6 +57,9 @@ Homepage = "https://github.com/SukramJ/openccu-loom-client"
 # requirements_test.txt. The daemon HTTP surface is mocked by tests/helpers
 # MockDaemon (a real in-process aiohttp server), so no aioresponses.
 dev = [
+    # Regenerating openccu_loom_client/wire/ needs it; see script/gen/ and
+    # `make generate`. It is a build-time tool, never imported at runtime.
+    "datamodel-code-generator>=0.57",
     "pytest>=7.4",
     "pytest-asyncio>=0.23",
     "ruff>=0.6",
@@ -550,7 +548,9 @@ fixture-parentheses = false # Don't require parentheses for fixtures without par
 "tests".msg = "Production code must not import from tests"
 
 [tool.ruff.lint.per-file-ignores]
-"script/*" = [
+# `script/**`, not `script/*`: a single star does not cross a directory
+# separator, so the generators under script/gen/ were outside this list.
+"script/**" = [
     "T20", # Allow print/debug statements in scripts
     "S101", # assert usage is fine in dev scripts
     "S110", "S112", # try-except-pass/continue in dev scripts
@@ -569,6 +569,14 @@ fixture-parentheses = false # Don't require parentheses for fixtures without par
 # The store mutates live domain wrappers through their private
 # `_replace_*` / `_update_*` / `_attach_*` / `_upsert_*` methods by
 # design (see CLAUDE.md conventions) — that coupling is the point.
+# openccu_loom_client/wire/ is machine output. Its shape is the
+# generator's — datamodel-codegen for rest.py, script/gen/ for the rest —
+# so linting it means either editing generated files by hand or teaching
+# the generator this project's style. Both are worse than exempting the
+# subpackage: a finding here is never actionable in the file it points at.
+# The generators themselves are ordinary source under script/ and are
+# linted with everything else.
+"openccu_loom_client/wire/*" = ["ALL"]
 "openccu_loom_client/store.py" = ["SLF001"]
 "openccu_loom_client/compat/aiohomematic/central/adapter.py" = ["SLF001"]
 "openccu_loom_client/compat/aiohomematic/central/hub_coordinator.py" = ["SLF001"]

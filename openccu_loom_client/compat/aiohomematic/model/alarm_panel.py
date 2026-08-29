@@ -23,16 +23,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from openccu_loom_types.enums import DataPointCategory
-
 from openccu_loom_client.compat.aiohomematic.model._protocol_surface import _HubProtocolSurface
 from openccu_loom_client.compat.aiohomematic.model.hub._surface import _HubEntitySurface
 from openccu_loom_client.model.alarm_panel import AlarmPanel
+from openccu_loom_client.wire.enums import DataPointCategory
 
 if TYPE_CHECKING:
-    from openccu_loom_types.rest import AlarmPanelEntity
-
     from openccu_loom_client.store import LoomStore
+    from openccu_loom_client.wire.rest import AlarmPanelEntity
 
 
 class LoomDpAlarmControlPanel(_HubEntitySurface, _HubProtocolSurface, AlarmPanel):

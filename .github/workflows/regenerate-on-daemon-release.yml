@@ -1,0 +1,109 @@
+name: "Regenerate: on daemon release"
+
+# Fired by the openccu-loom release workflow via repository_dispatch
+# (event_type: daemon-release, client_payload.tag: the released tag).
+# Checks out the daemon at that tag, regenerates every module under
+# openccu_loom_client/wire/ from its committed contract assets, stamps the
+# schema digest + api_version, and opens a pull request.
+#
+# It opens a PR and stops there. It does not bump the version, does not
+# merge, and does not tag. That is the whole point of moving this here:
+# the same job used to live in openccu-loom-types, where a merged
+# regeneration auto-tagged and published to PyPI, so 84 of 84 releases in
+# that repository since the automation landed were machine-decided and none
+# of them carried a hand-written line. A regeneration is a change; whether a
+# change is worth a release is a judgement, and `unreleased-check.yaml`
+# already reports package code that has been sitting on main untagged.
+#
+# Manual fallback: workflow_dispatch with the tag as input.
+# yamllint disable-line rule:truthy
+on:
+  repository_dispatch:
+    types: [daemon-release]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "openccu-loom release tag (e.g. v0.68.0)"
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  regenerate:
+    if: github.repository_owner == 'SukramJ'
+    name: Regenerate wire bindings from daemon tag
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve daemon tag
+        run: |
+          TAG="${{ github.event.client_payload.tag || github.event.inputs.tag }}"
+          if [ -z "$TAG" ]; then
+            echo "No daemon tag in payload/input" >&2
+            exit 1
+          fi
+          echo "DAEMON_TAG=${TAG}" >> "$GITHUB_ENV"
+
+      # Checked out with the PAT so the regen branch is pushed under a real
+      # identity — a branch/PR created via GITHUB_TOKEN would NOT trigger the
+      # CI workflows, and a regeneration PR nobody can see the checks for is
+      # worse than none.
+      - name: Checkout client repo
+        uses: actions/checkout@v7
+        with:
+          token: ${{ secrets.RELEASE_PAT }}
+
+      - name: Checkout daemon at the released tag
+        uses: actions/checkout@v7
+        with:
+          repository: SukramJ/openccu-loom
+          ref: ${{ env.DAEMON_TAG }}
+          path: openccu-loom
+
+      - name: Set up Python
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.14"
+
+      - name: Install generation tooling
+        run: pip install -e '.[dev]'
+
+      - name: Regenerate wire modules + stamp contract identity
+        run: make generate OPENCCU_LOOM_REPO=openccu-loom
+
+      - name: Open regeneration PR
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+        run: |
+          set -euo pipefail
+          # `make generate` has stamped the schema digest + daemon api_version
+          # and rewritten every generated module. If nothing under wire/
+          # changed, the daemon contract is identical to what is already
+          # committed — an API-unchanged daemon release costs nothing here.
+          if git diff --quiet -- openccu_loom_client/wire/; then
+            echo "No wire changes for ${DAEMON_TAG} — nothing to do"
+            exit 0
+          fi
+
+          API_VERSION="$(sed -nE 's/^DAEMON_API_VERSION: Final = "([^"]+)"$/\1/p' openccu_loom_client/wire/const.py)"
+
+          BRANCH="regen/daemon-${DAEMON_TAG}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add openccu_loom_client/wire/
+          git commit -s -m "feat(wire): regenerate from openccu-loom ${DAEMON_TAG} (api ${API_VERSION})"
+          git push origin "$BRANCH"
+
+          gh pr create \
+            --title "Regenerate wire bindings from openccu-loom ${DAEMON_TAG}" \
+            --body "Automated regeneration from the daemon release \`${DAEMON_TAG}\` (daemon api \`${API_VERSION}\`).
+
+          Changed: \`openccu_loom_client/wire/\` — \`enums.py\`, \`rest.py\`, \`ws.py\`, and the stamped
+          \`const.py\` (schema digest + daemon api_version).
+
+          **No version bump, no auto-merge, no tag.** Read the module diff for removed or renamed
+          fields before merging: a field this client reads that the daemon dropped fails at runtime,
+          not here. Whether the merged result is worth a release is a separate decision —
+          \`unreleased-check.yaml\` reports package code sitting on main untagged."

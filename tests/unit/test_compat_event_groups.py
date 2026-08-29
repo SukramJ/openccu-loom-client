@@ -7,10 +7,10 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from openccu_loom_types.enums import DeviceTriggerEventType
 import pytest
 
 from openccu_loom_client.compat.aiohomematic.model.event_group import ChannelEventGroup, _trigger_type
+from openccu_loom_client.wire.enums import DeviceTriggerEventType
 
 
 @pytest.mark.parametrize(

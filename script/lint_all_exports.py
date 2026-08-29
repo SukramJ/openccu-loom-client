@@ -40,9 +40,11 @@ import sys
 from typing import NamedTuple
 
 # Top-level packages whose absolute submodule imports count as re-exports.
-# The compat layer deliberately re-exports stable wire types from the sister
-# ``openccu_loom_types`` package (see CLAUDE.md), so it is first-party here too.
-FIRST_PARTY_PACKAGE = ("openccu_loom_client", "openccu_loom_types")
+# ``openccu_loom_client.wire`` is a subpackage of the first entry and needs no
+# listing of its own; it is named here only because the compat layer
+# deliberately re-exports wire types and a reader looking for that rule should
+# find it stated.
+FIRST_PARTY_PACKAGE = ("openccu_loom_client",)
 
 # Packages to validate
 PACKAGES_TO_VALIDATE: tuple[str, ...] = (

@@ -5,8 +5,6 @@
 
 from __future__ import annotations
 
-from openccu_loom_types.rest import Kind2 as Kind
-
 from openccu_loom_client.events import (
     DataPointsCreatedEvent,
     EventBus,
@@ -14,6 +12,7 @@ from openccu_loom_client.events import (
     new_data_points_created_event,
     new_optimistic_rollback_event,
 )
+from openccu_loom_client.wire.rest import Kind2 as Kind
 
 
 class TestDataPointsCreatedEvent:

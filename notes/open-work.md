@@ -373,12 +373,19 @@ than by a fresh opinion.
   convenience for the tokens we act on, not an allowlist to validate against" —
   while the generated enums reject unknown values outright.
 - **Keep `openccu_loom_types` as a top-level import path inside this
-  distribution.** No, and this is the one thing #122 must not get wrong. Home
+  distribution.** No, and it was the one thing #122 must not get wrong. Home
   Assistant never uninstalls abandoned requirements
   (`homeassistant/requirements.py:115-126`), and `openccu_loom_types-0.5.9.dist-info`
   is in every HA venv today. Two distributions owning one top-level package:
   reinstalling the orphan silently reverts `wire/`, uninstalling it deletes the
   package this client ships. Reproduced in a throwaway venv.
+
+  Carried out that way: the bindings live at `openccu_loom_client/wire/`, so the
+  two distributions own disjoint top-level packages. Re-measured in a throwaway
+  venv on the folded build — `importlib.metadata.files` reports **0 overlapping
+  files**, the client imports with `openccu-loom-types==0.5.9` installed on top,
+  and it still imports after that orphan is uninstalled. The failure mode is
+  gone rather than mitigated.
 
 Decided the same day, and recorded because the code cannot show them:
 

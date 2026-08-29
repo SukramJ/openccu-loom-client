@@ -16,14 +16,14 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
-from openccu_loom_types import DAEMON_API_VERSION
-from openccu_loom_types.rest import ChannelSummary, DeviceDetail, DeviceSummary, Snapshot
 import pytest
 
 from openccu_loom_client.model.device_client import DeviceClient
 from openccu_loom_client.operations.datapoints import DataPointsOperations
 from openccu_loom_client.store import LoomStore
 from openccu_loom_client.transport import HttpTransport
+from openccu_loom_client.wire import DAEMON_API_VERSION
+from openccu_loom_client.wire.rest import ChannelSummary, DeviceDetail, DeviceSummary, Snapshot
 from tests.helpers import MockDaemon
 
 _INFO = {

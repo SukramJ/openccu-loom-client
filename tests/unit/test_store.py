@@ -14,7 +14,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from openccu_loom_types.rest import (
+import pytest
+
+from openccu_loom_client.store import LoomStore
+from openccu_loom_client.wire.rest import (
     CalculatedDPSummary,
     ChannelSummary,
     CustomDPSummary,
@@ -24,16 +27,13 @@ from openccu_loom_types.rest import (
     Operations,
     Snapshot,
 )
-from openccu_loom_types.ws import (
+from openccu_loom_client.wire.ws import (
     CustomDataPointStateChangedPayload,
     DataPointValueChangedPayload,
     DeviceAvailabilityChangedPayload,
     DeviceCreatedPayload,
     DeviceRemovedPayload,
 )
-import pytest
-
-from openccu_loom_client.store import LoomStore
 
 # ---- fixtures ----
 

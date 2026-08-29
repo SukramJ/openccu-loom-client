@@ -44,9 +44,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, ClassVar, Final
 
-from openccu_loom_types.enums import DataPointCategory
-from openccu_loom_types.rest import ClimatePeriod, ClimateProfile, ClimateWeekday, SimpleScheduleEntry
-
 from openccu_loom_client.canonical import canonical_unique_id
 from openccu_loom_client.compat.aiohomematic._upstream import (
     CallSource,
@@ -58,13 +55,14 @@ from openccu_loom_client.compat.aiohomematic._upstream import (
 )
 from openccu_loom_client.compat.aiohomematic.model._protocol_surface import _CommonProtocolSurface, _NameData
 from openccu_loom_client.compat.aiohomematic.model.hub._surface import _HubEntitySurface
+from openccu_loom_client.wire.enums import DataPointCategory
+from openccu_loom_client.wire.rest import ClimatePeriod, ClimateProfile, ClimateWeekday, SimpleScheduleEntry
 
 if TYPE_CHECKING:
-    from openccu_loom_types.rest import Schedule, WeekProfileResponse
-
     from openccu_loom_client.model import Channel, Device
     from openccu_loom_client.operations.schedules import SchedulesOperations
     from openccu_loom_client.store import LoomStore
+    from openccu_loom_client.wire.rest import Schedule, WeekProfileResponse
 
 # Maximum schedule entries, mirroring aiohomematic's week-profile
 # constants: 13 climate slots/day × 7 weekdays × 6 profiles, and 24

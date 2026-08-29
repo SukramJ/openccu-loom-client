@@ -8,9 +8,8 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import quote
 
-from openccu_loom_types.rest import CustomDPSummary
-
 from openccu_loom_client.operations._base import _OperationsBase
+from openccu_loom_client.wire.rest import CustomDPSummary
 
 
 class CustomDataPointsOperations(_OperationsBase):

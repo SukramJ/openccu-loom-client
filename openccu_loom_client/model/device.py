@@ -9,10 +9,9 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
-from openccu_loom_types.rest import DeviceAvailability, DeviceFirmware, DeviceSummary
-
 from openccu_loom_client.model.device_client import DeviceClient
 from openccu_loom_client.operations.devices import DevicesOperations
+from openccu_loom_client.wire.rest import DeviceAvailability, DeviceFirmware, DeviceSummary
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

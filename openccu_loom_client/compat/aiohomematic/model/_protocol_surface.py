@@ -29,19 +29,18 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from openccu_loom_types.enums import DataPointType, DataPointUsage, ParamsetKey
+from openccu_loom_client.wire.enums import DataPointType, DataPointUsage, ParamsetKey
 
 if TYPE_CHECKING:
-    from openccu_loom_types.rest import (
+    from openccu_loom_client.model import Device
+    from openccu_loom_client.store import LoomStore
+    from openccu_loom_client.wire.rest import (
         AlarmPanelEntity,
         CustomDPSummary,
         DataPointSummary,
         ProgramSummary,
         SysvarSummary,
     )
-
-    from openccu_loom_client.model import Device
-    from openccu_loom_client.store import LoomStore
 
 
 class _NameData:

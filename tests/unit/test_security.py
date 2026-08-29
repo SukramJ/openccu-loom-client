@@ -15,9 +15,6 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import Any
 
-from openccu_loom_types import DAEMON_API_VERSION
-from openccu_loom_types.rest import Kind2 as Kind, SecuritySourceOverride
-from openccu_loom_types.ws import WsEnvelope
 import pytest
 
 from openccu_loom_client.events.types import (
@@ -30,6 +27,9 @@ from openccu_loom_client.events.types import (
 )
 from openccu_loom_client.operations import SecurityOperations
 from openccu_loom_client.transport import HttpTransport
+from openccu_loom_client.wire import DAEMON_API_VERSION
+from openccu_loom_client.wire.rest import Kind2 as Kind, SecuritySourceOverride
+from openccu_loom_client.wire.ws import WsEnvelope
 from tests.helpers import MockDaemon
 
 _INFO = {

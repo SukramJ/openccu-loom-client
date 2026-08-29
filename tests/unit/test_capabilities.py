@@ -12,10 +12,10 @@ These pin the shape that turns that into an error at the call site.
 
 from __future__ import annotations
 
-from openccu_loom_types import DAEMON_API_VERSION
 import pytest
 
 from openccu_loom_client import ALWAYS_ON, Capability, LoomClient
+from openccu_loom_client.wire import DAEMON_API_VERSION
 from tests.helpers.mock_daemon import MockDaemon
 
 _BASE_INFO = {

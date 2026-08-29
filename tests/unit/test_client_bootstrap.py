@@ -19,14 +19,6 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from unittest.mock import patch
 
-from openccu_loom_types import DAEMON_API_VERSION
-from openccu_loom_types.rest import Kind2 as Kind
-from openccu_loom_types.ws import (
-    DataPointValueChangedPayload,
-    DeviceAvailabilityChangedPayload,
-    DeviceCreatedPayload,
-    DeviceReleasedPayload,
-)
 import pytest
 
 from openccu_loom_client import LoomClient
@@ -42,6 +34,14 @@ from openccu_loom_client.events import (
     DeviceReleasedEvent,
 )
 from openccu_loom_client.exceptions import LoomIncompatibleVersionError, LoomTransportError
+from openccu_loom_client.wire import DAEMON_API_VERSION
+from openccu_loom_client.wire.rest import Kind2 as Kind
+from openccu_loom_client.wire.ws import (
+    DataPointValueChangedPayload,
+    DeviceAvailabilityChangedPayload,
+    DeviceCreatedPayload,
+    DeviceReleasedPayload,
+)
 from tests.helpers import MockDaemon
 
 _INFO = {

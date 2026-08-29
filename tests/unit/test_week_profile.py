@@ -8,7 +8,6 @@ from __future__ import annotations
 from typing import Any
 
 from aiohomematic.interfaces import model as aio_model
-from openccu_loom_types.rest import DeviceSummary, Schedule, WeekProfileResponse
 
 from openccu_loom_client.compat.aiohomematic._upstream import ScheduleProfile, WeekdayStr
 from openccu_loom_client.compat.aiohomematic.model.week_profile import (
@@ -18,6 +17,7 @@ from openccu_loom_client.compat.aiohomematic.model.week_profile import (
 )
 from openccu_loom_client.model import Device
 from openccu_loom_client.store import LoomStore
+from openccu_loom_client.wire.rest import DeviceSummary, Schedule, WeekProfileResponse
 
 _ADDRESS = "VCU0000001"
 

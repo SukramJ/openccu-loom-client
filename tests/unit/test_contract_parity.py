@@ -21,7 +21,6 @@ from pathlib import Path
 from typing import Any
 
 from aiohomematic.const import PROGRAM_ADDRESS, SYSVAR_ADDRESS
-from openccu_loom_types.enums import DataPointCategory, DataPointType
 import pytest
 
 from openccu_loom_client.canonical import (
@@ -34,6 +33,7 @@ from openccu_loom_client.canonical import (
 from openccu_loom_client.compat.aiohomematic.model.custom import custom_unique_id
 from openccu_loom_client.compat.aiohomematic.model.hub import program_unique_id, sysvar_unique_id
 from openccu_loom_client.events.types import data_point_event_key
+from openccu_loom_client.wire.enums import DataPointCategory, DataPointType
 
 _FIXTURES: Path = Path(__file__).parent.parent / "fixtures"
 
@@ -56,7 +56,7 @@ class TestEnumParity:
     """
     P2: the daemon-generated enum copies must match the golden values.
 
-    The client uses ``openccu_loom_types.enums`` (PascalCase members,
+    The client uses ``openccu_loom_client.wire.enums`` (PascalCase members,
     generated from the daemon's ``enums.json``); aiohomematic ships the
     same enum with SCREAMING_CASE members. Member *names* differ on
     purpose, so parity is checked on the string *values* HA filters on.

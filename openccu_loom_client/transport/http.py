@@ -34,9 +34,8 @@ import logging
 from typing import TYPE_CHECKING, Any, Final, Self
 
 import aiohttp
-import openccu_loom_types
-from openccu_loom_types.rest import Info
 
+from openccu_loom_client import wire
 from openccu_loom_client.exceptions import (
     BaseLoomException,
     LoomIncompatibleVersionError,
@@ -46,6 +45,7 @@ from openccu_loom_client.exceptions import (
     http_error_from_problem,
     parse_problem,
 )
+from openccu_loom_client.wire.rest import Info
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -202,7 +202,7 @@ class HttpTransport:
         daemon or unstamped types package).
         """
         daemon_digest = info_payload.get("schema_digest", "") if isinstance(info_payload, dict) else ""
-        types_digest = getattr(openccu_loom_types, "SCHEMA_DIGEST", "")
+        types_digest = getattr(wire, "SCHEMA_DIGEST", "")
         if not daemon_digest or not types_digest:
             return
         if daemon_digest != types_digest:
@@ -214,7 +214,7 @@ class HttpTransport:
                 self._config.host,
                 daemon_digest,
                 types_digest,
-                getattr(openccu_loom_types, "DAEMON_API_VERSION", "?"),
+                getattr(wire, "DAEMON_API_VERSION", "?"),
                 self._info.api_version if self._info else "?",
             )
 
@@ -238,7 +238,7 @@ class HttpTransport:
         Takes the raw ``api_version`` string rather than reading the parsed
         model, because it runs before that model exists — see connect().
         """
-        expected = getattr(openccu_loom_types, "DAEMON_API_VERSION", "")
+        expected = getattr(wire, "DAEMON_API_VERSION", "")
         expected_mm = self._parse_major_minor(expected)
         daemon_mm = self._parse_major_minor(api_version)
         if expected_mm is None or daemon_mm is None:

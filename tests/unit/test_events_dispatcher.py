@@ -26,7 +26,6 @@ import json
 import os
 import pathlib
 
-from openccu_loom_types.ws import WsEnvelope
 import pytest
 
 from openccu_loom_client.events import (
@@ -51,6 +50,7 @@ from openccu_loom_client.events import (
     event_from_envelope,
 )
 from openccu_loom_client.events.types import DataPointOptimisticRolledBackEvent, DeviceTriggerEvent, known_event_types
+from openccu_loom_client.wire.ws import WsEnvelope
 
 
 def _find_wsapi() -> pathlib.Path | None:

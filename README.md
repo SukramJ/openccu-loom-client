@@ -18,11 +18,13 @@ plugged in today; `CLAUDE.md` carries the reasoning behind that form.
 
 ## Architecture
 
-Wire types come from the sister package
-[`openccu-loom-types`](https://pypi.org/project/openccu-loom-types/)
-(Pydantic models + enum catalogue, generated from the daemon's
-`assets/openapi.yaml` and `assets/schemas/enums.json`). This package
-adds:
+Wire types are generated into `openccu_loom_client/wire/` (Pydantic
+models + enum catalogue, from the daemon's `assets/openapi.yaml`,
+`assets/wsapi.json` and `assets/schemas/enums.json`). They shipped as the
+separate `openccu-loom-types` distribution until 2026.9; that package is
+now a thin alias that requires this one, and nothing needs to depend on it.
+Everything under `wire/` is machine output; everything else here is
+hand-written:
 
 - `transport/http.py` — async REST client (aiohttp), RFC 9457
   `problem+json` parsing, retry/backoff.
@@ -47,15 +49,15 @@ adds:
 
 The daemon's external-client contract is tracked in
 [`notes/reference/external-client-asks.md`](https://github.com/SukramJ/openccu-loom/blob/main/notes/reference/external-client-asks.md)
-in the daemon repo. As of `openccu-loom-types==0.1.24`, all push-event
+in the daemon repo. All push-event
 payloads needed by Home Assistant (`DataPointValueChanged`,
 `CustomDataPointStateChanged`, `CentralStateChanged`,
 `SystemStatusChanged`, `SysvarChanged`, `ProgramExecuted`,
 `InstallModeChanged`, `DeviceCreated`, `DeviceRemoved`) ship typed and
 are bound in the event registry.
 
-The full daemon REST surface is wrapped — typed end-to-end against
-`openccu-loom-types`:
+The full daemon REST surface is wrapped — typed end-to-end against the
+generated wire models:
 
 - **HA-relevant:** devices/channels/data-points, paramsets, batch
   reads, custom data points, programs and sysvars (incl. create /
@@ -75,8 +77,8 @@ The full daemon REST surface is wrapped — typed end-to-end against
 
 The schedule, link and calculated-data-point schemas live in the
 daemon's `openapi.yaml` (`components.schemas`) and are regenerated into
-`openccu-loom-types` (currently `0.1.24`), so they are typed rather than
-free-form dicts.
+`openccu_loom_client/wire/`, so they are typed rather than free-form
+dicts.
 
 Two broadcasts that were once daemon-side gaps are **now live and
 bound**:

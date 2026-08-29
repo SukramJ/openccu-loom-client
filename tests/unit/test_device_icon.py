@@ -17,12 +17,12 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
-from openccu_loom_types.rest import ChannelSummary, DeviceDetail, DeviceSummary, Snapshot
 import pytest
 
 from openccu_loom_client.compat.aiohomematic import ccu_translations
 from openccu_loom_client.compat.aiohomematic.central.configurable_devices import build_configurable_devices
 from openccu_loom_client.store import LoomStore
+from openccu_loom_client.wire.rest import ChannelSummary, DeviceDetail, DeviceSummary, Snapshot
 
 
 @pytest.fixture(autouse=True)

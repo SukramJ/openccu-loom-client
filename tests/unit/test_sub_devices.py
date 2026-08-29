@@ -16,9 +16,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from openccu_loom_types.rest import ChannelSummary, DeviceDetail, DeviceSummary, Snapshot
-
 from openccu_loom_client.store import LoomStore
+from openccu_loom_client.wire.rest import ChannelSummary, DeviceDetail, DeviceSummary, Snapshot
 
 # ---- fixtures ----
 

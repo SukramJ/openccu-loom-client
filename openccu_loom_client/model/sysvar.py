@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from openccu_loom_types.rest import SysvarSummary
+from openccu_loom_client.wire.rest import SysvarSummary
 
 if TYPE_CHECKING:
     from openccu_loom_client.model.channel import Channel

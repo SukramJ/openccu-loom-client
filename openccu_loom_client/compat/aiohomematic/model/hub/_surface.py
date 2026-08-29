@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from openccu_loom_types.enums import DataPointCategory
+from openccu_loom_client.wire.enums import DataPointCategory
 
 
 class _HubEntitySurface:

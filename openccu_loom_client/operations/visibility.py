@@ -10,14 +10,13 @@ patterns surface specific ones per central.
 
 from __future__ import annotations
 
-from openccu_loom_types.rest import (
+from openccu_loom_client.operations._base import _OperationsBase
+from openccu_loom_client.wire.rest import (
     UnIgnoreCandidateList,
     UnIgnoreListResponse,
     UnIgnoreUpdateRequest,
     UnIgnoreUpdateResponse,
 )
-
-from openccu_loom_client.operations._base import _OperationsBase
 
 
 class VisibilityOperations(_OperationsBase):

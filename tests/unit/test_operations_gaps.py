@@ -13,9 +13,6 @@ contract.
 
 from __future__ import annotations
 
-from openccu_loom_types import DAEMON_API_VERSION
-from openccu_loom_types.rest import Area, AreaRoomRef, Schedule, ScheduleChannelRef
-from openccu_loom_types.ws import WsEnvelope
 import pytest
 
 from openccu_loom_client.events import InstallModeChangedEvent
@@ -28,6 +25,9 @@ from openccu_loom_client.operations import (
     SchedulesOperations,
 )
 from openccu_loom_client.transport import HttpTransport
+from openccu_loom_client.wire import DAEMON_API_VERSION
+from openccu_loom_client.wire.rest import Area, AreaRoomRef, Schedule, ScheduleChannelRef
+from openccu_loom_client.wire.ws import WsEnvelope
 from tests.helpers import MockDaemon
 
 _INFO = {

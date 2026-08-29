@@ -46,9 +46,6 @@ from datetime import UTC, datetime
 import logging
 from typing import TYPE_CHECKING, Any, Final, cast
 
-from openccu_loom_types.enums import CentralState, DataPointCategory
-from openccu_loom_types.rest import BackupEntry
-
 from openccu_loom_client.compat.aiohomematic._upstream import (
     AlarmMessageData,
     BackupData,
@@ -101,6 +98,8 @@ from openccu_loom_client.events import (
     ConnectionStateChangedEvent as LoomConnectionStateChangedEvent,
 )
 from openccu_loom_client.exceptions import BaseLoomException, LoomHttpError, LoomNotFoundError
+from openccu_loom_client.wire.enums import CentralState, DataPointCategory
+from openccu_loom_client.wire.rest import BackupEntry
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping

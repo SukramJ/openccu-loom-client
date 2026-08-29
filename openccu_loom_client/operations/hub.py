@@ -8,7 +8,8 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import quote
 
-from openccu_loom_types.rest import (
+from openccu_loom_client.operations._base import _OperationsBase
+from openccu_loom_client.wire.rest import (
     AlarmMessage,
     Area,
     AreaRoomRef,
@@ -20,8 +21,6 @@ from openccu_loom_types.rest import (
     ServiceMessage,
     SysvarSummary,
 )
-
-from openccu_loom_client.operations._base import _OperationsBase
 
 
 class HubOperations(_OperationsBase):
