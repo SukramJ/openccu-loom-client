@@ -1,4 +1,4 @@
-# Version 2026.8.34 (2026-08-29)
+# Version 2026.8.33 (2026-08-29)
 
 - **Fix: a system-variable push without a `unique_id` no longer emits the wrong key.**
   Daemon 0.68.0 keys system variables on the CCU's numeric variable id, and no push
@@ -46,8 +46,6 @@
   The two-file pin guard for `openccu-loom-types` is gone with the pin it
   guarded — there is no second version number left for `pyproject.toml` and
   `requirements.txt` to disagree about. `TestAiohomematicIsFloored` stays.
-
-# Version 2026.8.33 (2026-08-28)
 
 - **CUxD entities re-key once on this upgrade.** Not a change in this package,
   but its consequence, and it lands here because this is the release that pins
