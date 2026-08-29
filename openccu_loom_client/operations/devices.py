@@ -33,22 +33,28 @@ class DevicesOperations(_OperationsBase):
 
     # ---- read ----
 
-    async def list_devices(self, *, page: int = 1, per_page: int = 50) -> DeviceList:
+    async def list_devices(self, *, page: int = 1, per_page: int = 50, central: str | None = None) -> DeviceList:
         """
         Paginated catalogue of registered devices.
 
         Wire: ``GET /devices?page=&per_page=``. Returns the full
         envelope (items + page + per_page + total) so callers can
         page through without parsing.
+
+        ``central`` scopes the listing to one CCU on a daemon mediating
+        several; an older daemon ignores it and returns the whole fleet.
         """
+        params: dict[str, Any] = {"page": page, "per_page": per_page}
+        if central:
+            params["central"] = central
         payload = await self._transport.request(
             method="GET",
             path="/devices",
-            params={"page": page, "per_page": per_page},
+            params=params,
         )
         return DeviceList.model_validate(payload)
 
-    async def iter_all_devices(self, *, per_page: int = 200) -> list[DeviceSummary]:
+    async def iter_all_devices(self, *, per_page: int = 200, central: str | None = None) -> list[DeviceSummary]:
         """
         Walk all pages and return one flat device list.
 
@@ -56,11 +62,14 @@ class DevicesOperations(_OperationsBase):
         complete catalogue in one go. For large CCUs prefer
         :meth:`SystemOperations.get_snapshot` which returns the
         device list in a single request.
+
+        ``central`` is forwarded to every page, so a daemon mediating
+        several CCUs walks only this one's.
         """
         out: list[DeviceSummary] = []
         page = 1
         while True:
-            chunk = await self.list_devices(page=page, per_page=per_page)
+            chunk = await self.list_devices(page=page, per_page=per_page, central=central)
             out.extend(chunk.items)
             if len(out) >= chunk.total or not chunk.items:
                 return out

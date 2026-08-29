@@ -442,12 +442,53 @@ class LoomClient:
                 return False
             await asyncio.sleep(_READINESS_POLL_SECONDS)
 
+    async def _pin_central_id(self) -> None:
+        """
+        Resolve this client's central before the snapshot, so it can be scoped.
+
+        ``load_snapshot`` derives the central id from the snapshot's own
+        interface list, which is too late to ask the daemon for one central's
+        devices — on a daemon mediating several CCUs the whole fleet has
+        already crossed the wire, and every consumer bound to one CCU parses
+        and discards the others' device trees. ``GET /system/ccu`` names the
+        centrals directly and is cheap.
+
+        The resolution rule is `LoomStore._infer_central_id`'s, deliberately:
+        the configured central name when the daemon knows it, the sole entry
+        when the daemon mediates exactly one, and otherwise nothing. Two rules
+        that disagree would scope the request one way and filter the store the
+        other. Failing to resolve is not an error — the snapshot then goes out
+        unscoped, exactly as before.
+        """
+        if self._store.central_id:
+            return
+        try:
+            entries = await self.system.list_system_ccus()
+        except BaseLoomException as err:
+            _LOGGER.debug("cannot scope the snapshot (GET /system/ccu): %s", err)
+            return
+        names = [name for entry in entries if (name := getattr(entry, "name", None))]
+        configured = self._store.central_name
+        if configured and configured in names:
+            self._store.set_central_id(central_id=configured)
+        elif len(names) == 1:
+            self._store.set_central_id(central_id=names[0])
+        elif names:
+            _LOGGER.debug(
+                "daemon mediates %s and none matches the configured central name %r — requesting the unscoped snapshot",
+                names,
+                configured,
+            )
+
     async def bootstrap(self, *, fetch_data_points: bool = True) -> None:
         """
         Populate the store from the daemon's current state.
 
         Steps:
 
+        0. Resolve this central (:meth:`_pin_central_id`) so the snapshot
+           below can be scoped to it with ``?central=``. Skipped once known,
+           so a re-bootstrap costs nothing.
         1. ``GET /snapshot?include=data_points`` → registers every device
            and, in the same response, the nested channels + data points
            (:attr:`Snapshot.device_channels`).
@@ -475,8 +516,13 @@ class LoomClient:
         rather than deleted: it costs one branch and it is what answers a
         daemon that ignores ``include``.
         """
+        await self._pin_central_id()
         include = "channels,data_points" if fetch_data_points else "channels"
-        snapshot = await self.system.get_snapshot(include=include, released_only=self._config.released_only)
+        snapshot = await self.system.get_snapshot(
+            include=include,
+            released_only=self._config.released_only,
+            central=self._store.central_id or None,
+        )
         self._store.load_snapshot(snapshot=snapshot)
 
         # load_snapshot derives the central id from the interface list.
