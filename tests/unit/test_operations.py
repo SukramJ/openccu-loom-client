@@ -11,6 +11,7 @@ import pytest
 
 from openccu_loom_client.exceptions import LoomNotFoundError
 from openccu_loom_client.operations import (
+    CustomDataPointsOperations,
     DataPointsOperations,
     DevicesOperations,
     DiagnosticsOperations,
@@ -317,3 +318,40 @@ class TestOnboardingRelease:
         with pytest.raises(LoomNotFoundError):
             await DevicesOperations(transport=http).release_device(address="VCU0001")
         assert len(mock_daemon.requests) - before == 1
+
+
+class TestCustomDataPointDetailShape:
+    """
+    `GET .../cdps/{name}` answers with a detail record, not a summary.
+
+    This is a regression guard with a production traceback behind it. The
+    façade validated `CustomDPSummary` and so raised against every real
+    response — `supported_operations` and `unique_id` are simply not in it.
+    Nothing called the façade, so nothing noticed, until the store began
+    delegating to it in 2026.8.33 and 22 entities failed to be added on a
+    live installation.
+
+    The payload below is the one from that log.
+    """
+
+    async def test_validates_the_response_the_daemon_actually_sends(
+        self, mock_daemon: MockDaemon, http: HttpTransport
+    ) -> None:
+        mock_daemon.get(
+            "/api/v1/devices/VCU0001/cdps/STATE@12",
+            payload={"name": "STATE@12", "category": "switch", "channel_no": 12, "state": {"is_on": False}},
+        )
+        detail = await CustomDataPointsOperations(transport=http).get(address="VCU0001", name="STATE@12")
+        assert detail.name == "STATE@12"
+        assert detail.category == "switch"
+        assert detail.channel_no == 12
+        assert detail.state == {"is_on": False}
+
+    async def test_a_missing_state_is_not_an_error(self, mock_daemon: MockDaemon, http: HttpTransport) -> None:
+        """The daemon may answer without a state; the caller decides what that means."""
+        mock_daemon.get(
+            "/api/v1/devices/VCU0001/cdps/SWITCH",
+            payload={"name": "SWITCH", "category": "switch", "channel_no": 1},
+        )
+        detail = await CustomDataPointsOperations(transport=http).get(address="VCU0001", name="SWITCH")
+        assert detail.state is None

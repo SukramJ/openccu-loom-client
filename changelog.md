@@ -1,3 +1,30 @@
+# Version 2026.8.35 (2026-08-29)
+
+- **Fix: refreshing a custom data point raised instead of refreshing.** On a
+  live installation 22 entities failed to be added, each with a
+  `ValidationError` from `CustomDPSummary`. Anyone on 2026.8.33 or 2026.8.34
+  whose entities refresh a custom data point — a switch, a cover, a light, a
+  thermostat — is affected. Upgrade.
+
+  `GET /devices/{addr}/cdps/{name}` answers with a _detail_ record: `name`,
+  `category`, `channel_no`, `state`. Not with the summary the list endpoint
+  returns — no `supported_operations`, no `unique_id`. The operations façade
+  validated the summary, so it raised against every real response. It had no
+  caller, so it never ran; 2026.8.33 made the store delegate to it, and the
+  wrong type reached production.
+
+  The façade returns the right shape now, and the store reads `state` from it.
+
+  Two things let this through, and both are fixed rather than noted. The
+  daemon declares no schema for that operation — its OpenAPI entry is
+  `200: Custom DP detail` with no content — so there was nothing to generate
+  a type from and the façade guessed; raised as SukramJ/openccu-loom#648, and
+  the model here is hand-written until that lands. And the one test covering
+  the path had been given a fixture that returned a whole summary, on the same
+  wrong assumption, which is why the suite stayed green. It now returns what
+  the daemon returns, and a regression test replays the exact payload from the
+  production traceback.
+
 # Version 2026.8.34 (2026-08-29)
 
 - **The aiohomematic floor tracks the tested version.** `pyproject.toml` now

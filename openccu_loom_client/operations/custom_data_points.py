@@ -8,8 +8,31 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import quote
 
+from pydantic import BaseModel
+
 from openccu_loom_client.operations._base import _OperationsBase
 from openccu_loom_client.wire.rest import CustomDPSummary
+
+
+class CustomDPDetail(BaseModel):
+    """
+    The response of ``GET /devices/{addr}/cdps/{name}``.
+
+    Hand-written, which everything else in this package's wire layer is not.
+    The daemon declares no schema for this operation — its OpenAPI entry is
+    ``200: Custom DP detail`` with no ``content`` — so there is nothing to
+    generate from, and the shape here was read off the Go handler
+    (``internal/north/rest/handlers/custom_data_points.go:102-108``) and
+    confirmed against a real response.
+
+    Delete this in favour of the generated model once the daemon declares the
+    schema: SukramJ/openccu-loom#648.
+    """
+
+    name: str
+    category: str
+    channel_no: int
+    state: dict[str, Any] | None = None
 
 
 class CustomDataPointsOperations(_OperationsBase):
@@ -26,10 +49,21 @@ class CustomDataPointsOperations(_OperationsBase):
         """Wire: ``GET /devices/{addr}/cdps``."""
         return await self._request_list(method="GET", path=f"/devices/{address}/cdps", model=CustomDPSummary)
 
-    async def get(self, *, address: str, name: str) -> CustomDPSummary:
-        """Wire: ``GET /devices/{addr}/cdps/{name}``."""
+    async def get(self, *, address: str, name: str) -> CustomDPDetail:
+        """
+        Wire: ``GET /devices/{addr}/cdps/{name}``.
+
+        Returns a *detail* record, not a summary. The endpoint answers with
+        four fields — ``name``, ``category``, ``channel_no``, ``state`` — and
+        not with the summary the list endpoint returns: no
+        ``supported_operations``, no ``unique_id``, no ``capabilities``.
+
+        This method used to validate ``CustomDPSummary`` and therefore raised
+        against every real response. Nothing called it, so nothing noticed
+        until the store began delegating to it in 2026.8.33.
+        """
         payload = await self._transport.request(method="GET", path=f"/devices/{address}/cdps/{quote(name, safe='')}")
-        return CustomDPSummary.model_validate(payload)
+        return CustomDPDetail.model_validate(payload)
 
     async def invoke(
         self,
