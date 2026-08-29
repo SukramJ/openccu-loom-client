@@ -44,7 +44,13 @@ from openccu_loom_client.compat.aiohomematic.model.week_profile import ClimateWe
 
 aiohomematic = pytest.importorskip("aiohomematic")
 
-from aiohomematic.interfaces.model import (  # noqa: E402 — after importorskip
+from aiohomematic.interfaces.custom import (  # noqa: E402 — after importorskip
+    CoverDataPointProtocol,
+    GarageDataPointProtocol,
+    SoundPlayerDataPointProtocol,
+    TiltCoverDataPointProtocol,
+)
+from aiohomematic.interfaces.model import (  # noqa: E402
     CallbackDataPointProtocol,
     ClimateWeekProfileDataPointProtocol,
     CustomDataPointProtocol,
@@ -307,4 +313,111 @@ def test_climate_week_profile_twin_satisfies_its_protocol() -> None:
         "WeekProfileDp now satisfies the climate protocol too, so the isinstance split the adapter and the "
         "integration rely on no longer discriminates. Either that is intended and both sides need a new "
         "discriminator, or a climate-only member leaked onto the base class."
+    )
+
+
+# --- the category protocols: aiohomematic.interfaces.custom ---
+#
+# A second protocol module, and the one `homematicip_local` began dispatching
+# on in its 2026-08-29 release (`cover.py:9`, `siren.py:9`). The guards above
+# cover `aiohomematic.interfaces.model` only, so until this section existed
+# nothing in either repository asserted that the loom twins satisfy the
+# protocols HA now decides platform behaviour with — the dispatch moved and its
+# guard did not.
+
+# The ordered chain `homematicip_local/cover.py:61-87` runs. Order is the whole
+# point: a data point lands in the branch of the FIRST protocol it satisfies,
+# so a twin that also satisfies an earlier one silently takes the wrong branch.
+# That is not hypothetical — it is how every loom garage door ended up in the
+# cover branch while `CustomDpGarage` still subclassed `CustomDpCover`.
+_COVER_DISPATCH_CHAIN: tuple[tuple[str, Any], ...] = (
+    ("garage", GarageDataPointProtocol),
+    ("tilt", TiltCoverDataPointProtocol),
+    ("cover", CoverDataPointProtocol),
+)
+
+# Measured, not assumed: `CustomDpGarage` satisfies garage *and* cover but not
+# tilt, the blinds satisfy tilt and cover but not garage, and `CustomDpCover`
+# satisfies cover alone. Each therefore lands where HA means it to — and this
+# table fails the moment one of them starts satisfying something earlier.
+_COVER_EXPECTED_BRANCH: dict[str, str] = {
+    "CustomDpCover": "cover",
+    "CustomDpBlind": "tilt",
+    "CustomDpIpBlind": "tilt",
+    "CustomDpGarage": "garage",
+}
+
+
+@pytest.mark.parametrize(("class_name", "expected"), sorted(_COVER_EXPECTED_BRANCH.items()))
+def test_cover_twin_lands_in_the_branch_ha_dispatches_it_to(class_name: str, expected: str) -> None:
+    """Replay HA's ordered chain, rather than assert membership one protocol at a time."""
+    instance = _custom_instance(class_name)
+    landed = next((branch for branch, protocol in _COVER_DISPATCH_CHAIN if isinstance(instance, protocol)), None)
+    assert landed == expected, (
+        f"{class_name} lands in the {landed!r} branch of homematicip_local's cover dispatch, "
+        f"expected {expected!r}. The chain is ordered (garage, tilt, cover) and takes the first match, "
+        "so satisfying an earlier protocol than intended silently rehomes every entity of this class."
+    )
+
+
+# `siren.py` does not chain — it gates sound-player behaviour on one protocol
+# (`:99`, `:136`, `:160`). Both directions matter: the sound player must satisfy
+# it or its soundfile attributes and play/stop services go missing, and a plain
+# siren must not, or it advertises services it cannot serve.
+@pytest.mark.parametrize(
+    ("class_name", "is_sound_player"),
+    [("CustomDpSoundPlayer", True), ("BaseCustomDpSiren", False)],
+)
+def test_sound_player_gate_admits_exactly_the_sound_players(class_name: str, is_sound_player: bool) -> None:
+    instance = _custom_instance(class_name)
+    assert isinstance(instance, SoundPlayerDataPointProtocol) is is_sound_player, (
+        f"{class_name} {'does not satisfy' if is_sound_player else 'unexpectedly satisfies'} "
+        "SoundPlayerDataPointProtocol; homematicip_local gates play_sound / stop_sound and the "
+        f"soundfile attributes on it. Missing members: {_missing_members(instance, SoundPlayerDataPointProtocol)}"
+    )
+
+
+# Same contract as the model snapshot above, for the second module. A protocol
+# appearing here is a category HA may start dispatching on; one disappearing is
+# a dispatch site that silently stops matching. Bump with the aiohomematic pin.
+_KNOWN_AIOHM_CUSTOM_PROTOCOLS: frozenset[str] = frozenset(
+    {
+        "ClimateDataPointProtocol",
+        "CoverDataPointProtocol",
+        "CustomDataPointProtocol",
+        "GarageDataPointProtocol",
+        "LightDataPointProtocol",
+        "LockDataPointProtocol",
+        "SirenDataPointProtocol",
+        "SoundPlayerDataPointProtocol",
+        "TiltCoverDataPointProtocol",
+    }
+)
+
+
+def _runtime_checkable_custom_protocols() -> frozenset[str]:
+    from aiohomematic.interfaces import custom
+
+    names: set[str] = set()
+    for name in dir(custom):
+        obj = getattr(custom, name)
+        if (
+            isinstance(obj, type)
+            and getattr(obj, "_is_protocol", False)
+            and getattr(obj, "_is_runtime_protocol", False)
+        ):
+            names.add(name)
+    return frozenset(names)
+
+
+def test_aiohomematic_custom_protocol_surface_has_not_drifted() -> None:
+    current = _runtime_checkable_custom_protocols()
+    added = current - _KNOWN_AIOHM_CUSTOM_PROTOCOLS
+    removed = _KNOWN_AIOHM_CUSTOM_PROTOCOLS - current
+    assert not (added or removed), (
+        "aiohomematic.interfaces.custom runtime_checkable protocols drifted — homematicip_local "
+        "dispatches platform behaviour on these, so decide whether a compat twin and a dispatch "
+        "case above need to follow, then update the snapshot.\n"
+        f"  added (new upstream protocols): {sorted(added)}\n"
+        f"  removed (gone upstream): {sorted(removed)}"
     )

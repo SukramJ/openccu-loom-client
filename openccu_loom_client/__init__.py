@@ -9,9 +9,9 @@ The public surface intentionally mirrors what the
 `aiohomematic` today — see `compat/aiohomematic/` for the namespace
 shim that ships alongside this package.
 
-Stable wire types are re-exported from the sister package
-``openccu-loom-types`` (Pydantic models + enums, regenerated on every
-daemon release). This package adds the transport, event-bus and
+Stable wire types live in ``openccu_loom_client.wire`` (Pydantic models
++ enums, regenerated from the daemon's contract on every daemon release
+and never hand-edited). This package adds the transport, event-bus and
 domain-wrapper layers on top.
 """
 
