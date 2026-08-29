@@ -19,16 +19,27 @@ dependencies = [
     # requirements would be unsatisfiable together and this library would block
     # the only thing that installs it.
     #
-    # The floor names what is actually required: `InboxDeviceData.awaiting_release`
-    # arrived in 2026.8.6. No upper bound, because there is no honest one to
-    # write — CalVer carries no compatibility semantics, so `<2026.9` would
-    # claim 2026.9.0 breaks something merely because a month turned.
+    # The floor tracks the CI pin, like every other floor in this list: a fresh
+    # `pip install` then resolves the set this package's suite actually ran
+    # against, rather than the oldest one that would import. It used to name
+    # only what was strictly required — `InboxDeviceData.awaiting_release`,
+    # 2026.8.6 — but that left an install free to pair a current client with a
+    # reference old enough to key hub entities differently from the daemon it
+    # talks to, which is a shape nobody wants to debug from a bug report.
     #
-    # What guards the coupling is not metadata but the drift-guard test
+    # The cost is real and bounded: raising it costs a release here, and it
+    # would block an install whose consumer pinned aiohomematic *older* than
+    # this floor. `homematicip_local` tracks the current release, so that is a
+    # lag it would have to choose, not one it can fall into.
+    #
+    # No upper bound, because there is no honest one to write — CalVer carries
+    # no compatibility semantics, so `<2026.9` would claim 2026.9.0 breaks
+    # something merely because a month turned.
+    #
+    # What guards the coupling is still not metadata but the drift-guard test
     # (tests/compat/test_aiohomematic_protocol_parity.py) running against the
-    # exact version in requirements.txt. That is the CI pin, and it is where a
-    # new aiohomematic series gets validated before anyone relies on it.
-    "aiohomematic>=2026.8.7",
+    # exact version in requirements.txt.
+    "aiohomematic>=2026.8.8",
     # Floors match the CI-pinned versions in requirements.txt so a fresh
     # `pip install` resolves a tested-compatible set, not an ancient one.
     "aiohttp>=3.12.0",
