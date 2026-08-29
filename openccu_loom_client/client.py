@@ -913,7 +913,7 @@ class LoomClient:
             # consumer makes, where it can be handled in context.
             _LOGGER.error(
                 "the daemon reachable after this reconnect is no longer contract-compatible with this build; "
-                "REST calls will fail until the daemon or openccu-loom-types is updated",
+                "REST calls will fail until the daemon or this client is updated",
             )
         except Exception:
             _LOGGER.debug("contract re-check after reconnect failed", exc_info=True)

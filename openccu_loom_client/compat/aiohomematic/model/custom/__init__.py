@@ -208,10 +208,10 @@ class _CustomEntitySurface(_CustomProtocolSurface, CustomDataPoint):
         summary ships the composed channel-level display name (custom
         channel names verbatim, ``ch<no>``/``vch<no>`` group markers,
         button-lock postfix labels) and the untranslated marker/postfix
-        portion. The fields reach this client with the matching
-        openccu-loom-types release; ``getattr`` keeps older type pins
-        degrading to the device-name collapse instead of crashing (same
-        pattern as the ``config`` block above).
+        portion. The fields reach this client with the wire types
+        regenerated from that daemon release; ``getattr`` keeps an older
+        build degrading to the device-name collapse instead of crashing
+        (same pattern as the ``config`` block above).
         """
         summary = self._summary
         translated = getattr(summary, "translated_name", None) or None
