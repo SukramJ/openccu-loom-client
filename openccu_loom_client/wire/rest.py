@@ -63,6 +63,114 @@ class CustomDPInvokeRequest(BaseModel):
     priority: Priority | None = None
 
 
+class CreatedNamedResource(BaseModel):
+    id: str = Field(..., description="CCU-assigned identifier of the created object.")
+    name: str = Field(..., description="Name as the CCU stored it.")
+
+
+class LinkParamset(BaseModel):
+    model_config = ConfigDict(
+        extra="allow",
+    )
+
+
+class UISchemaChannel(BaseModel):
+    address: str
+    number: int
+    type: str = Field(..., description="OCCU channel-type string (e.g. `ENERGIE_METER_TRANSMITTER`).")
+    label: str | None = Field(None, description="Localised channel-type label. Empty when no translation exists.")
+    device_address: str
+    paramset: str = Field(
+        ..., description="Paramset the form edits. Vocabulary: the ParamsetKey enum in\n`assets/schemas/enums.json`.\n"
+    )
+
+
+class UISchemaGroup(BaseModel):
+    id: str
+    label: str
+    parameters: list[str] = Field(..., description="Names of the parameters this group contains.")
+
+
+class UISchemaValueListEntry(BaseModel):
+    value: int = Field(..., description="Wire ordinal of the ENUM member.")
+    key: str = Field(..., description="Wire name of the ENUM member.")
+    label: str | None = Field(None, description="Localised label. Empty when no translation exists.")
+
+
+class UISchemaParameterOps(BaseModel):
+    read: bool
+    write: bool
+    event: bool
+    determine: bool | None = Field(None, description="The parameter supports the CCU's determine-value verb.")
+
+
+class UISchemaParameterFlags(BaseModel):
+    visible: bool
+    internal: bool
+    service: bool
+
+
+class UISchemaTimePreset(BaseModel):
+    base: int
+    factor: int
+    label: str
+
+
+class UISchemaPreset(BaseModel):
+    label: str
+    value: Any = Field(..., description="Preset value, typed as the parameter is.")
+
+
+class UISchemaVisibility(BaseModel):
+    show: list[str]
+    hide: list[str] | None = None
+    trigger: str = Field(..., description="Name of the parameter whose value drives the rule.")
+    trigger_value: Any = Field(
+        ..., description="Value of `trigger` that activates the rule, typed as that parameter is."
+    )
+
+
+class UISchemaCrossValidation(BaseModel):
+    id: str
+    rule: str = Field(..., description="Constraint kind, which decides the slots below.")
+    param_a: str | None = None
+    param_b: str | None = None
+    param: str | None = None
+    min_param: str | None = None
+    max_param: str | None = None
+    applies_to_params: list[str] = Field(..., description="Every parameter the constraint touches.")
+    error: str | None = Field(None, description="Localised message to show when the constraint fails.")
+
+
+class UISchemaProfile(BaseModel):
+    receiver_type: str
+    sender_type: str | None = None
+    active_profile_id: int | None = Field(None, description="Profile the channel currently runs.")
+    raw: Any | None = Field(None, description="Raw profile document, as the profile store holds it.")
+
+
+class UISchemaSubsetOpt(BaseModel):
+    id: int
+    label: str
+    values: dict[str, Any] = Field(..., description="Parameter name to value, applied together when picked.")
+
+
+class CustomDPDetail(BaseModel):
+    name: str = Field(
+        ...,
+        description="Wire identity of the Custom-DP, echoing the `{name}` path\nparameter — the bare parameter name, or `PARAM@<channel>` when a\nprofile channel group materialises it on several channels.\n",
+    )
+    category: str = Field(
+        ...,
+        description="Model category of the Custom-DP (`switch`, `cover`, `climate`, …).\nVocabulary: the DataPointCategory enum in\n`assets/schemas/enums.json`.\n",
+    )
+    channel_no: int = Field(..., description="Primary CCU channel the Custom-DP is materialised on.")
+    state: dict[str, Any] | None = Field(
+        ...,
+        description="Live state snapshot — the same semantic keys the WS\n`custom_data_point.state_changed` event carries (`is_locked`,\n`hvac_mode`, `brightness`, …). Null when the Custom-DP reports no\nstate.\n",
+    )
+
+
 class CustomDPSummary(BaseModel):
     name: str = Field(
         ...,
@@ -3747,6 +3855,58 @@ class WiringSeam(BaseModel):
     )
 
 
+class UISchemaParameter(BaseModel):
+    name: str
+    label: str | None = Field(None, description="Localised parameter label. Empty when no translation exists.")
+    help: str | None = Field(None, description="Localised help text. Empty when none exists.")
+    type: str = Field(
+        ...,
+        description="CCU parameter type (`BOOL`, `INTEGER`, `FLOAT`, `ENUM`, `STRING`,\n`ACTION`). Vocabulary: the ParameterType enum in\n`assets/schemas/enums.json`.\n",
+    )
+    unit: str | None = None
+    min: Any | None = Field(None, description="Lower bound, typed as the parameter is.")
+    max: Any | None = Field(None, description="Upper bound, typed as the parameter is.")
+    default: Any | None = Field(None, description="Default value, typed as the parameter is.")
+    value_list: list[UISchemaValueListEntry] | None = Field(None, description="Choices for an ENUM parameter.")
+    operations: UISchemaParameterOps
+    flags: UISchemaParameterFlags
+    control: str | None = Field(
+        None, description="CCU control hint (e.g. `BUTTON.SHORT`). Empty when none is declared."
+    )
+    value: Any | None = Field(None, description="Current value. Absent when the parameter has not been observed.")
+    observed: bool = Field(..., description="Whether a value has actually been read from the CCU.")
+    modified_at: str | None = Field(None, description="RFC3339 timestamp of the last local modification.")
+    group_id: str | None = Field(None, description="Id of the `groups` entry this parameter belongs to.")
+    preset: str | None = None
+    category: str | None = None
+    keypress_group: str | None = Field(None, description="Groups the keypress parameters of one button together.")
+    display_as_percent: bool | None = Field(None, description="Render a 0..1 float as a percentage.")
+    display_value: Any | None = Field(
+        None, description="Pre-rendered display form of `value`, when one differs from it."
+    )
+    multiplier: float | None = Field(None, description="Factor between the wire value and the displayed one.")
+    has_last_value: bool | None = None
+    hidden_by_default: bool | None = Field(None, description="Render collapsed unless the operator asks for it.")
+    time_pair_id: str | None = Field(None, description="Pairs a base/factor duration parameter with its partner.")
+    time_selector_type: str | None = None
+    time_presets: list[UISchemaTimePreset] | None = None
+    presets: list[UISchemaPreset] | None = None
+    allow_custom_value: bool | None = Field(None, description="Whether a value outside `presets` may be entered.")
+    subset_group_id: str | None = Field(
+        None, description="Id of the `subset_groups` entry this parameter is a member of."
+    )
+
+
+class UISchemaSubsetGroup(BaseModel):
+    id: str
+    label: str
+    member_params: list[str]
+    current_option_id: int | None = Field(
+        None, description="Option the members currently match. Null when the current values\nmatch no option.\n"
+    )
+    options: list[UISchemaSubsetOpt]
+
+
 class GroupEntry(BaseModel):
     id: int = Field(..., description="Numeric CCU group id.")
     name: str = Field(..., description="Operator-facing group name.")
@@ -4117,6 +4277,34 @@ class SecurityNotification(BaseModel):
 
 class ListSchedulesResponse(BaseModel):
     items: list[ScheduleDeviceSummary]
+
+
+class UISchema(BaseModel):
+    channel: UISchemaChannel
+    groups: list[UISchemaGroup] | None = Field(
+        None, description="Named parameter groupings the form renders as sections."
+    )
+    parameter_order: list[str] | None = Field(
+        None,
+        description="Parameter names in the order the form should render them.\nAbsent when the natural order applies.\n",
+    )
+    parameters: list[UISchemaParameter]
+    visibility: list[UISchemaVisibility] | None = Field(
+        None, description="Conditional show/hide rules driven by another parameter's value."
+    )
+    cross_validations: list[UISchemaCrossValidation] | None = None
+    profile: UISchemaProfile | None = None
+    subset_groups: list[UISchemaSubsetGroup] | None = Field(
+        None,
+        description='Easymode "scene"-style multi-parameter choices — picking one\noption patches every member parameter at once.\n',
+    )
+    model_description: str | None = Field(
+        None,
+        description="Localised human-readable device model name. Empty when the model\ncannot be resolved from the translation catalogue.\n",
+    )
+    device_icon: str | None = Field(
+        None, description="Icon identifier for the device type. Empty when none is registered."
+    )
 
 
 class GroupCentralEntry(BaseModel):
