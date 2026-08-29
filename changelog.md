@@ -1,4 +1,4 @@
-# Version 2026.8.34 (2026-08-29)
+# Version 2026.8.33 (2026-08-29)
 
 - **The wire bindings ship inside this package.** `openccu_loom_types` is now
   `openccu_loom_client.wire` — same generated Pydantic models, same enum
@@ -29,8 +29,6 @@
   The two-file pin guard for `openccu-loom-types` is gone with the pin it
   guarded — there is no second version number left for `pyproject.toml` and
   `requirements.txt` to disagree about. `TestAiohomematicIsFloored` stays.
-
-# Version 2026.8.33 (2026-08-28)
 
 - **CUxD entities re-key once on this upgrade.** Not a change in this package,
   but its consequence, and it lands here because this is the release that pins
