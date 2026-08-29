@@ -73,7 +73,7 @@ class CustomDPSummary(BaseModel):
     supported_operations: list[str]
     kind: str | None = Field(
         None,
-        description="Stable widget hint derived from the concrete Custom-DP\ntype — e.g. `light`, `light_color`, `light_color_temp`,\n`light_fixed_color`, `light_rgbw`, `cover_blind`,\n`cover_garage`, `climate_hmip`, `climate_rf`,\n`climate_simple`, `lock`, `siren`, `switch`,\n`text_display`. Drives the SPA's CDP-aware widget\nselection (ADR 0016). Empty when the kind classifier\ndoes not recognise the Custom-DP type.\n\nDeliberately not a closed enum: the empty value is\nreachable, so a schema that pinned the token set would\nreject a conforming response. The full token list is\npublished as the open `CustomDPKind` vocabulary in\n`assets/schemas/enums.json`; consumers keep a fallback\nfor tokens they do not know.\n",
+        description="Stable widget hint derived from the concrete Custom-DP\ntype — e.g. `light`, `light_color`, `light_color_temp`,\n`light_fixed_color`, `light_rgbw`, `cover_blind`,\n`cover_garage`, `climate_hmip`, `climate_rf`,\n`climate_simple`, `lock`, `siren`, `switch`,\n`text_display`. Drives the SPA's CDP-aware widget\nselection (ADR 0016). Empty when the kind classifier\ndoes not recognise the Custom-DP type.\n",
     )
     channels: list[int] | None = Field(
         None,
@@ -81,7 +81,7 @@ class CustomDPSummary(BaseModel):
     )
     capabilities: dict[str, bool] | None = Field(
         None,
-        description="Flat string→bool map of optional features the device\nsupports — e.g. `dimmable`, `color`, `color_temp`,\n`effects`, `tilt`, `boost`, `away`. Mirrors the\nper-category Capability struct from\n`internal/model/custom/mixins.go`.\n\nA Custom-DP carries only the flags of its own category, so\na missing key means the feature is not applicable — never\nthat it is switched off. The full key list is published as\nthe open `CustomDPCapability` vocabulary in\n`assets/schemas/enums.json`.\n",
+        description="Flat string→bool map of optional features the device\nsupports — e.g. `dimmable`, `color`, `color_temp`,\n`effects`, `tilt`, `boost`, `away`. Mirrors the\nper-category Capability struct from\n`internal/model/custom/mixins.go`.\n",
     )
     config: dict[str, Any] | None = Field(
         None,
@@ -359,21 +359,6 @@ class UpdateStatus(StrEnum):
     installing = "installing"
 
 
-class DeviceFirmware(BaseModel):
-    Current: str | None = None
-    Available: str | None = None
-    Updatable: bool | None = None
-    UpdateState: str | None = None
-
-
-class DeviceAvailability(BaseModel):
-    IsReachable: bool | None = None
-    LastUpdated: AwareDatetime | None = None
-    BatteryLevel: int | None = None
-    LowBattery: bool | None = None
-    SignalStrength: int | None = None
-
-
 class RxMode(BaseModel):
     always: bool | None = Field(
         None, description="Mains-powered, permanently reachable (RX_ALWAYS); applies configuration immediately."
@@ -387,6 +372,21 @@ class RxMode(BaseModel):
         None,
         description="Battery device whose configuration transfer is deferred until its next wakeup (RX_LAZY_CONFIG).",
     )
+
+
+class Firmware(BaseModel):
+    Current: str | None = None
+    Available: str | None = None
+    Updatable: bool | None = None
+    UpdateState: str | None = None
+
+
+class Availability(BaseModel):
+    IsReachable: bool | None = None
+    LastUpdated: AwareDatetime | None = None
+    BatteryLevel: int | None = None
+    LowBattery: bool | None = None
+    SignalStrength: int | None = None
 
 
 class ChannelFlags(BaseModel):
@@ -3816,8 +3816,6 @@ class DeviceSummary(BaseModel):
         description="True when the device should be split into multiple logical\nsub-devices for northbound presentation. The SPA's CdpTilesPanel\nuses this flag to switch from a flat tile grid to per-group\nsections.\n",
     )
     rx_mode: RxMode | None = None
-    firmware: DeviceFirmware
-    availability: DeviceAvailability
 
 
 class DeviceList(BaseModel):
@@ -3828,8 +3826,8 @@ class DeviceList(BaseModel):
 
 
 class DeviceDetail(DeviceSummary):
-    firmware: DeviceFirmware
-    availability: DeviceAvailability
+    firmware: Firmware
+    availability: Availability
     channels: list[ChannelSummary]
 
 
