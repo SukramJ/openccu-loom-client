@@ -52,14 +52,6 @@ from aiohomematic.interfaces.model import (  # noqa: E402 — after importorskip
     GenericProgramDataPointProtocol,
     GenericSysvarDataPointProtocol,
 )
-from openccu_loom_types.enums import DataPointCategory  # noqa: E402
-from openccu_loom_types.rest import (  # noqa: E402
-    CustomDPSummary,
-    DataPointSummary,
-    Operations,
-    ProgramSummary,
-    SysvarSummary,
-)
 
 from openccu_loom_client.compat.aiohomematic.model import (  # noqa: E402
     custom as _custom,
@@ -67,6 +59,14 @@ from openccu_loom_client.compat.aiohomematic.model import (  # noqa: E402
     hub as _hub,
 )
 from openccu_loom_client.store import LoomStore  # noqa: E402
+from openccu_loom_client.wire.enums import DataPointCategory  # noqa: E402
+from openccu_loom_client.wire.rest import (  # noqa: E402
+    CustomDPSummary,
+    DataPointSummary,
+    Operations,
+    ProgramSummary,
+    SysvarSummary,
+)
 
 _DEVICE = "VCU0000001"
 _OPS = Operations(read=True, write=True, event=True)

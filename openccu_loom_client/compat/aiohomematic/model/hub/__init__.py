@@ -19,8 +19,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
-from openccu_loom_types.enums import DataPointCategory
-
 from openccu_loom_client.canonical import canonical_unique_id, hub_slug
 from openccu_loom_client.compat.aiohomematic._upstream import PROGRAM_ADDRESS, SYSVAR_ADDRESS
 from openccu_loom_client.compat.aiohomematic.model._protocol_surface import (
@@ -29,6 +27,7 @@ from openccu_loom_client.compat.aiohomematic.model._protocol_surface import (
 )
 from openccu_loom_client.compat.aiohomematic.model.hub._surface import _HubEntitySurface
 from openccu_loom_client.model import Program, Sysvar
+from openccu_loom_client.wire.enums import DataPointCategory
 
 if TYPE_CHECKING:
     from openccu_loom_client.store import LoomStore

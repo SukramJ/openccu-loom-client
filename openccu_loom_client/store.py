@@ -33,7 +33,23 @@ from functools import cached_property
 import logging
 from typing import TYPE_CHECKING, Any, Final, Protocol, runtime_checkable
 
-from openccu_loom_types.rest import (
+from openccu_loom_client.canonical import serial_suffix as canonical_serial_suffix
+from openccu_loom_client.model import (
+    MASTER_ZONE_ID,
+    AlarmPanel,
+    Channel,
+    CustomDataPoint,
+    DataPoint,
+    Device,
+    Program,
+    Sysvar,
+)
+from openccu_loom_client.operations.alarm import AlarmOperations
+from openccu_loom_client.operations.custom_data_points import CustomDataPointsOperations
+from openccu_loom_client.operations.datapoints import DataPointsOperations
+from openccu_loom_client.operations.devices import DevicesOperations
+from openccu_loom_client.operations.hub import HubOperations
+from openccu_loom_client.wire.rest import (
     AlarmArmAccepted,
     AlarmMotionResetResult,
     AlarmPanelEntity,
@@ -51,28 +67,12 @@ from openccu_loom_types.rest import (
     SysvarSummary,
 )
 
-from openccu_loom_client.canonical import serial_suffix as canonical_serial_suffix
-from openccu_loom_client.model import (
-    MASTER_ZONE_ID,
-    AlarmPanel,
-    Channel,
-    CustomDataPoint,
-    DataPoint,
-    Device,
-    Program,
-    Sysvar,
-)
-from openccu_loom_client.operations.alarm import AlarmOperations
-from openccu_loom_client.operations.custom_data_points import CustomDataPointsOperations
-from openccu_loom_client.operations.datapoints import DataPointsOperations
-from openccu_loom_client.operations.devices import DevicesOperations
-from openccu_loom_client.operations.hub import HubOperations
-
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from openccu_loom_types.rest import AlarmZoneStatus
-    from openccu_loom_types.ws import (
+    from openccu_loom_client.transport.http import HttpTransport
+    from openccu_loom_client.wire.rest import AlarmZoneStatus
+    from openccu_loom_client.wire.ws import (
         AlarmCountdownPayload,
         AlarmHealthChangedPayload,
         AlarmPanelChangedPayload,
@@ -88,8 +88,6 @@ if TYPE_CHECKING:
         ProgramExecutedPayload,
         SysvarChangedPayload,
     )
-
-    from openccu_loom_client.transport.http import HttpTransport
 
 _LOGGER: Final = logging.getLogger(__name__)
 

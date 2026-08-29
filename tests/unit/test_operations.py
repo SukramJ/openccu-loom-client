@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
-from openccu_loom_types import DAEMON_API_VERSION
 import pytest
 
 from openccu_loom_client.exceptions import LoomNotFoundError
@@ -19,6 +18,7 @@ from openccu_loom_client.operations import (
     SystemOperations,
 )
 from openccu_loom_client.transport import HttpTransport
+from openccu_loom_client.wire import DAEMON_API_VERSION
 from tests.helpers import MockDaemon
 
 _INFO = {

@@ -15,8 +15,6 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
-from openccu_loom_types import DAEMON_API_VERSION
-from openccu_loom_types.rest import StartupCaptureConfigWrite
 import pytest
 
 from openccu_loom_client.exceptions import LoomValidationError
@@ -29,6 +27,8 @@ from openccu_loom_client.operations import (
 )
 from openccu_loom_client.operations.devices import DevicesOperations
 from openccu_loom_client.transport import HttpTransport
+from openccu_loom_client.wire import DAEMON_API_VERSION
+from openccu_loom_client.wire.rest import StartupCaptureConfigWrite
 from tests.helpers import MockDaemon
 
 _INFO = {

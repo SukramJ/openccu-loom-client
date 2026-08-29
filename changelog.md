@@ -1,3 +1,35 @@
+# Version 2026.8.34 (2026-08-29)
+
+- **The wire bindings ship inside this package.** `openccu_loom_types` is now
+  `openccu_loom_client.wire` — same generated Pydantic models, same enum
+  catalogue, one distribution instead of two. Import from
+  `openccu_loom_client.wire.rest`, `.ws` and `.enums`. Nothing about the wire
+  contract changed; only where the modules live.
+
+  **For consumers:** nothing to do beyond upgrading. `openccu-loom-types` is no
+  longer a dependency, and the two distributions own disjoint top-level
+  packages, so an orphaned `openccu-loom-types` left behind in an existing
+  environment is inert — measured in a clean venv: 0 overlapping files, the
+  client imports with the old distribution installed on top, and still imports
+  after it is uninstalled. A last `openccu-loom-types` release will alias to
+  this package so the orphan can be cleaned up rather than merely tolerated.
+
+  Why: the split cost a release of its own for every daemon release. Since the
+  auto-tag landed on 2026-06-22, 84 of 84 `openccu-loom-types` releases came
+  out of a regeneration commit and not one carried a hand-written line, while
+  54 of its 106 publications never reached a pin in any consumer. No consumer
+  ever imported the package directly.
+
+  A daemon release now opens a regeneration pull request here and stops —
+  no version bump, no auto-merge, no tag. Whether a regeneration is worth a
+  release is a decision; `unreleased-check.yaml` is what reports one being
+  owed. `make generate` regenerates `wire/` from a daemon checkout alongside,
+  and the generators are ordinary source under `script/gen/`.
+
+  The two-file pin guard for `openccu-loom-types` is gone with the pin it
+  guarded — there is no second version number left for `pyproject.toml` and
+  `requirements.txt` to disagree about. `TestAiohomematicIsFloored` stays.
+
 # Version 2026.8.33 (2026-08-28)
 
 - **CUxD entities re-key once on this upgrade.** Not a change in this package,

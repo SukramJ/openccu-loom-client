@@ -29,15 +29,14 @@ from __future__ import annotations
 
 from urllib.parse import quote
 
-from openccu_loom_types.rest import (
+from openccu_loom_client.operations._base import _OperationsBase
+from openccu_loom_client.wire.rest import (
     SecurityClassState,
     SecurityFault,
     SecuritySnapshot,
     SecuritySourceOverride,
     SecuritySourceView,
 )
-
-from openccu_loom_client.operations._base import _OperationsBase
 
 
 class SecurityOperations(_OperationsBase):

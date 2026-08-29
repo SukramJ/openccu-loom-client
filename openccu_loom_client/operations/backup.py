@@ -14,9 +14,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from openccu_loom_types.rest import BackupEntry, BackupStorageInfo
-
 from openccu_loom_client.operations._base import _OperationsBase
+from openccu_loom_client.wire.rest import BackupEntry, BackupStorageInfo
 
 
 class BackupOperations(_OperationsBase):

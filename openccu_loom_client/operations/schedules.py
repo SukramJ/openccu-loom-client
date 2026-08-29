@@ -8,7 +8,7 @@ Maps to the ``schedules``-tagged endpoints in the daemon's OpenAPI
 surface. These cover the thermostat week-program feature that
 ``homematicip_local`` exposes as HA climate schedules.
 
-Wire types come from ``openccu_loom_types.rest`` (:class:`Schedule`,
+Wire types come from ``openccu_loom_client.wire.rest`` (:class:`Schedule`,
 :class:`WeekProfileResponse`, :class:`SetActiveProfileRequest`), so
 callers get end-to-end typing for the thermostat week-program feature
 ``homematicip_local`` exposes as HA climate schedules.
@@ -16,15 +16,14 @@ callers get end-to-end typing for the thermostat week-program feature
 
 from __future__ import annotations
 
-from openccu_loom_types.rest import (
+from openccu_loom_client.operations._base import _OperationsBase
+from openccu_loom_client.wire.rest import (
     CopyProfileRequest,
     CopyScheduleRequest,
     Schedule,
     SetActiveProfileRequest,
     WeekProfileResponse,
 )
-
-from openccu_loom_client.operations._base import _OperationsBase
 
 
 class SchedulesOperations(_OperationsBase):

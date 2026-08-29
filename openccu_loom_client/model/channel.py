@@ -7,9 +7,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from openccu_loom_types.rest import ChannelSummary
-
 from openccu_loom_client.operations.devices import DevicesOperations
+from openccu_loom_client.wire.rest import ChannelSummary
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

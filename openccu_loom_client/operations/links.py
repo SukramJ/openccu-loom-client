@@ -15,7 +15,7 @@ surface. Two distinct concepts live here:
   events. Enabling these is the prerequisite for HA automations on
   Homematic button/remote presses.
 
-Wire types come from ``openccu_loom_types.rest`` (:class:`Link`,
+Wire types come from ``openccu_loom_client.wire.rest`` (:class:`Link`,
 :class:`AddLinkRequest`, :class:`CentralLinksStatus`); the LINK
 paramset is a free-form ``map[string]any`` and stays a dict.
 """
@@ -25,11 +25,10 @@ from __future__ import annotations
 import contextlib
 from typing import Any
 
-from openccu_loom_types.rest import AddLinkRequest, CentralLinksStatus, Link
-
 from openccu_loom_client.exceptions import BaseLoomException
 from openccu_loom_client.operations._base import _OperationsBase
 from openccu_loom_client.operations.sessions import SessionsOperations
+from openccu_loom_client.wire.rest import AddLinkRequest, CentralLinksStatus, Link
 
 
 class LinksOperations(_OperationsBase):

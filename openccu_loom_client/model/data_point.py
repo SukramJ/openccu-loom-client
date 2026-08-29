@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from openccu_loom_types.rest import DataPointSummary, Operations, Source, UiHint
+from openccu_loom_client.wire.rest import DataPointSummary, Operations, Source, UiHint
 
 if TYPE_CHECKING:
     from openccu_loom_client.model.channel import Channel
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 # Priority values accepted by the daemon's SetValueRequest.value.priority
 # field (see openapi.yaml -> SetValueRequest). The client narrows the
 # wire-side string enum here so type checkers can flag typos at call
-# sites without importing from openccu_loom_types.rest.
+# sites without importing from openccu_loom_client.wire.rest.
 SetValuePriority = str  # "critical" | "high" | "default" | "low"
 
 

@@ -8,7 +8,8 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import quote
 
-from openccu_loom_types.rest import (
+from openccu_loom_client.operations._base import _OperationsBase
+from openccu_loom_client.wire.rest import (
     AddonUpdateStatus,
     Health,
     HubDataPoints,
@@ -21,8 +22,6 @@ from openccu_loom_types.rest import (
     SystemCCUEntry,
     SystemUpdateEntry,
 )
-
-from openccu_loom_client.operations._base import _OperationsBase
 
 
 class SystemOperations(_OperationsBase):

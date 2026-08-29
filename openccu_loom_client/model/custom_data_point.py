@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from openccu_loom_types.rest import CustomDPSummary
+from openccu_loom_client.wire.rest import CustomDPSummary
 
 if TYPE_CHECKING:
     from openccu_loom_client.model.device import Device

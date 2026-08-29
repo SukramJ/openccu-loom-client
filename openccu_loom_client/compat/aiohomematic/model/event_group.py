@@ -21,10 +21,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from openccu_loom_types.enums import DataPointCategory, DataPointUsage, DeviceTriggerEventType
-
 from openccu_loom_client.canonical import LOOM_NAMESPACE, generate_channel_unique_id
 from openccu_loom_client.compat.aiohomematic.model.naming import channel_display_name
+from openccu_loom_client.wire.enums import DataPointCategory, DataPointUsage, DeviceTriggerEventType
 
 if TYPE_CHECKING:
     from openccu_loom_client.model import Channel, DataPoint

@@ -4,7 +4,7 @@
 """
 Constants + enums — surface that ``aiohomematic.const`` used to expose.
 
-The values come from ``openccu_loom_types.enums`` where possible (so
+The values come from ``openccu_loom_client.wire.enums`` where possible (so
 the wire contract stays the single source of truth). The few aliases
 that aren't enums (config-key strings, regex patterns, scalar
 defaults) are declared here verbatim — they shadow whatever default
@@ -17,7 +17,9 @@ from __future__ import annotations
 import re
 from typing import Any, Final
 
-from openccu_loom_types.enums import (
+# ---- enum re-exports (single source of truth: openccu_loom_client.wire) ----
+from openccu_loom_client.compat.aiohomematic._upstream import CCUType as AiohomematicCCUType, SystemInformation
+from openccu_loom_client.wire.enums import (
     Backend,
     CacheType,
     CalculatedParameter,
@@ -50,9 +52,6 @@ from openccu_loom_types.enums import (
     ProductGroup,
     ProgramTrigger,
 )
-
-# ---- enum re-exports (single source of truth: openccu_loom_types) ----
-from openccu_loom_client.compat.aiohomematic._upstream import CCUType as AiohomematicCCUType, SystemInformation
 
 # ---- config-key constants ----
 

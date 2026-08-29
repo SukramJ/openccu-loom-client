@@ -19,9 +19,6 @@ from types import SimpleNamespace
 from typing import Any
 
 from aiohomematic.central.events import EventBus as AioEventBus
-from openccu_loom_types import DAEMON_API_VERSION
-from openccu_loom_types.enums import DataPointCategory
-from openccu_loom_types.rest import AlarmMessage, DataPointSummary, Kind2 as Kind, Link, ServiceMessage, Snapshot
 import pytest
 
 from openccu_loom_client import BasicAuth, BearerAuth
@@ -39,6 +36,9 @@ from openccu_loom_client.compat.aiohomematic.central.adapter import (
 )
 from openccu_loom_client.events import ConnectionStateChangedEvent as LoomConnectionStateChangedEvent
 from openccu_loom_client.exceptions import LoomConflictError, LoomNotFoundError
+from openccu_loom_client.wire import DAEMON_API_VERSION
+from openccu_loom_client.wire.enums import DataPointCategory
+from openccu_loom_client.wire.rest import AlarmMessage, DataPointSummary, Kind2 as Kind, Link, ServiceMessage, Snapshot
 from tests.helpers import MockDaemon
 
 

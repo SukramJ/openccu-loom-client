@@ -18,10 +18,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from openccu_loom_types.rest import CalculatedDPSummary, DataPointSummary
-
 from openccu_loom_client.compat.aiohomematic.model.generic import DpBinarySensor, DpSensor
 from openccu_loom_client.model import DataPoint
+from openccu_loom_client.wire.rest import CalculatedDPSummary, DataPointSummary
 
 if TYPE_CHECKING:
     from openccu_loom_client.store import LoomStore

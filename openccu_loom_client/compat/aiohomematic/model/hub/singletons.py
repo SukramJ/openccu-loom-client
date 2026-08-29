@@ -20,23 +20,22 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, ClassVar, Final, NamedTuple
 
-from openccu_loom_types.enums import DataPointCategory
 from slugify import slugify
 
 from openccu_loom_client.canonical import canonical_unique_id
 from openccu_loom_client.compat.aiohomematic._upstream import HUB_ADDRESS, INSTALL_MODE_ADDRESS
 from openccu_loom_client.compat.aiohomematic.model._protocol_surface import _SysvarProtocolSurface
 from openccu_loom_client.compat.aiohomematic.model.hub._surface import _HubEntitySurface
+from openccu_loom_client.wire.enums import DataPointCategory
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-    from openccu_loom_types.rest import AddonUpdateStatus, SystemUpdateEntry
-    from openccu_loom_types.ws import HubSystemUpdateChangedPayload
-
     from openccu_loom_client.operations.hub import HubOperations
     from openccu_loom_client.operations.system import SystemOperations
     from openccu_loom_client.store import LoomStore
+    from openccu_loom_client.wire.rest import AddonUpdateStatus, SystemUpdateEntry
+    from openccu_loom_client.wire.ws import HubSystemUpdateChangedPayload
 
 # Interface → install-mode token, mirroring aiohomematic's
 # ``interface_suffix`` (hub.py): only HmIP-RF and BidCos-RF carry an

@@ -4,7 +4,7 @@
 """
 Domain models — store-aware wrappers around the wire-type Pydantic models.
 
-The Pydantic models in ``openccu_loom_types.rest`` are flat data
+The Pydantic models in ``openccu_loom_client.wire.rest`` are flat data
 containers. These classes add the navigation graph (Device → Channels
 → DataPoints), the lifecycle hook into the store, and the
 :meth:`DataPoint.send_value` action that round-trips back to the

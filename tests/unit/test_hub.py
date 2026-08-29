@@ -7,11 +7,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from openccu_loom_types.rest import DeviceDetail, DeviceSummary, ProgramSummary, Snapshot, SysvarSummary
-from openccu_loom_types.ws import ProgramExecutedPayload, SysvarChangedPayload
 import pytest
 
 from openccu_loom_client.store import LoomStore
+from openccu_loom_client.wire.rest import DeviceDetail, DeviceSummary, ProgramSummary, Snapshot, SysvarSummary
+from openccu_loom_client.wire.ws import ProgramExecutedPayload, SysvarChangedPayload
 
 
 def _program_summary(*, program_id: str = "p1", **extra: Any) -> ProgramSummary:

@@ -18,9 +18,6 @@ from typing import Any
 
 from aiohomematic.async_support import Looper
 from aiohomematic.central.events import DataPointStateChangedEvent, EventBus as AioEventBus
-from openccu_loom_types.enums import DataPointCategory
-from openccu_loom_types.rest import AlarmPanelEntity, Kind2 as Kind
-from openccu_loom_types.ws import AlarmCountdownPayload, AlarmPanelChangedPayload
 import pytest
 
 from openccu_loom_client.compat.aiohomematic.central.adapter import _category_for_type
@@ -31,6 +28,9 @@ from openccu_loom_client.compat.aiohomematic.model.alarm_panel import (
 )
 from openccu_loom_client.events import AlarmCountdownEvent, AlarmPanelChangedEvent, EventBus
 from openccu_loom_client.store import LoomStore
+from openccu_loom_client.wire.enums import DataPointCategory
+from openccu_loom_client.wire.rest import AlarmPanelEntity, Kind2 as Kind
+from openccu_loom_client.wire.ws import AlarmCountdownPayload, AlarmPanelChangedPayload
 
 
 def _panel_entity(
@@ -234,7 +234,7 @@ class TestCategoryForType:
         assert _category_for_type(data_point_type=AioDataPointType.SIREN) is DataPointCategory.Siren
 
     def test_maps_loom_pascal_case_by_value(self) -> None:
-        from openccu_loom_types.enums import DataPointType as LoomDataPointType
+        from openccu_loom_client.wire.enums import DataPointType as LoomDataPointType
 
         assert (
             _category_for_type(data_point_type=LoomDataPointType.AlarmControlPanel)

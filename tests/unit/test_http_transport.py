@@ -9,7 +9,6 @@ from dataclasses import replace
 import logging
 import time
 
-import openccu_loom_types
 import pytest
 
 from openccu_loom_client import (
@@ -19,6 +18,7 @@ from openccu_loom_client import (
     LoomNotFoundError,
     LoomTransportError,
     LoomUpstreamUnavailableError,
+    wire,
 )
 from openccu_loom_client.transport import HttpTransport
 from tests.helpers import MockDaemon
@@ -28,7 +28,7 @@ _INFO_RESPONSE = {
     # Report the exact API version the installed types were generated
     # against so the connect() compatibility guard passes; guard-rejection
     # cases override this inline. See TestApiVersionGuard.
-    "api_version": openccu_loom_types.DAEMON_API_VERSION,
+    "api_version": wire.DAEMON_API_VERSION,
     "commit": "deadbeef",
     "build_date": "2026-05-24T10:00:00Z",
     "addon_build": False,
@@ -36,7 +36,7 @@ _INFO_RESPONSE = {
     # uptime is ISO-8601 duration per the daemon schema.
     "uptime": "PT60S",
     # capabilities is a closed enum on the wire — these values come
-    # straight from openccu_loom_types.rest.Capability.
+    # straight from openccu_loom_client.wire.rest.Capability.
     "capabilities": ["rest.v1", "ws.broadcasts.v1", "errors.problem_details.v1"],
     # Required field since daemon 0.2.0; empty skips the digest handshake
     # so unrelated tests stay quiet. Digest tests override it explicitly.
@@ -56,7 +56,7 @@ class TestConnect:
         mock_daemon.get("/api/v1/info", payload=_INFO_RESPONSE)
         info = await transport.connect()
         assert info.version == "1.2.3"
-        assert info.api_version == openccu_loom_types.DAEMON_API_VERSION
+        assert info.api_version == wire.DAEMON_API_VERSION
         assert transport.info is not None
         await transport.close()
 
@@ -90,7 +90,7 @@ class TestSchemaDigestHandshake:
         monkeypatch: pytest.MonkeyPatch,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        monkeypatch.setattr(openccu_loom_types, "SCHEMA_DIGEST", _DIGEST_A, raising=False)
+        monkeypatch.setattr(wire, "SCHEMA_DIGEST", _DIGEST_A, raising=False)
         mock_daemon.get("/api/v1/info", payload={**_INFO_RESPONSE, "schema_digest": _DIGEST_B})
         with caplog.at_level(logging.WARNING):
             await transport.connect()
@@ -104,7 +104,7 @@ class TestSchemaDigestHandshake:
         monkeypatch: pytest.MonkeyPatch,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        monkeypatch.setattr(openccu_loom_types, "SCHEMA_DIGEST", _DIGEST_A, raising=False)
+        monkeypatch.setattr(wire, "SCHEMA_DIGEST", _DIGEST_A, raising=False)
         mock_daemon.get("/api/v1/info", payload={**_INFO_RESPONSE, "schema_digest": _DIGEST_A})
         with caplog.at_level(logging.WARNING):
             await transport.connect()
@@ -127,7 +127,7 @@ class TestSchemaDigestHandshake:
         types_digest: str,
         payload_extra: dict[str, str],
     ) -> None:
-        monkeypatch.setattr(openccu_loom_types, "SCHEMA_DIGEST", types_digest, raising=False)
+        monkeypatch.setattr(wire, "SCHEMA_DIGEST", types_digest, raising=False)
         mock_daemon.get("/api/v1/info", payload={**_INFO_RESPONSE, **payload_extra})
         with caplog.at_level(logging.WARNING):
             await transport.connect()
@@ -140,7 +140,7 @@ class TestApiVersionGuard:
 
     @staticmethod
     def _expected_major_minor() -> tuple[int, int]:
-        parts = openccu_loom_types.DAEMON_API_VERSION.split(".")
+        parts = wire.DAEMON_API_VERSION.split(".")
         return int(parts[0]), int(parts[1])
 
     async def test_matching_version_connects(self, mock_daemon: MockDaemon, transport: HttpTransport) -> None:

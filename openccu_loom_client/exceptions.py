@@ -6,7 +6,7 @@ Exception hierarchy for the openccu-loom client.
 
 The daemon emits RFC 9457 `application/problem+json` for every error
 response. The `type` field is one of a fixed set of URIs declared in
-``openccu_loom_types.rest.Code`` — this module maps each URI to a
+``openccu_loom_client.wire.rest.Code`` — this module maps each URI to a
 typed Python exception so consumers can ``except`` on the failure
 class rather than parse the status code or URI themselves.
 
@@ -26,7 +26,8 @@ from __future__ import annotations
 from typing import Any
 
 from aiohomematic.exceptions import BaseHomematicException
-from openccu_loom_types.rest import Code, Problem
+
+from openccu_loom_client.wire.rest import Code, Problem
 
 # Stable problem-type URI prefix the daemon uses for its error catalogue.
 # See assets/openapi.yaml -> components.schemas.Problem.type.enum.
@@ -169,7 +170,7 @@ class LoomInternalError(LoomHttpError):
 
 
 # URI -> exception class. The mapping is exhaustive against
-# `openccu_loom_types.rest.Code`; tests assert that every Code enum
+# `openccu_loom_client.wire.rest.Code`; tests assert that every Code enum
 # value has a binding here so the mapping stays in sync with the
 # wire contract.
 _CODE_TO_EXCEPTION: dict[Code, type[LoomHttpError]] = {

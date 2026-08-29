@@ -8,9 +8,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Final
 
 if TYPE_CHECKING:
-    from openccu_loom_types.rest import AlarmModeReadiness, AlarmMotionResetResult, AlarmPanelEntity, AlarmZoneStatus
-
     from openccu_loom_client.store import LoomStore
+    from openccu_loom_client.wire.rest import (
+        AlarmModeReadiness,
+        AlarmMotionResetResult,
+        AlarmPanelEntity,
+        AlarmZoneStatus,
+    )
 
 # The daemon's pseudo-zone id of the aggregate master panel
 # (``alarmpanel.MasterZoneID``, wire-stable).

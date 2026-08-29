@@ -6,7 +6,7 @@ Device-scoped REST operations.
 
 Maps to the ``/devices`` and ``/devices/{addr}``-rooted endpoints in
 the daemon's OpenAPI surface. Returns parsed Pydantic models from
-``openccu_loom_types.rest`` so callers get end-to-end typing.
+``openccu_loom_client.wire.rest`` so callers get end-to-end typing.
 """
 
 from __future__ import annotations
@@ -14,7 +14,9 @@ from __future__ import annotations
 from http import HTTPStatus
 from typing import Any
 
-from openccu_loom_types.rest import (
+from openccu_loom_client.exceptions import LoomHttpError
+from openccu_loom_client.operations._base import _OperationsBase
+from openccu_loom_client.wire.rest import (
     CalculatedDPDetail,
     CalculatedDPSummary,
     ChannelSummary,
@@ -24,9 +26,6 @@ from openccu_loom_types.rest import (
     DeviceSummary,
     ExportedConfiguration,
 )
-
-from openccu_loom_client.exceptions import LoomHttpError
-from openccu_loom_client.operations._base import _OperationsBase
 
 
 class DevicesOperations(_OperationsBase):

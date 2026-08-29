@@ -69,10 +69,9 @@ from openccu_loom_client.events import (
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-    from openccu_loom_types.rest import ProgramSummary, SysvarSummary
-
     from openccu_loom_client.client import LoomClient
     from openccu_loom_client.events import SubscriptionGroup
+    from openccu_loom_client.wire.rest import ProgramSummary, SysvarSummary
 
 _LOGGER: Final = logging.getLogger(__name__)
 

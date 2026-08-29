@@ -17,10 +17,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Final
 
-from openccu_loom_types.rest import DataPointSummary
-
 from openccu_loom_client.canonical import canonical_unique_id
 from openccu_loom_client.compat.aiohomematic.model.generic import BaseDpNumber
+from openccu_loom_client.wire.rest import DataPointSummary
 
 if TYPE_CHECKING:
     from openccu_loom_client.model import DataPoint, Device

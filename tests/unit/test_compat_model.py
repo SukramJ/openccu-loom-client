@@ -25,41 +25,6 @@ from aiohomematic.const import (
     DeviceTriggerEventType,
     ParamsetKey,
 )
-from openccu_loom_types.enums import DataPointType
-from openccu_loom_types.rest import (
-    AddonUpdateStatus,
-    CustomDPSummary,
-    DataPointSummary,
-    DeviceDetail,
-    HubDataPoints,
-    Kind2 as Kind,
-    ProgramSummary,
-    SecuritySnapshot,
-    Snapshot,
-)
-from openccu_loom_types.ws import (
-    CentralStateChangedPayload,
-    CustomDataPointStateChangedPayload,
-    DaemonStatusPayload,
-    DataPointValueChangedPayload,
-    DeviceAvailabilityChangedPayload,
-    DeviceCreatedPayload,
-    DeviceMetadataChangedPayload,
-    DeviceRemovedPayload,
-    DeviceTriggerPayload,
-    HubConnectivityChangedPayload,
-    HubCountChangedPayload,
-    HubMetricChangedPayload,
-    HubSystemUpdateChangedPayload,
-    InstallModeChangedPayload,
-    OptimisticRollbackPayload,
-    ScheduleChangedPayload,
-    SecurityClassChangedPayload,
-    SecurityFaultChangedPayload,
-    SecurityNotificationPayload,
-    SecurityStateChangedPayload,
-    SysvarChangedPayload,
-)
 
 from openccu_loom_client.compat.aiohomematic.central import CentralConfig
 from openccu_loom_client.compat.aiohomematic.central.adapter import _HubCoordinator
@@ -109,6 +74,41 @@ from openccu_loom_client.events.types import (
     DeviceTriggerEvent as LoomDeviceTriggerEvent,
 )
 from openccu_loom_client.store import LoomStore
+from openccu_loom_client.wire.enums import DataPointType
+from openccu_loom_client.wire.rest import (
+    AddonUpdateStatus,
+    CustomDPSummary,
+    DataPointSummary,
+    DeviceDetail,
+    HubDataPoints,
+    Kind2 as Kind,
+    ProgramSummary,
+    SecuritySnapshot,
+    Snapshot,
+)
+from openccu_loom_client.wire.ws import (
+    CentralStateChangedPayload,
+    CustomDataPointStateChangedPayload,
+    DaemonStatusPayload,
+    DataPointValueChangedPayload,
+    DeviceAvailabilityChangedPayload,
+    DeviceCreatedPayload,
+    DeviceMetadataChangedPayload,
+    DeviceRemovedPayload,
+    DeviceTriggerPayload,
+    HubConnectivityChangedPayload,
+    HubCountChangedPayload,
+    HubMetricChangedPayload,
+    HubSystemUpdateChangedPayload,
+    InstallModeChangedPayload,
+    OptimisticRollbackPayload,
+    ScheduleChangedPayload,
+    SecurityClassChangedPayload,
+    SecurityFaultChangedPayload,
+    SecurityNotificationPayload,
+    SecurityStateChangedPayload,
+    SysvarChangedPayload,
+)
 
 
 async def _adapter():

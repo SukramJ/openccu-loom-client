@@ -19,16 +19,6 @@ from typing import Any
 
 from aiohomematic.async_support import Looper
 from aiohomematic.central.events import DataPointStateChangedEvent, EventBus as AioEventBus
-from openccu_loom_types.rest import (
-    CustomDPSummary,
-    DataPointSummary,
-    DeviceDetail,
-    Schedule,
-    Snapshot,
-    SysvarSummary,
-    WeekProfileResponse,
-)
-from openccu_loom_types.ws import DataPointValueChangedPayload
 
 from openccu_loom_client.compat.aiohomematic.central import CentralConfig
 from openccu_loom_client.compat.aiohomematic.central.adapter import LoomCentralAdapter
@@ -39,6 +29,16 @@ from openccu_loom_client.compat.aiohomematic.model.generic import make_generic_d
 from openccu_loom_client.compat.aiohomematic.model.week_profile import ScheduleChannelSwitch, WeekProfileDp
 from openccu_loom_client.events import DataPointValueChangedEvent, EventBus
 from openccu_loom_client.store import LoomStore
+from openccu_loom_client.wire.rest import (
+    CustomDPSummary,
+    DataPointSummary,
+    DeviceDetail,
+    Schedule,
+    Snapshot,
+    SysvarSummary,
+    WeekProfileResponse,
+)
+from openccu_loom_client.wire.ws import DataPointValueChangedPayload
 
 # ---------------------------------------------------------------------------
 # fixtures
@@ -1067,9 +1067,8 @@ class TestCalculatedTranslatedName:
     """daemon api 1.5.0: calc DPs carry the locale-aware label."""
 
     def test_synthesized_summary_carries_translated_name(self) -> None:
-        from openccu_loom_types.rest import CalculatedDPSummary
-
         from openccu_loom_client.compat.aiohomematic.model.calculated import synthesize_summary
+        from openccu_loom_client.wire.rest import CalculatedDPSummary
 
         calc = CalculatedDPSummary.model_validate(
             {
@@ -1092,10 +1091,9 @@ class TestCalculatedTranslatedName:
         ``name_data.name``; without this the generic fallback returns the raw
         parameter ("DEW_POINT") and the composed entity name reads "… DEW_POINT".
         """
-        from openccu_loom_types.rest import CalculatedDPSummary
-
         from openccu_loom_client.compat.aiohomematic.model.calculated import make_calculated_data_point
         from openccu_loom_client.store import LoomStore
+        from openccu_loom_client.wire.rest import CalculatedDPSummary
 
         calc = CalculatedDPSummary.model_validate(
             {
@@ -1114,10 +1112,9 @@ class TestCalculatedTranslatedName:
 
     def test_calculated_name_falls_back_to_parameter(self) -> None:
         """Without a daemon label, the calc DP name falls back to the parameter."""
-        from openccu_loom_types.rest import CalculatedDPSummary
-
         from openccu_loom_client.compat.aiohomematic.model.calculated import make_calculated_data_point
         from openccu_loom_client.store import LoomStore
+        from openccu_loom_client.wire.rest import CalculatedDPSummary
 
         calc = CalculatedDPSummary.model_validate(
             {

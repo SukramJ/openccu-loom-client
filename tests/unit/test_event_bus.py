@@ -8,8 +8,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from openccu_loom_types.rest import Kind2 as Kind
-from openccu_loom_types.ws import CentralStateChangedPayload, DataPointValueChangedPayload
 import pytest
 
 from openccu_loom_client.events import (
@@ -18,6 +16,8 @@ from openccu_loom_client.events import (
     DeviceCreatedEvent,
     EventBus,
 )
+from openccu_loom_client.wire.rest import Kind2 as Kind
+from openccu_loom_client.wire.ws import CentralStateChangedPayload, DataPointValueChangedPayload
 
 
 def _ts() -> datetime:

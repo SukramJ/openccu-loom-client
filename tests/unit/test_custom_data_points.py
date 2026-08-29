@@ -7,12 +7,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from openccu_loom_types.rest import CustomDPSummary
-from openccu_loom_types.ws import CustomDataPointStateChangedPayload, DeviceRemovedPayload
 import pytest
 
 from openccu_loom_client.operations import CustomDataPointsOperations
 from openccu_loom_client.store import LoomStore
+from openccu_loom_client.wire.rest import CustomDPSummary
+from openccu_loom_client.wire.ws import CustomDataPointStateChangedPayload, DeviceRemovedPayload
 
 
 def _cdp_summary(*, name: str = "main", kind: str = "switch") -> CustomDPSummary:

@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-from openccu_loom_types.rest import Code, Problem
 import pytest
 
 from openccu_loom_client.exceptions import (
@@ -21,6 +20,7 @@ from openccu_loom_client.exceptions import (
     http_error_from_problem,
     parse_problem,
 )
+from openccu_loom_client.wire.rest import Code, Problem
 
 
 def _make_problem(code: Code, *, status: int, title: str = "boom") -> Problem:

@@ -6,7 +6,7 @@ Typed event classes that wrap ``WsEnvelope`` + payload.
 
 The daemon's WebSocket surface emits a uniform envelope
 ``{topic, type, ts, seq, kind, payload}`` (see ``WsEnvelope`` in
-``openccu_loom_types.ws``). The ``type`` discriminator selects the
+``openccu_loom_client.wire.ws``). The ``type`` discriminator selects the
 concrete payload schema; this module mirrors that on the Python side
 by giving each known wire type its own ``LoomEvent`` subclass that
 holds the parsed payload directly.
@@ -23,8 +23,11 @@ from dataclasses import dataclass
 import logging
 from typing import Any, ClassVar, Final
 
-from openccu_loom_types.rest import Kind2 as Kind
-from openccu_loom_types.ws import (
+from pydantic import BaseModel
+
+from openccu_loom_client.canonical import canonical_unique_id
+from openccu_loom_client.wire.rest import Kind2 as Kind
+from openccu_loom_client.wire.ws import (
     AddonUpdateStatus,
     AlarmCountdownPayload,
     AlarmHealthChangedPayload,
@@ -71,9 +74,6 @@ from openccu_loom_types.ws import (
     SysvarChangedPayload,
     WsEnvelope,
 )
-from pydantic import BaseModel
-
-from openccu_loom_client.canonical import canonical_unique_id
 
 _LOGGER: Final = logging.getLogger(__name__)
 
@@ -882,7 +882,7 @@ class UnknownLoomEvent(LoomEvent):
 
 
 # Registry: wire ``type`` string → (event class, payload class). The
-# payload class is a Pydantic model from openccu_loom_types.ws; the
+# payload class is a Pydantic model from openccu_loom_client.wire.ws; the
 # event class is the dataclass wrapper above.
 _EVENT_REGISTRY: Final[dict[str, tuple[Callable[..., LoomEvent], type[BaseModel]]]] = {
     DataPointValueChangedEvent.type_id: (DataPointValueChangedEvent, DataPointValueChangedPayload),

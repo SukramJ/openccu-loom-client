@@ -4,15 +4,20 @@
 """
 Guard the dependency pins that are maintained in two files at once.
 
-`openccu-loom-types` is pinned exactly, in `pyproject.toml` (what an
-installer reads) and in `requirements.txt` (what CI installs). Release
-2026.8.29 exists because those two drifted: `requirements.txt` moved to
-0.5.9 and `pyproject.toml` stayed on 0.5.8, so every test ran against the
-right version and passed while a clean `pip install` of the published
-package resolved the wrong one and failed on import.
+`aiohomematic` is declared as a floor in `pyproject.toml` (what an installer
+reads) and pinned exactly in `requirements.txt` (what CI installs). Those two
+roles must not be swapped: the application consuming this library depends on
+aiohomematic directly and pins it, so a `==` here would make the pair
+unsatisfiable together the moment the versions differed.
 
-That is the failure mode this file exists for — one nothing else can catch,
-because the half that is wrong is the half the test suite never uses.
+The file used to guard a second distribution the same way. `openccu-loom-types`
+was pinned exactly in both files, and release 2026.8.29 exists because they
+drifted — requirements.txt moved to 0.5.9, pyproject.toml stayed on 0.5.8, so
+every test ran against the right version and passed while a clean
+`pip install` resolved the wrong one and failed on import. That whole class of
+failure is gone rather than guarded: the wire bindings ship inside this
+distribution now (`openccu_loom_client/wire/`), so there is no second version
+number for the two files to disagree about.
 """
 
 from __future__ import annotations
@@ -22,14 +27,6 @@ import re
 import tomllib
 
 _ROOT = Path(__file__).resolve().parents[2]
-# Dependencies pinned exactly in both files, by distribution name.
-# `openccu-loom-types` qualifies because nothing but this client consumes it —
-# the wire models are generated per daemon build, and an exact pin there cannot
-# conflict with anybody. `aiohomematic` deliberately does not: the application
-# that consumes this library depends on it directly and pins it exactly, so an
-# `==` here would make the two unsatisfiable together the moment they differed.
-# Its floor-versus-CI-pin relationship is checked separately below.
-_EXACT_IN_BOTH = ("openccu-loom-types",)
 
 
 def _pyproject_requirements() -> dict[str, str]:
@@ -52,42 +49,6 @@ def _requirements_txt() -> dict[str, str]:
         name = re.split(r"[<>=!~\[ ]", line, maxsplit=1)[0].strip()
         out[name] = line
     return out
-
-
-class TestExactPinsAgree:
-    """The exactly-pinned dependencies must name the same version in both files."""
-
-    def test_openccu_loom_types_pin_matches(self) -> None:
-        pyproject = _pyproject_requirements()
-        requirements = _requirements_txt()
-        for dist in _EXACT_IN_BOTH:
-            assert dist in pyproject, f"{dist} vanished from pyproject dependencies"
-            assert dist in requirements, f"{dist} vanished from requirements.txt"
-            assert pyproject[dist] == requirements[dist], (
-                f"{dist} pin drifted: pyproject.toml says {pyproject[dist]!r}, "
-                f"requirements.txt says {requirements[dist]!r}. The installer reads "
-                f"pyproject; CI reads requirements — so a mismatch ships broken and "
-                f"tests green."
-            )
-
-    def test_types_pin_is_exact(self) -> None:
-        """
-        A range would let an installer resolve a types version this build never saw.
-
-        The wire models are generated per daemon build, so anything other than
-        `==` reintroduces exactly the drift the schema-digest handshake reports.
-        """
-        assert _pyproject_requirements()["openccu-loom-types"].startswith("openccu-loom-types==")
-
-    def test_installed_types_version_matches_the_pin(self) -> None:
-        """The environment running these tests must be the one the pins describe."""
-        from openccu_loom_types import VERSION
-
-        pinned = _pyproject_requirements()["openccu-loom-types"].split("==", 1)[1].strip()
-        assert pinned == VERSION, (
-            f"installed openccu-loom-types is {VERSION}, pins say {pinned} — "
-            f"a green run here would say nothing about the published package"
-        )
 
 
 class TestAiohomematicIsFloored:

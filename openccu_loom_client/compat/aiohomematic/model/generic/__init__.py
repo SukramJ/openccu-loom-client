@@ -28,11 +28,10 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, ClassVar, Final
 
-from openccu_loom_types.enums import DataPointCategory
-
 from openccu_loom_client.compat.aiohomematic.model._protocol_surface import _GenericProtocolSurface
 from openccu_loom_client.events.types import data_point_event_key
 from openccu_loom_client.model import DataPoint
+from openccu_loom_client.wire.enums import DataPointCategory
 
 if TYPE_CHECKING:
     from openccu_loom_client.store import LoomStore

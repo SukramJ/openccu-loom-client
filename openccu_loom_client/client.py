@@ -43,8 +43,6 @@ import contextlib
 import logging
 from typing import TYPE_CHECKING, Final, Self
 
-from openccu_loom_types.rest import DeviceDetail
-
 from openccu_loom_client.bridge import bind_ws_events_to_store
 from openccu_loom_client.capabilities import Capability
 from openccu_loom_client.events import (
@@ -76,13 +74,21 @@ from openccu_loom_client.operations import (
 )
 from openccu_loom_client.store import LoomStore
 from openccu_loom_client.transport import HttpTransport, WsTransport
+from openccu_loom_client.wire.rest import DeviceDetail
 
 if TYPE_CHECKING:
     from types import TracebackType
 
-    from openccu_loom_types.rest import Channel, DataPointSummary, DeviceChannel, DeviceSummary, Health, Info, Readiness
-
     from openccu_loom_client.config import LoomConfig
+    from openccu_loom_client.wire.rest import (
+        Channel,
+        DataPointSummary,
+        DeviceChannel,
+        DeviceSummary,
+        Health,
+        Info,
+        Readiness,
+    )
 
 _LOGGER: Final = logging.getLogger(__name__)
 

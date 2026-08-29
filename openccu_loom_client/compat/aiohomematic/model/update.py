@@ -15,9 +15,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, ClassVar, Final
 
-from openccu_loom_types.enums import DataPointCategory
-
 from openccu_loom_client.canonical import canonical_unique_id
+from openccu_loom_client.wire.enums import DataPointCategory
 
 if TYPE_CHECKING:
     from openccu_loom_client.model import Device
