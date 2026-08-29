@@ -1,3 +1,64 @@
+# Version 2026.8.37 (2026-08-29)
+
+- **The bootstrap snapshot is scoped to one CCU.** A daemon may mediate several,
+  and `GET /snapshot` carries every one of them — so on a two-CCU daemon each
+  Home Assistant entry pulled, parsed and then discarded the other CCU's whole
+  device tree. `GET /snapshot` and `GET /devices` both declare a `central` query
+  parameter and this client now passes it; `list_devices` and
+  `iter_all_devices` take it too.
+
+  It had been recorded here as a deliberate non-use, on the grounds that the
+  compat layer filters anyway. What that left out is the cost of the traffic and
+  the parse — and it stayed a footnote only because nobody had said whether
+  multi-CCU installations exist. They do.
+
+  The ordering is why it was not free: `load_snapshot` derives the central id
+  _from_ the snapshot's interface list, too late to ask for one central's
+  devices. `_pin_central_id()` resolves it first from `GET /system/ccu`, using
+  `LoomStore._infer_central_id`'s rule verbatim — the configured central name
+  when the daemon knows it, the sole entry when the daemon mediates one, nothing
+  otherwise. Two rules that disagreed would scope the request one way and filter
+  the store the other.
+
+  Failing to resolve is not an error: the snapshot goes out unscoped, exactly as
+  before. Sending a name the daemon does not know would filter it to nothing and
+  leave the consumer with no entities at all, which is strictly worse than
+  carrying a foreign device tree. An older daemon that 404s on `GET /system/ccu`
+  or ignores the parameter lands in the same place.
+
+- **The protocol guard follows the dispatch again.** `homematicip_local` began
+  deciding cover and siren behaviour on `aiohomematic.interfaces.custom`
+  protocols; this package's drift guard covered `aiohomematic.interfaces.model`
+  only, and nothing here imported the other module at all. Every twin satisfies
+  its protocol today, so nothing was broken — but the failure mode left open is
+  silent: `isinstance` returns `False`, the entity never spawns, no exception.
+
+  What is pinned is stronger than membership. HA's cover dispatch is an ordered
+  chain (garage, tilt, cover) and a data point lands in the branch of the
+  _first_ protocol it satisfies, so the test replays the chain and asserts where
+  each twin lands. A twin gaining an earlier protocol now fails here instead of
+  silently rehoming every entity of its class — the structural form of the bug
+  that once put every garage door in the cover branch. The siren gate is pinned
+  in both directions, and the nine protocols in that module get a drift snapshot
+  of their own.
+
+- **Four user-facing messages named a package that no longer exists.** On a
+  schema-digest mismatch and on an incompatible API version — the two moments a
+  user is meant to act on the message — this client told them to update or
+  install `openccu-loom-types`, folded into `wire/` in 2026.8.33. They now name
+  `openccu-loom-client`.
+
+- The daemon contract in CI is pinned to the daemon's latest _release_ rather
+  than its default branch. Both regeneration workflows already check the daemon
+  out at a tag; measuring the PR gate against `main` compared against a contract
+  this package never adopts directly, and let an unrelated daemon merge turn a
+  pull request red for a reason its author could not act on.
+
+- `LoomStore.daemon_central_count` and `LoomCentralAdapter.daemon_central_count`
+  report how many centrals the daemon mediates, learned while resolving this
+  client's own. Nothing is reported anywhere; it exists so a consumer can put it
+  in a diagnostics dump a user chooses to attach to a bug report.
+
 # Version 2026.8.36 (2026-08-29)
 
 - **Wire types regenerated from daemon 0.68.1 (api 7.24.0).** Purely additive:
