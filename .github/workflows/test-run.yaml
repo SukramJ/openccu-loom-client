@@ -21,10 +21,29 @@ jobs:
       # The daemon's `assets/wsapi.json` is the source the broadcast drift
       # guard compares against. Without it that test skips, which is how a
       # new daemon broadcast could land unbound without anything going red.
+      #
+      # Pinned to the daemon's latest *release*, not its default branch. This
+      # package only ever regenerates from releases — `wire-regen-clean.yml`
+      # and `regenerate-on-daemon-release.yml` both check the daemon out at a
+      # tag — so measuring against `main` compares against a contract this
+      # package will never adopt directly, and lets an unrelated daemon merge
+      # turn a pull request red here for a reason its author cannot act on.
+      # A guard that goes red for unactionable reasons is a guard that gets
+      # ignored. Drift still surfaces, one daemon release later, on the
+      # regeneration PR that would adopt it.
+      - name: Resolve the daemon's latest release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="$(gh release view --repo SukramJ/openccu-loom --json tagName --jq .tagName)"
+          echo "Pinning the daemon contract to ${TAG}"
+          echo "DAEMON_TAG=${TAG}" >> "$GITHUB_ENV"
       - name: Check out the daemon for its wire contract
         uses: actions/checkout@v7
         with:
           repository: SukramJ/openccu-loom
+          ref: ${{ env.DAEMON_TAG }}
           path: openccu-loom
           persist-credentials: false
       - name: Set up Python
