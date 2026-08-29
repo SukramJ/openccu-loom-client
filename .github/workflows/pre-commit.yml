@@ -39,4 +39,11 @@ jobs:
           pip install -r requirements_test.txt
 
       - name: Run prek
+        # `no-commit-to-branch` guards a developer's working copy against a
+        # direct commit to main. On the post-merge run it can only ever fail,
+        # because the checkout *is* main — and it did, on every merge, which
+        # made this workflow permanently red and therefore unread. Skipping it
+        # here removes a check that had no meaning in CI, not one that did.
+        env:
+          SKIP: ${{ github.event_name == 'push' && 'no-commit-to-branch' || '' }}
         run: prek run --all-files
