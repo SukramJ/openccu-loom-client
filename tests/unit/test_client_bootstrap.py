@@ -304,6 +304,25 @@ class TestTheSnapshotIsScopedToThisCentral:
 
         assert self._snapshot_query(mock_daemon).get("central") == "ccu-cellar"
 
+    async def test_the_daemon_central_count_is_recorded(self, mock_daemon: MockDaemon) -> None:
+        """
+        How many centrals the daemon mediates, kept for a diagnostics dump.
+
+        Whether multi-CCU deployments exist was an open question no repository
+        could answer. This is the one place that already knows, and recording
+        it lets a consumer surface it in a diagnostics dump the user attaches
+        to a bug report — no reporting, no telemetry.
+        """
+        mock_daemon.get("/api/v1/info", payload=_INFO)
+        mock_daemon.get("/api/v1/system/ccu", payload=self._ccu_entries("ccu-attic", "ccu-cellar"))
+        mock_daemon.get("/api/v1/snapshot", payload=_SNAPSHOT_NESTED)
+
+        async with LoomClient(config=mock_daemon.config) as client:
+            assert client.store.daemon_central_count == 0, "nothing is known before the lookup"
+            client.store.set_central_name(central_name="ccu-cellar")
+            await client.bootstrap()
+            assert client.store.daemon_central_count == 2
+
     async def test_a_single_central_scopes_without_being_configured(self, mock_daemon: MockDaemon) -> None:
         """One CCU is unambiguous, so the scope is free even with no name set."""
         mock_daemon.get("/api/v1/info", payload=_INFO)

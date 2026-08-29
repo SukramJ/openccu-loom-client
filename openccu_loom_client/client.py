@@ -468,6 +468,7 @@ class LoomClient:
             _LOGGER.debug("cannot scope the snapshot (GET /system/ccu): %s", err)
             return
         names = [name for entry in entries if (name := getattr(entry, "name", None))]
+        self._store.set_daemon_central_count(count=len(names))
         configured = self._store.central_name
         if configured and configured in names:
             self._store.set_central_id(central_id=configured)
