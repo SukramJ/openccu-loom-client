@@ -20,3 +20,8 @@ htmlcov/
 .vscode/
 .DS_Store
 /tmp
+
+# The regeneration workflow checks the daemon out into ./openccu-loom so
+# `make generate` can read its contract assets. Untracked, and `gh pr create`
+# warns about it on every run otherwise.
+/openccu-loom/

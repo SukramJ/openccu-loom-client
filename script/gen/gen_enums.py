@@ -88,10 +88,17 @@ def main() -> int:
     doc = json.loads(args.enums_json.read_text())
     enums = doc.get("enums", [])
 
-    parts = [HEADER]
-    for entry in enums:
-        parts.append(to_class(entry["name"], entry["values"]))
-        parts.append("\n")
+    # Two blank lines around every top-level class: PEP 8, and what
+    # `ruff format` enforces. Emitting one made the generated file
+    # non-reproducible — a repo-wide `ruff format` added the second and
+    # the next `make generate` took it away again, so the file drifted
+    # without anyone editing it.
+    #
+    # HEADER already ends with one newline after the imports, so one more
+    # opens the two-blank-line gap; the classes are joined by the same
+    # gap and the file ends with a single newline.
+    body = "\n\n\n".join(to_class(e["name"], e["values"]).rstrip("\n") for e in enums)
+    parts = [HEADER, "\n", body, "\n"]
 
     args.out_py.parent.mkdir(parents=True, exist_ok=True)
     args.out_py.write_text("".join(parts))

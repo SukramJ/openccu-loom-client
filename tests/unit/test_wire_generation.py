@@ -19,6 +19,11 @@ from __future__ import annotations
 
 import importlib
 import keyword
+from pathlib import Path
+import shutil
+import subprocess
+
+import pytest
 
 from openccu_loom_client import wire
 from openccu_loom_client.wire import enums
@@ -87,3 +92,36 @@ def test_contract_identity_is_stamped() -> None:
     assert len(wire.SCHEMA_DIGEST) == len("sha256:") + 64
     assert wire.DAEMON_API_VERSION
     assert wire.WIRE_VERSION
+
+
+def test_generated_modules_are_already_formatted() -> None:
+    """
+    The generators must emit what `ruff format` would produce anyway.
+
+    Otherwise the two fight over the file: a repo-wide `ruff format` adds what
+    the generator omits, the next `make generate` takes it away, and the
+    committed file drifts with nobody editing it. That happened once — the
+    enum generator emitted one blank line between classes where PEP 8 wants
+    two — and it only surfaced when a regeneration workflow produced a
+    74-line diff for an unchanged daemon contract.
+
+    Pinning the committed output is enough to catch it: `make generate`
+    rewrites these files, so a generator that stops emitting formatted code
+    fails here on the very next regeneration, without needing a daemon
+    checkout to compare against.
+    """
+    if (ruff := shutil.which("ruff")) is None:
+        pytest.skip("ruff is not installed in this environment")
+
+    wire_dir = Path(wire.__file__).parent
+    result = subprocess.run(  # noqa: S603
+        [ruff, "format", "--check", str(wire_dir)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, (
+        f"generated modules are not ruff-format clean:\n{result.stdout}{result.stderr}\n"
+        f"Fix the generator in script/gen/ so it emits formatted code — do not run "
+        f"`ruff format` over wire/ to paper over it, which is what caused the drift before."
+    )
