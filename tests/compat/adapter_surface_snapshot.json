@@ -6,6 +6,7 @@
   "config_ui_url",
   "configuration",
   "create_backup_and_download",
+  "daemon_central_count",
   "device_coordinator",
   "event_bus",
   "events",
