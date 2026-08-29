@@ -31,7 +31,7 @@ from openccu_loom_client.canonical import (
     serial_suffix,
 )
 from openccu_loom_client.compat.aiohomematic.model.custom import custom_unique_id
-from openccu_loom_client.compat.aiohomematic.model.hub import program_unique_id, sysvar_unique_id
+from openccu_loom_client.compat.aiohomematic.model.hub import legacy_program_unique_id, legacy_sysvar_unique_id
 from openccu_loom_client.events.types import data_point_event_key
 from openccu_loom_client.wire.enums import DataPointCategory, DataPointType
 
@@ -135,14 +135,16 @@ class TestUniqueIdWrappers:
             )
 
     @pytest.mark.parametrize("name", ["My Var", "Außen Temperatur", "alarm", "Wert mit-Strich"])
-    def test_sysvar_key_matches_canonical(self, name: str) -> None:
-        assert sysvar_unique_id(serial_suffix="11a0001234", name=name) == canonical_unique_id(
+    def test_legacy_sysvar_key_is_the_name_slug(self, name: str) -> None:
+        """The pre-0.68.0 shape, kept for recognising entities a older daemon keyed."""
+        assert legacy_sysvar_unique_id(serial_suffix="11a0001234", name=name) == canonical_unique_id(
             serial_suffix="11a0001234", address=SYSVAR_ADDRESS, parameter=hub_slug(name=name)
         )
 
     @pytest.mark.parametrize("name", ["All off", "Anwesenheit Simulation"])
-    def test_program_key_matches_canonical(self, name: str) -> None:
-        assert program_unique_id(serial_suffix="11a0001234", name=name) == canonical_unique_id(
+    def test_legacy_program_key_is_the_name_slug(self, name: str) -> None:
+        """As above, for programs."""
+        assert legacy_program_unique_id(serial_suffix="11a0001234", name=name) == canonical_unique_id(
             serial_suffix="11a0001234", address=PROGRAM_ADDRESS, parameter=hub_slug(name=name)
         )
 

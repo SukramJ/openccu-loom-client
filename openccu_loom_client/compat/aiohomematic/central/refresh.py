@@ -18,7 +18,8 @@ using the ``central`` id the daemon stamps on every payload:
 * ``CustomDataPointStateChangedEvent`` → custom DP unique id
   (``generate_unique_id(address=addr:channel_no)`` — the primary channel)
 * ``SysvarChangedEvent`` → sysvar unique id
-  (``generate_unique_id(address="sysvar", parameter=hub_slug(name))``)
+  (the daemon-stamped ``unique_id``; the name slug only as a
+  pre-0.68.0 fallback — see ``_sysvar_event_key``)
 
 It also bridges the daemon's optimistic-rollback broadcast:
 
@@ -51,7 +52,7 @@ from openccu_loom_client.compat.aiohomematic._upstream import (
     ParamsetKey,
 )
 from openccu_loom_client.compat.aiohomematic.model.custom import custom_unique_id
-from openccu_loom_client.compat.aiohomematic.model.hub import sysvar_unique_id
+from openccu_loom_client.compat.aiohomematic.model.hub import legacy_sysvar_unique_id
 from openccu_loom_client.events import (
     AlarmCountdownEvent,
     AlarmPanelChangedEvent,
@@ -179,11 +180,31 @@ def _wire_value_events(*, group: SubscriptionGroup, store: LoomStore, ha_bus: Ai
             value=None,
         )
 
+    def _sysvar_event_key(*, unique_id: str | None, name: str) -> str:
+        """
+        Resolve a sysvar push onto the key its entity is registered under.
+
+        Three sources, in descending authority. The payload's own
+        ``unique_id`` is what the daemon stamped and always wins. Failing
+        that the store is asked, because it holds the summary the same
+        daemon served at bootstrap — which since 0.68.0 is keyed on the
+        CCU's variable id, a value no push payload carries.
+
+        Only if neither knows does this fall back to the pre-id name slug,
+        and that is a considered guess rather than a leftover: a daemon old
+        enough to omit ``unique_id`` from a push is older than the id
+        keying, so the slug is the shape its entities actually carry.
+        """
+        if unique_id:
+            return unique_id
+        if (sysvar := store.get_sysvar(name=name)) is not None and (stored := sysvar.summary.unique_id):
+            return stored
+        return legacy_sysvar_unique_id(serial_suffix=store.serial_suffix, name=name)
+
     async def on_sysvar(event: SysvarChangedEvent) -> None:
         await _emit(
             ts=event.ts,
-            event_key=event.payload.unique_id
-            or sysvar_unique_id(serial_suffix=store.serial_suffix, name=event.payload.name),
+            event_key=_sysvar_event_key(unique_id=event.payload.unique_id, name=event.payload.name),
             value=event.payload.value,
         )
 

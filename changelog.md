@@ -1,5 +1,22 @@
 # Version 2026.8.33 (2026-08-29)
 
+- **Fix: a system-variable push without a `unique_id` no longer emits the wrong key.**
+  Daemon 0.68.0 keys system variables on the CCU's numeric variable id, and no push
+  payload carries that id — only the name. The refresh bridge's fallback still built
+  the pre-0.68.0 name slug, so a push that omitted `unique_id` reached no entity and
+  the entity stopped updating without anything failing.
+
+  The fallback now asks the store first: it holds the summary the same daemon served
+  at bootstrap, which carries the stamped key. The name slug remains as the last
+  resort, and that is a considered guess rather than a leftover — a daemon old enough
+  to omit `unique_id` from a push predates the id keying, so the slug is the shape its
+  entities actually carry.
+
+  `sysvar_unique_id` / `program_unique_id` are renamed to `legacy_sysvar_unique_id` /
+  `legacy_program_unique_id`. They never built the canonical key after 0.68.0, and a
+  name claiming otherwise is how the defect above survived review. Read
+  `SysvarSummary.unique_id` / `ProgramSummary.unique_id` for the authoritative value.
+
 - **The wire bindings ship inside this package.** `openccu_loom_types` is now
   `openccu_loom_client.wire` — same generated Pydantic models, same enum
   catalogue, one distribution instead of two. Import from
