@@ -185,10 +185,15 @@ def _wire_value_events(*, group: SubscriptionGroup, store: LoomStore, ha_bus: Ai
         Resolve a sysvar push onto the key its entity is registered under.
 
         Three sources, in descending authority. The payload's own
-        ``unique_id`` is what the daemon stamped and always wins. Failing
-        that the store is asked, because it holds the summary the same
-        daemon served at bootstrap — which since 0.68.0 is keyed on the
-        CCU's variable id, a value no push payload carries.
+        ``unique_id`` is what the daemon stamped and always wins — and since
+        0.69.0 it is the vid-keyed identity, because the sysvar push frame
+        was fixed to carry what the model publishes instead of the name slug
+        it had been stamping.
+
+        The store is asked next, because it holds the summary the same daemon
+        served at bootstrap. That path now matters mainly for daemons between
+        0.68.0 and 0.69.0, where the summary was already vid-keyed but the
+        push frame still carried the slug.
 
         Only if neither knows does this fall back to the pre-id name slug,
         and that is a considered guess rather than a leftover: a daemon old

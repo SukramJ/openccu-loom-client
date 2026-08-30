@@ -1,3 +1,33 @@
+# Version 2026.8.38 (2026-08-30)
+
+- **Event groups are read from the daemon, not classified here.** The compat
+  layer carried its own sets of CCU keypress / impulse / device-error
+  parameter names and rebuilt each group's `unique_id` from the namespace,
+  the flavour slug and the channel id. That was the fourth copy of the same
+  domain set across this family of repositories, and a copy of an enumerable
+  set caps its holder at whatever its author wrote down — the daemon's own
+  MQTT plane kept one and published keypresses alone while the model had
+  known three event kinds all along.
+
+  `ChannelSummary.event_groups` (daemon 0.70.0, api 7.26.0) now carries the
+  grouping, the flavour, the member parameters and the key, and
+  `build_event_groups` reads them. The keys are unchanged: the client's
+  computation and the daemon's agreed byte for byte, which is precisely why
+  the duplication stayed invisible.
+
+  The usage gate stays local. The daemon groups every event source a channel
+  has; this layer additionally drops parameters the reference stack never
+  spawns an event for (`no_create` / `ignored`), which is a consumer-side
+  visibility rule rather than a fact about the device. A flavour the client
+  does not model yet is skipped rather than guessed, so the daemon can add
+  one before the client follows.
+
+- **Corrected a comment that daemon 0.69.0 falsified.** `_sysvar_event_key`
+  justified its store lookup with "the CCU's variable id, a value no push
+  payload carries". The sysvar push frame was fixed in 0.69.0 to carry
+  exactly that. The chain is unchanged and still correct; its reasoning now
+  matches what the daemon does.
+
 # Version 2026.8.37 (2026-08-29)
 
 - **The bootstrap snapshot is scoped to one CCU.** A daemon may mediate several,

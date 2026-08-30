@@ -163,6 +163,7 @@ def _channel(
     name: str,
     channel_type: str | None = None,
     is_custom_dp_primary: bool | None = None,
+    event_groups: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "address": f"{address}:{number}",
@@ -175,6 +176,8 @@ def _channel(
         payload["type"] = channel_type
     if is_custom_dp_primary is not None:
         payload["is_custom_dp_primary"] = is_custom_dp_primary
+    if event_groups is not None:
+        payload["event_groups"] = event_groups
     return payload
 
 
@@ -938,7 +941,25 @@ class TestEventGroupChannelName:
             address="VCU1",
             model="HmIP-BSM",
             name="Galerie",
-            channels=[_channel(address="VCU1", number=channel_no, name=channel_name)],
+            channels=[
+                _channel(
+                    address="VCU1",
+                    number=channel_no,
+                    name=channel_name,
+                    # The daemon declares the group; the client no longer
+                    # classifies PRESS_SHORT for itself.
+                    event_groups=[
+                        {
+                            "channel_address": f"VCU1:{channel_no}",
+                            "kind": "keypress",
+                            "event_types": ["press_short"],
+                            "parameters": ["PRESS_SHORT"],
+                            "available": True,
+                            "unique_id": f"loom_event_group_keypress_vcu1_{channel_no}",
+                        }
+                    ],
+                )
+            ],
         )
         store.attach_channel_data_points(
             device_address="VCU1",
