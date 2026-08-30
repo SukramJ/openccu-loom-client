@@ -507,71 +507,6 @@ class ChannelFlagsRequest(BaseModel):
     locked: bool | None = None
 
 
-class ChannelSummary(BaseModel):
-    address: str
-    number: int
-    name: str | None = Field(None, description="User-defined channel name. Empty when none is set.")
-    category: str | None = Field(
-        None,
-        description="OCCU channel-type string (same value as `type`), exposed under\nits own key so consumers can route on channel purpose without\nparsing the `type` string.\n",
-    )
-    type: str | None = Field(None, description="OCCU channel-type string (e.g. ENERGIE_METER_TRANSMITTER).")
-    type_label: str | None = Field(
-        None,
-        description="Localised, human-readable channel-type label resolved through\nthe OCCU channel_types table. Empty when no translation exists;\nconsumers fall back to the raw `type`.\n",
-    )
-    paramset_key: str
-    paramset_keys: list[str] | None = Field(
-        None,
-        description='Paramsets this channel actually exposes — "VALUES" when it has\nvalue data points and "MASTER" when it has master (config) data\npoints. The config-panel / HA drop-in uses this to offer the\nright paramset tabs.\n',
-    )
-    data_points_count: int
-    custom_dp_name: str | None = Field(
-        None,
-        description="Stable name of the Custom-DP this channel is attached to.\nEmpty when the channel is not owned by any CDP. Lets the\nSPA's CDP-first Übersicht view (ADR 0016) filter channels\nthat are already represented by a CDP tile.\n",
-    )
-    group_no: int | None = Field(
-        None,
-        description="Channel-group number this channel belongs to (the group\nmaster's channel number). Omitted when the channel is not\npart of any channel group.\n",
-    )
-    is_group_master: bool | None = Field(
-        None,
-        description="True when this channel is the master of its channel group\n(`group_no == number`). Only present alongside `group_no`.\n",
-    )
-    is_in_multi_group: bool | None = Field(
-        None,
-        description="True when the channel's group has more than one member —\ni.e. the channel participates in the parent device's\nsub-device split. Singleton groups omit the flag.\n",
-    )
-    sub_device_name: str | None = Field(
-        None,
-        description="Resolved sub-device label for the channel's group (the\ngroup master's name with device-name/number fallbacks).\nOnly present for multi-member groups.\n",
-    )
-    room: str | None = Field(
-        None,
-        description="The channel's single resolved room with the group-master\nfallback applied. Empty when no unique room can be\nresolved. External clients use it as the suggested zone of\nthe channel group's sub-device.\n",
-    )
-    rooms: list[str] | None = Field(
-        None,
-        description="The channel's full room-assignment set. Unlike `room` it is\nnot collapsed to the unique case, so assignment editors can\nround-trip it. Omitted when the channel carries no room\nassignment.\n",
-    )
-    functions: list[str] | None = Field(
-        None,
-        description='The channel\'s resolved "Gewerke" (function) labels — the\nchannel-level twin of `DeviceSummary.functions`. Lets clients\nmap functions at channel granularity instead of folding them\nup to the device. Omitted when the channel carries no function\nassignment.\n',
-    )
-    is_custom_dp_primary: bool | None = Field(
-        None,
-        description='True when the channel owns a Custom-DP AND is the primary\n(group-master) channel of its group — the daemon-derived\n"device primary channel" marker. Omitted when neither\ncondition holds.\n',
-    )
-    hidden: bool | None = Field(
-        None,
-        description="Operator per-channel override (G12): when true the channel is\nhidden from the operation surfaces (data-point list, MQTT, Matter).\nThe channel stays in the device detail so it remains manageable.\nOmitted when false.\n",
-    )
-    locked: bool | None = Field(
-        None,
-        description="Operator per-channel override (G12): when true control writes to\nthe channel's VALUES paramset are rejected (423). Reads and\nMASTER/config edits are unaffected. Omitted when false.\n",
-    )
-
-
 class MQTTReloadResponse(BaseModel):
     reloaded: bool = Field(
         ..., description="Always true on success; the 503 path returns a problem+json document instead."
@@ -1185,15 +1120,6 @@ class Room(BaseModel):
 class Function(BaseModel):
     name: str
     device_count: int
-
-
-class Channel(ChannelSummary):
-    data_points: list[DataPointSummary] | None = Field(None, description="Present only with `?include=data_points`.\n")
-
-
-class DeviceChannel(BaseModel):
-    device_address: str
-    channels: list[Channel]
 
 
 class Role(StrEnum):
@@ -3987,10 +3913,82 @@ class DeviceList(BaseModel):
     total: int
 
 
-class DeviceDetail(DeviceSummary):
-    firmware: DeviceFirmware
-    availability: DeviceAvailability
-    channels: list[ChannelSummary]
+class ChannelSummary(BaseModel):
+    address: str
+    number: int
+    name: str | None = Field(None, description="User-defined channel name. Empty when none is set.")
+    category: str | None = Field(
+        None,
+        description="OCCU channel-type string (same value as `type`), exposed under\nits own key so consumers can route on channel purpose without\nparsing the `type` string.\n",
+    )
+    type: str | None = Field(None, description="OCCU channel-type string (e.g. ENERGIE_METER_TRANSMITTER).")
+    type_label: str | None = Field(
+        None,
+        description="Localised, human-readable channel-type label resolved through\nthe OCCU channel_types table. Empty when no translation exists;\nconsumers fall back to the raw `type`.\n",
+    )
+    paramset_key: str
+    paramset_keys: list[str] | None = Field(
+        None,
+        description='Paramsets this channel actually exposes — "VALUES" when it has\nvalue data points and "MASTER" when it has master (config) data\npoints. The config-panel / HA drop-in uses this to offer the\nright paramset tabs.\n',
+    )
+    data_points_count: int
+    custom_dp_name: str | None = Field(
+        None,
+        description="Stable name of the Custom-DP this channel is attached to.\nEmpty when the channel is not owned by any CDP. Lets the\nSPA's CDP-first Übersicht view (ADR 0016) filter channels\nthat are already represented by a CDP tile.\n",
+    )
+    group_no: int | None = Field(
+        None,
+        description="Channel-group number this channel belongs to (the group\nmaster's channel number). Omitted when the channel is not\npart of any channel group.\n",
+    )
+    is_group_master: bool | None = Field(
+        None,
+        description="True when this channel is the master of its channel group\n(`group_no == number`). Only present alongside `group_no`.\n",
+    )
+    is_in_multi_group: bool | None = Field(
+        None,
+        description="True when the channel's group has more than one member —\ni.e. the channel participates in the parent device's\nsub-device split. Singleton groups omit the flag.\n",
+    )
+    sub_device_name: str | None = Field(
+        None,
+        description="Resolved sub-device label for the channel's group (the\ngroup master's name with device-name/number fallbacks).\nOnly present for multi-member groups.\n",
+    )
+    room: str | None = Field(
+        None,
+        description="The channel's single resolved room with the group-master\nfallback applied. Empty when no unique room can be\nresolved. External clients use it as the suggested zone of\nthe channel group's sub-device.\n",
+    )
+    rooms: list[str] | None = Field(
+        None,
+        description="The channel's full room-assignment set. Unlike `room` it is\nnot collapsed to the unique case, so assignment editors can\nround-trip it. Omitted when the channel carries no room\nassignment.\n",
+    )
+    functions: list[str] | None = Field(
+        None,
+        description='The channel\'s resolved "Gewerke" (function) labels — the\nchannel-level twin of `DeviceSummary.functions`. Lets clients\nmap functions at channel granularity instead of folding them\nup to the device. Omitted when the channel carries no function\nassignment.\n',
+    )
+    is_custom_dp_primary: bool | None = Field(
+        None,
+        description='True when the channel owns a Custom-DP AND is the primary\n(group-master) channel of its group — the daemon-derived\n"device primary channel" marker. Omitted when neither\ncondition holds.\n',
+    )
+    hidden: bool | None = Field(
+        None,
+        description="Operator per-channel override (G12): when true the channel is\nhidden from the operation surfaces (data-point list, MQTT, Matter).\nThe channel stays in the device detail so it remains manageable.\nOmitted when false.\n",
+    )
+    locked: bool | None = Field(
+        None,
+        description="Operator per-channel override (G12): when true control writes to\nthe channel's VALUES paramset are rejected (423). Reads and\nMASTER/config edits are unaffected. Omitted when false.\n",
+    )
+    event_groups: list[EventGroupSummary] | None = Field(
+        None,
+        description="The channel's device-trigger event groups — the same objects\n`GET /devices/{addr}/channels/{no}/event-groups` serves, carried\ninline so a client builds its event entities from the one\nbootstrap call instead of a round trip per channel.\n\nEach group carries its own `unique_id`, `kind`, `event_types` and\nmember `parameters`, so a consumer never has to classify CCU\nparameter names or recompute a routing key for itself — doing so\nis what caps a consumer at the event kinds its author knew about.\n\nOmitted when the channel exposes no event sources, which is the\ncommon case; only trigger-capable channels grow the payload.\n",
+    )
+
+
+class Channel(ChannelSummary):
+    data_points: list[DataPointSummary] | None = Field(None, description="Present only with `?include=data_points`.\n")
+
+
+class DeviceChannel(BaseModel):
+    device_address: str
+    channels: list[Channel]
 
 
 class Snapshot(BaseModel):
@@ -4310,6 +4308,12 @@ class UISchema(BaseModel):
 class GroupCentralEntry(BaseModel):
     central: str = Field(..., description="Daemon-local central name the groups belong to.")
     groups: list[GroupEntry]
+
+
+class DeviceDetail(DeviceSummary):
+    firmware: DeviceFirmware
+    availability: DeviceAvailability
+    channels: list[ChannelSummary]
 
 
 class UnIgnoreCandidateGroup(BaseModel):
