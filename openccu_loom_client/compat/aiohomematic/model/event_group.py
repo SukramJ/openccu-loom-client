@@ -21,7 +21,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from openccu_loom_client.canonical import LOOM_NAMESPACE, generate_channel_unique_id
 from openccu_loom_client.compat.aiohomematic.model.naming import channel_display_name
 from openccu_loom_client.wire.enums import DataPointCategory, DataPointUsage, DeviceTriggerEventType
 
@@ -29,57 +28,37 @@ if TYPE_CHECKING:
     from openccu_loom_client.model import Channel, DataPoint
     from openccu_loom_client.store import LoomStore
 
-# CCU parameter-name sets per device-trigger event type (mirrors
-# aiohomematic.const CLICK_EVENTS / IMPULSE_EVENTS / DEVICE_ERROR_EVENTS).
-_CLICK_PARAMS = frozenset(
-    {
-        "PRESS",
-        "PRESS_CONT",
-        "PRESS_LOCK",
-        "PRESS_LONG",
-        "PRESS_LONG_RELEASE",
-        "PRESS_LONG_START",
-        "PRESS_SHORT",
-        "PRESS_UNLOCK",
-    }
-)
-_IMPULSE_PARAMS = frozenset({"SEQUENCE_OK"})
-_DEVICE_ERROR_PARAMS = frozenset({"ERROR", "SENSOR_ERROR"})
-
 # Usage verdicts that exclude a DP from event groups. Mirrors the
 # reference stack's creation gate: a suppressed parameter (e.g. HmIP-PS
 # click events via IGNORE_DEVICES_FOR_DATA_POINT_EVENTS) never spawns an
 # event there, so no keypress group may form around it here either.
 _SUPPRESSED_USAGES = frozenset({"no_create", "ignored"})
 
-# aiohomematic's DeviceTriggerEventType.short — the unique_id infix.
+# aiohomematic's DeviceTriggerEventType.short — the flavour slug, used for the
+# HA translation key and the group's fallback name.
 _TRIGGER_SHORT: dict[DeviceTriggerEventType, str] = {
     DeviceTriggerEventType.Keypress: "keypress",
     DeviceTriggerEventType.Impulse: "impulse",
     DeviceTriggerEventType.DeviceError: "device_error",
 }
 
-
-def _trigger_type(*, parameter: str) -> DeviceTriggerEventType | None:
-    if parameter in _CLICK_PARAMS:
-        return DeviceTriggerEventType.Keypress
-    if parameter in _IMPULSE_PARAMS:
-        return DeviceTriggerEventType.Impulse
-    if parameter in _DEVICE_ERROR_PARAMS:
-        return DeviceTriggerEventType.DeviceError
-    return None
+# The daemon names an event group's flavour with the same slug, so reading it
+# back is a vocabulary lookup rather than a classification: which CCU
+# parameters constitute a keypress is the daemon's answer and arrives in the
+# summary. Derived from the map above so the two cannot drift apart.
+_TRIGGER_BY_KIND: dict[str, DeviceTriggerEventType] = {slug: t for t, slug in _TRIGGER_SHORT.items()}
 
 
 class ChannelEventGroup:
     """One device-trigger event group bound to a channel (per event type)."""
 
     __slots__ = (
-        "_central_id",
         "_channel",
         "_event_type",
         "_events",
         "_last_triggered",
         "_registered",
+        "_unique_id",
     )
 
     _category = DataPointCategory.EventGroup
@@ -90,13 +69,13 @@ class ChannelEventGroup:
         channel: Channel,
         event_type: DeviceTriggerEventType,
         events: tuple[DataPoint, ...],
-        central_id: str,
+        unique_id: str,
     ) -> None:
-        """Bind the group to its channel, event type, and member events."""
+        """Bind the group to its channel, event type, member events and key."""
         self._channel = channel
         self._event_type = event_type
         self._events = events
-        self._central_id = central_id
+        self._unique_id = unique_id
         self._registered = False
         self._last_triggered: TriggeredEvent | None = None
 
@@ -105,13 +84,14 @@ class ChannelEventGroup:
         """
         Return the canonical event-group key HA entities are bound to.
 
-        Carries the ``loom_`` namespace like every other loom key — the
-        aiohomematic twin registers ``event_group_<type>_<channel_uid>``
-        for the same channel, and both entries may run in one HA
-        instance.
+        Served by the daemon in ``ChannelSummary.event_groups``. It used to be
+        recomputed here from the namespace, the flavour slug and the channel
+        id — byte-identical to the daemon's answer, and therefore invisible
+        while it stayed that way. The daemon is the naming authority; a
+        consumer that rebuilds a key it is handed is one release away from
+        disagreeing with it.
         """
-        channel_uid = generate_channel_unique_id(central_id=self._central_id, address=self._channel.address)
-        return f"{LOOM_NAMESPACE}_event_group_{_TRIGGER_SHORT[self._event_type]}_{channel_uid}"
+        return self._unique_id
 
     @property
     def category(self) -> DataPointCategory:
@@ -224,28 +204,53 @@ def build_event_groups(
     event_type: DeviceTriggerEventType | None = None,
     registered: bool | None = None,
 ) -> tuple[ChannelEventGroup, ...]:
-    """Build the device-trigger event groups from the store's trigger DPs."""
+    """
+    Build the device-trigger event groups the daemon declares for each channel.
+
+    The grouping, the flavour and the routing key all come from
+    ``ChannelSummary.event_groups``. This used to classify CCU parameter names
+    here against local sets and rebuild the key from its parts — the fourth
+    copy of that set in this family of repositories, and a copy of an
+    enumerable domain set caps its holder at whatever its author wrote down.
+    That is not hypothetical: the daemon's own MQTT plane kept such a copy and
+    published keypresses alone while the model had known three event kinds all
+    along.
+
+    ``central_id`` is retained for call compatibility and is no longer used to
+    derive anything.
+
+    The usage gate stays local on purpose. The daemon groups every event
+    source of a channel; this layer additionally drops parameters the
+    reference stack never spawns an event for (``no_create`` / ``ignored``),
+    which is a consumer-side visibility rule rather than a fact about the
+    device. A group whose members are all suppressed does not materialise.
+    """
+    del central_id
     groups: list[ChannelEventGroup] = []
     for device in store.devices:
         for channel in device.channels:
-            by_type: dict[DeviceTriggerEventType, list[DataPoint]] = {}
-            for dp in channel.data_points:
-                if not dp.emits_events:
-                    continue
-                if dp.summary.usage in _SUPPRESSED_USAGES:
-                    continue
-                resolved = _trigger_type(parameter=dp.parameter)
+            for declared in channel.summary.event_groups or ():
+                resolved = _TRIGGER_BY_KIND.get(declared.kind)
                 if resolved is None:
+                    # A flavour this client does not model yet. Skipping is
+                    # correct — inventing a DeviceTriggerEventType for it
+                    # would spawn an entity HA has no translation for.
                     continue
-                by_type.setdefault(resolved, []).append(dp)
-            for resolved, events in by_type.items():
                 if event_type is not None and resolved != event_type:
+                    continue
+                members = frozenset(declared.parameters)
+                events = tuple(
+                    dp
+                    for dp in channel.data_points
+                    if dp.parameter in members and dp.emits_events and dp.summary.usage not in _SUPPRESSED_USAGES
+                )
+                if not events:
                     continue
                 group = ChannelEventGroup(
                     channel=channel,
                     event_type=resolved,
-                    events=tuple(events),
-                    central_id=central_id,
+                    events=events,
+                    unique_id=declared.unique_id,
                 )
                 if registered is None or group.is_registered == registered:
                     groups.append(group)
