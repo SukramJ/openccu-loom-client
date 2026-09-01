@@ -17,7 +17,13 @@ from openccu_loom_client.compat.aiohomematic.model.week_profile import (
 )
 from openccu_loom_client.model import Device
 from openccu_loom_client.store import LoomStore
-from openccu_loom_client.wire.rest import DeviceSummary, Schedule, WeekProfileResponse
+from openccu_loom_client.wire.rest import (
+    DeviceSummary,
+    Schedule,
+    ScheduleTimeCorrection,
+    ScheduleWriteResult,
+    WeekProfileResponse,
+)
 
 _ADDRESS = "VCU0000001"
 
@@ -116,10 +122,11 @@ def _simple_schedule() -> Schedule:
 
 
 class _FakeSchedulesOps:
-    def __init__(self, *, schedule: Schedule | None = None) -> None:
+    def __init__(self, *, schedule: Schedule | None = None, write_result: ScheduleWriteResult | None = None) -> None:
         self.calls: list[dict[str, Any]] = []
         self.puts: list[Schedule] = []
         self._schedule = schedule
+        self.write_result = write_result if write_result is not None else ScheduleWriteResult()
 
     async def set_channel_lock(self, *, address: str, channel: int, key: str, enabled: bool) -> None:
         self.calls.append({"address": address, "channel": channel, "key": key, "enabled": enabled})
@@ -128,9 +135,10 @@ class _FakeSchedulesOps:
         assert self._schedule is not None
         return self._schedule
 
-    async def put_channel_schedule(self, *, address: str, channel: int, schedule: Schedule) -> None:
+    async def put_channel_schedule(self, *, address: str, channel: int, schedule: Schedule) -> ScheduleWriteResult:
         self.puts.append(schedule)
         self._schedule = schedule
+        return self.write_result
 
     async def copy_schedule(self, *, src_address: str, dst_address: str) -> None:
         self.calls.append({"copy_schedule": (src_address, dst_address)})
@@ -288,6 +296,66 @@ class TestClimateScheduleData:
         assert wednesday.periods[0].start_time == "07:00"
         assert wednesday.periods[0].end_time == "09:00"
         assert wednesday.periods[0].temperature == 22.0
+
+    async def test_a_corrected_time_reaches_the_cached_schedule(self) -> None:
+        """
+        A reported correction must reach the cached schedule.
+
+        The daemon stores a 24:xx end time as 23:55 and says so. The cached copy
+        must follow, or this layer describes a schedule the device does not
+        hold -- which is the defect the daemon's report exists to prevent,
+        reproduced one layer out.
+        """
+        store, device = _store_with_device()
+        ops = _FakeSchedulesOps(
+            schedule=_climate_schedule(),
+            write_result=ScheduleWriteResult(
+                corrections=[
+                    ScheduleTimeCorrection(
+                        profile="P1",
+                        weekday="WEDNESDAY",
+                        period=0,
+                        field="end_time",
+                        requested="24:30",
+                        applied="23:55",
+                    )
+                ]
+            ),
+        )
+        dp = _climate_dp(store, device, ops=ops)
+        await dp.set_schedule_weekday(
+            profile=ScheduleProfile.P1,
+            weekday=WeekdayStr.WEDNESDAY,
+            weekday_data={
+                "base_temperature": 18.0,
+                "periods": [{"starttime": "07:00", "endtime": "24:30", "temperature": 22.0}],
+            },
+        )
+        # What went to the wire is what the caller asked for...
+        assert ops.puts[0].profiles["P1"].weekdays["WEDNESDAY"].periods[0].end_time == "24:30"
+        # ...and the cache this layer answers from now holds what the device
+        # actually stored. Reading the private cache is the point of the test:
+        # it is the copy every public read is served from.
+        cached = dp._schedule
+        assert cached is not None
+        assert cached.profiles["P1"].weekdays["WEDNESDAY"].periods[0].end_time == "23:55"
+
+    async def test_an_uncorrected_write_keeps_what_was_sent(self) -> None:
+        """The negative control: with no correction the cached copy is untouched."""
+        store, device = _store_with_device()
+        ops = _FakeSchedulesOps(schedule=_climate_schedule())
+        dp = _climate_dp(store, device, ops=ops)
+        await dp.set_schedule_weekday(
+            profile=ScheduleProfile.P1,
+            weekday=WeekdayStr.WEDNESDAY,
+            weekday_data={
+                "base_temperature": 18.0,
+                "periods": [{"starttime": "07:00", "endtime": "09:00", "temperature": 22.0}],
+            },
+        )
+        cached = dp._schedule
+        assert cached is not None
+        assert cached.profiles["P1"].weekdays["WEDNESDAY"].periods[0].end_time == "09:00"
 
     async def test_copy_climate_profile_uses_1_based_index(self) -> None:
         store, device = _store_with_device()

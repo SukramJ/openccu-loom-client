@@ -55,6 +55,7 @@ from openccu_loom_client.compat.aiohomematic._upstream import (
 )
 from openccu_loom_client.compat.aiohomematic.model._protocol_surface import _CommonProtocolSurface, _NameData
 from openccu_loom_client.compat.aiohomematic.model.hub._surface import _HubEntitySurface
+from openccu_loom_client.operations.schedules import apply_corrections
 from openccu_loom_client.wire.enums import DataPointCategory
 from openccu_loom_client.wire.rest import ClimatePeriod, ClimateProfile, ClimateWeekday, SimpleScheduleEntry
 
@@ -373,10 +374,12 @@ class WeekProfileDp(_ScheduleEntityBase):
         ]
         base = await self._reload_schedule()
         new_schedule = base.model_copy(update={"simple_entries": entries})
-        await self._schedules_ops.put_channel_schedule(
+        result = await self._schedules_ops.put_channel_schedule(
             address=self._device.address, channel=self._channel_no, schedule=new_schedule
         )
-        self.update_from(schedule=new_schedule)
+        # The cache has to describe what the device holds, not what was sent:
+        # the daemon stores a corrected time rather than refusing it.
+        self.update_from(schedule=apply_corrections(schedule=new_schedule, result=result))
 
     async def set_schedule_enabled(self, *, enabled: bool, channel_key: str | None = None) -> None:
         """Enable or disable the weekly program for one channel key, or all known keys when ``None``."""
@@ -625,10 +628,10 @@ class ClimateWeekProfileDp(WeekProfileDp):
     async def _put_profiles(self, *, schedule: Schedule, profiles: dict[str, ClimateProfile]) -> None:
         """Persist an updated profile map to the daemon and refresh the cache."""
         new_schedule = schedule.model_copy(update={"profiles": profiles})
-        await self._schedules_ops.put_channel_schedule(
+        result = await self._schedules_ops.put_channel_schedule(
             address=self._device.address, channel=self._channel_no, schedule=new_schedule
         )
-        self.update_from(schedule=new_schedule)
+        self.update_from(schedule=apply_corrections(schedule=new_schedule, result=result))
 
     # ---- cross-device copy ----
 
