@@ -780,6 +780,7 @@ class Quantity(str, Enum):
     CO2 = "carbon_dioxide"
     Current = "current"
     Distance = "distance"
+    Door = "door"
     Duration = "duration"
     Energy = "energy"
     Enum = "enum"
@@ -989,6 +990,13 @@ class SecurityVerb(str, Enum):
 class ServiceScope(str, Enum):
     External = "external"
     Internal = "internal"
+
+
+class SmokeDetectorAlarmStatus(str, Enum):
+    IdleOff = "IDLE_OFF"
+    IntrusionAlarm = "INTRUSION_ALARM"
+    PrimaryAlarm = "PRIMARY_ALARM"
+    SecondaryAlarm = "SECONDARY_ALARM"
 
 
 class SourceOfDeviceCreation(str, Enum):
