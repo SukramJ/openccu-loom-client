@@ -1075,25 +1075,6 @@ class ChannelLockRequest(BaseModel):
     )
 
 
-class MasterProfileSummary(BaseModel):
-    id: int
-    name: str = Field(..., description="Localised profile name.")
-    description: str = Field(..., description="Localised profile description.")
-    param_count: int = Field(..., description="Number of MASTER parameters this profile sets.")
-
-
-class Params(BaseModel):
-    constraint_type: str | None = Field(None, description='Usually "fixed"; other kinds appear sporadically.')
-    value: Any | None = None
-
-
-class MasterProfile(BaseModel):
-    id: int
-    name: dict[str, str] = Field(..., description='Locale-keyed profile name (e.g. `{"en": "Eco", "de": "Eco"}`).')
-    description: dict[str, str] = Field(..., description="Locale-keyed profile description.")
-    params: dict[str, Params] = Field(..., description="MASTER parameter name to constraint.")
-
-
 class InterfaceState(BaseModel):
     id: str
     name: str
@@ -2475,6 +2456,23 @@ class SimpleScheduleEntry(BaseModel):
     output_behaviour: int | None = Field(None, description="HmIP-BSL signal-LED behaviour, opaque.")
 
 
+class FieldModel(StrEnum):
+    start_time = "start_time"
+    end_time = "end_time"
+
+
+class ScheduleTimeCorrection(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    profile: str = Field(..., description="Profile key, e.g. P1")
+    weekday: str = Field(..., description="Weekday key, e.g. MONDAY")
+    period: int = Field(..., description="0-based index into the submitted periods list")
+    field: FieldModel
+    requested: str = Field(..., description="The submitted value")
+    applied: str = Field(..., description="The value actually stored")
+
+
 class Kind5(StrEnum):
     climate = "climate"
     simple = "simple"
@@ -3516,14 +3514,6 @@ class LoginRequest(BaseModel):
     password: str
 
 
-class MatchMasterProfileRequest(BaseModel):
-    current_values: dict[str, Any] | None = None
-
-
-class MatchMasterProfileResponse(BaseModel):
-    active_id: int
-
-
 class Confirm(StrEnum):
     remove_all_fabrics = "remove-all-fabrics"
 
@@ -4161,6 +4151,13 @@ class ScheduleDeviceSummary(BaseModel):
         ...,
         description="`week_profile` when a dedicated channel carries the profile,\n`climate` when a thermostat carries it in MASTER.\n",
     )
+
+
+class ScheduleWriteResult(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    corrections: list[ScheduleTimeCorrection] | None = None
 
 
 class WeekProfileResponse(BaseModel):
