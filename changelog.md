@@ -23,7 +23,7 @@
   a target hides that instead of leaving it visible on the next read.
 
   One limit worth knowing before acting on the answer: an absent `corrections`
-  list means *nothing was reported*, not *nothing was corrected*. A daemon
+  list means _nothing was reported_, not _nothing was corrected_. A daemon
   before api 10.1.0 answers 202 with no body at all, and a 10.1.0 daemon omits
   the field when the schedule was stored exactly as submitted. The two are
   indistinguishable at this layer; a caller needing the stronger reading has
