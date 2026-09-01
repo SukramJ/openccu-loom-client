@@ -17,8 +17,11 @@ contract specifics:
   wall-clock is that budget — not N × per-request timeout. Never applied to
   non-idempotent verbs (POST / PATCH) unless the caller opts in.
 - One-shot capability handshake against ``GET /info`` at
-  :meth:`HttpTransport.connect`, asserting the daemon's ``api_version``
-  is compatible and that any caller-required capabilities are present.
+  :meth:`HttpTransport.connect`. The **capabilities** the caller declares
+  are the hard gate: a missing one raises. The daemon's ``api_version``
+  is reported, never enforced — a major bump routinely removes surface no
+  generated client ever referenced, so refusing on the number alone locked
+  out working pairings in both directions.
 
 The transport itself is generic — domain-specific operation modules
 (``operations/devices.py``, ``operations/datapoints.py`` …) layer
@@ -111,6 +114,10 @@ class HttpTransport:
         self._backoff_sequence: Final = backoff_sequence
         self._session: aiohttp.ClientSession | None = session
         self._info: Info | None = None
+        # What the caller declared at connect(). Kept so recheck_contract()
+        # can re-apply the same gate to a daemon swapped underneath a live
+        # session — the version numbers no longer catch that for us.
+        self._required_capabilities: tuple[str, ...] = ()
 
     # ---- context manager ----
 
@@ -138,8 +145,14 @@ class HttpTransport:
         Returns the parsed ``/info`` payload so callers can record the
         daemon's version and capability set without an extra round-trip.
         Raises :class:`LoomTransportError` if the daemon is unreachable
-        or returns a non-2xx status.
+        or returns a non-2xx status, and
+        :class:`LoomIncompatibleVersionError` when the daemon does not
+        advertise one of ``required_capabilities`` — the only compatibility
+        condition that refuses a connection. Declare what this caller truly
+        cannot work without and nothing more: every token named here is a
+        daemon somebody cannot connect to.
         """
+        self._required_capabilities = tuple(required_capabilities)
         created_here = False
         if self._session is None or self._session.closed:
             self._session = self._external_session or aiohttp.ClientSession(
@@ -155,20 +168,14 @@ class HttpTransport:
             # release requires is simply absent on an older daemon —
             # validating first turns "your daemon is too old" into a
             # pydantic error naming whichever field happened to be added
-            # last, which sends the reader after the wrong thing.
-            self._check_api_version(
+            # last, which sends the reader after the wrong thing. The
+            # version note now only logs, so it still has to be emitted
+            # before whatever the payload does next.
+            self._report_api_version(
                 api_version=info_payload.get("api_version", "") if isinstance(info_payload, dict) else "",
             )
             self._info = Info.model_validate(info_payload)
-
-            missing = [c for c in required_capabilities if c not in (self._info.capabilities or [])]
-            if missing:
-                msg = (
-                    f"daemon at {self._config.host} is missing required capabilities: "
-                    f"{sorted(missing)} — got {sorted(self._info.capabilities or [])}"
-                )
-                raise LoomTransportError(msg)
-
+            self._assert_capabilities()
             self._check_schema_digest(info_payload=info_payload)
         except BaseException:
             # A failed handshake must not leak the session we just opened
@@ -218,22 +225,64 @@ class HttpTransport:
                 self._info.api_version if self._info else "?",
             )
 
-    def _check_api_version(self, *, api_version: str) -> None:
+    def _assert_capabilities(self) -> None:
         """
-        Fail fast when the daemon's API version is incompatible with the types.
+        Enforce the capabilities the caller declared at :meth:`connect`.
 
-        This package's wire layer is generated against one daemon API
-        version (``DAEMON_API_VERSION``). Under the daemon's semver
-        contract a *major* bump is breaking and a *minor* bump adds only
-        backward-compatible surface, so this build is compatible with a daemon
-        of the **same major** whose **minor is at least** the one the types
-        were generated against. Anything else is raised — not merely logged
-        like the digest drift — so ``connect()`` fails cleanly and the caller
-        retries with aligned versions instead of half-initializing against an
-        incompatible daemon (which manifests downstream as bootstrap/dispatch
-        failures and event storms). Skipped when either version is absent or
-        unparsable (old daemon or unstamped types package); the digest
-        handshake still warns on build drift within a compatible API line.
+        This is the hard compatibility gate. The caller names the daemon
+        features it cannot work without; a daemon that does not advertise one
+        of them will never serve this caller, however the version numbers on
+        either side compare. Nothing else about the handshake refuses a
+        connection.
+
+        Raises :class:`LoomIncompatibleVersionError` — a subclass of
+        :class:`LoomTransportError`, so handlers that catch the transport
+        error keep working, but distinguishable, and the distinction is the
+        whole point: an absent capability does not clear on its own, while an
+        unreachable host does. Home Assistant asks exactly that question when
+        it chooses between ``ConfigEntryNotReady`` and ``ConfigEntryError``.
+        """
+        if not self._required_capabilities or self._info is None:
+            return
+        have = set(self._info.capabilities or [])
+        # str() on purpose: a required capability may arrive as a Capability
+        # StrEnum member, whose repr is "<Capability.PROBLEM_DETAILS: '…'>".
+        # This message reaches an operator through Home Assistant, where the
+        # only useful spelling is the wire token the daemon would advertise.
+        missing = [str(c) for c in self._required_capabilities if c not in have]
+        if missing:
+            msg = (
+                f"daemon at {self._config.host} is missing required capabilities: "
+                f"{sorted(missing)} — got {sorted(have)}"
+            )
+            raise LoomIncompatibleVersionError(msg)
+
+    def _report_api_version(self, *, api_version: str) -> None:
+        """
+        Log — never raise — when the daemon's API version differs from the types.
+
+        This package's wire layer is generated against one daemon API version
+        (``DAEMON_API_VERSION``), and refusing to connect unless the daemon
+        matched (same major, minor at least as high) was wrong in both
+        directions:
+
+        - *Major.* The daemon's major moved 7 → 8 → 9 → 10 inside one release
+          window, and every one of those bumps removed surface no generated
+          client referenced. The number said "breaking"; nothing this client
+          calls actually broke.
+        - *Minor.* HACS updates the Home Assistant integration before the
+          operator updates the daemon, so ``minor(daemon) < minor(types)`` is
+          the ordinary state of an additive daemon release — and it hard-failed
+          setup for a contract that was fully present.
+
+        The question the client actually needs answered is "is the surface I
+        call still here", which the capability set answers directly; see
+        :meth:`_assert_capabilities`. So this reports the drift for a reader
+        looking at a log and lets the connection proceed: a call that does hit
+        removed surface fails on its own, at the call, naming it.
+
+        Silent when either version is absent or unparsable (old daemon or
+        unstamped types package), and when the two agree.
 
         Takes the raw ``api_version`` string rather than reading the parsed
         model, because it runs before that model exists — see connect().
@@ -245,17 +294,29 @@ class HttpTransport:
             return
         exp_major, exp_minor = expected_mm
         got_major, got_minor = daemon_mm
-        if got_major != exp_major or got_minor < exp_minor:
-            msg = (
-                f"daemon at {self._config.host} reports incompatible API version {api_version!r}: "
-                f"this openccu-loom-client build expects {expected!r} (same major, minor ≥ {exp_minor}). "
-                f"Update the daemon, or install an openccu-loom-client release matching it."
+        if got_major != exp_major:
+            _LOGGER.warning(
+                "daemon at %s reports API version %s; this openccu-loom-client build was generated "
+                "against %s. The majors differ, so the daemon may have added or removed contract "
+                "surface — connecting anyway, since a major bump usually touches surface this "
+                "client never calls. If calls start failing, install the openccu-loom-client "
+                "release matching the daemon.",
+                self._config.host,
+                api_version,
+                expected,
             )
-            # Typed distinctly from every other connect() failure. This one does
-            # not clear on its own: retrying reaches the same daemon with the
-            # same answer until somebody upgrades one side. A caller that
-            # retries "not ready" conditions needs to tell the two apart.
-            raise LoomIncompatibleVersionError(msg)
+        elif got_minor != exp_minor:
+            _LOGGER.info(
+                "daemon at %s reports API version %s; this openccu-loom-client build was generated "
+                "against %s. Same major — %s.",
+                self._config.host,
+                api_version,
+                expected,
+                "the daemon carries additive surface this build does not use"
+                if got_minor > exp_minor
+                else "the daemon predates additive surface of that minor; anything this build "
+                "needs from it is gated by the capability handshake",
+            )
 
     @staticmethod
     def _parse_major_minor(version: str) -> tuple[int, int] | None:
@@ -294,23 +355,31 @@ class HttpTransport:
 
         Call this when the connection has just come back after an interruption
         long enough for the peer to have restarted. Returns ``True`` when the
-        daemon still matches, ``False`` when ``/info`` could not be read (a
-        transient failure — the caller keeps going and tries again later), and
-        raises :class:`LoomIncompatibleVersionError` when the daemon on the
-        other end is now one this build cannot talk to.
+        daemon still serves this caller, ``False`` when ``/info`` could not be
+        read (a transient failure — the caller keeps going and tries again
+        later), and raises :class:`LoomIncompatibleVersionError` when the
+        daemon on the other end has dropped a capability the caller declared
+        at :meth:`connect` — the same gate, re-applied, because a swapped
+        daemon is exactly the case the connect-time check cannot see. A
+        differing API version is reported to the log and nothing more.
         """
         previous = self._info
         try:
             payload = await self.request(method="GET", path="/info")
-        except LoomIncompatibleVersionError:
-            raise
         except BaseLoomException as err:
             _LOGGER.debug("contract re-check could not read /info (keeping the previous handshake): %s", err)
             return False
         api_version = payload.get("api_version", "") if isinstance(payload, dict) else ""
-        # Raises when the peer moved outside what this build supports.
-        self._check_api_version(api_version=api_version)
+        self._report_api_version(api_version=api_version)
+        # A peer that fails the capability gate must leave the previous
+        # handshake standing rather than half-replace it with the contract we
+        # just refused, so the assignment below is rolled back on refusal.
         self._info = Info.model_validate(payload)
+        try:
+            self._assert_capabilities()
+        except LoomIncompatibleVersionError:
+            self._info = previous
+            raise
         self._check_schema_digest(info_payload=payload)
         if previous is not None and previous.version != self._info.version:
             _LOGGER.info(

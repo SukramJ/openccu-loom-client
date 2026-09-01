@@ -66,7 +66,12 @@ _INFO = {
     "addon_build": False,
     "started_at": "2026-05-24T10:01:00Z",
     "uptime": "PT60S",
-    "capabilities": ["rest.v1"],
+    # The daemon's always-on set, not a subset: capabilities() in
+    # internal/north/rest/handlers/info.go emits these three unconditionally
+    # and has since the initial release, so a fake advertising only "rest.v1"
+    # models a daemon that has never existed — and it hid the fact that this
+    # adapter now names its preconditions at connect().
+    "capabilities": ["rest.v1", "ws.broadcasts.v1", "errors.problem_details.v1"],
     "schema_digest": "sha256:test",
     "config_ui_url": "",
 }

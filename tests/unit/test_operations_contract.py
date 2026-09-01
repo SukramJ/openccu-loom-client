@@ -38,22 +38,29 @@ checks it out and passes ``OPENCCU_LOOM_REPO``.
 
 from __future__ import annotations
 
-import ast
+import importlib.util
+import json
 import os
 import pathlib
-import re
 
 import pytest
 import yaml
 
+# One implementation, imported rather than copied: this module asserts the set
+# of calls, script/gen/consumed_operations.py publishes it for the daemon's
+# surface guard, and a second copy here would let the two drift apart silently.
+_GEN = importlib.util.spec_from_file_location(
+    "consumed_operations",
+    pathlib.Path(__file__).resolve().parents[2] / "script" / "gen" / "consumed_operations.py",
+)
+assert _GEN is not None and _GEN.loader is not None
+consumed_operations = importlib.util.module_from_spec(_GEN)
+_GEN.loader.exec_module(consumed_operations)
+
+_client_calls = consumed_operations.client_calls
+_normalise = consumed_operations.normalise
+
 _HTTP_METHODS = frozenset({"get", "post", "put", "patch", "delete", "head", "options"})
-
-_OPERATIONS_DIR = pathlib.Path(__file__).resolve().parents[2] / "openccu_loom_client" / "operations"
-
-# The request helpers every façade routes through. `_base.py` is excluded from
-# the walk: its `_request_list` forwards a `path` parameter it was handed, so
-# it is plumbing rather than a call site.
-_REQUEST_HELPERS = frozenset({"request", "_request_list"})
 
 # Tags whose every documented operation this package serves today. Pinned so
 # that completeness is kept on purpose rather than by accident — a daemon
@@ -100,47 +107,6 @@ def _find_openapi() -> pathlib.Path | None:
 
 
 _OPENAPI = _find_openapi()
-
-
-def _normalise(path: str) -> str:
-    """
-    Reduce a path to its shape, with every parameter as ``{}``.
-
-    Parameter *names* are not part of the wire contract — the daemon calls one
-    ``{channel_no}`` where this package calls it ``{channel}`` — so comparing
-    them would report a difference that does not exist.
-    """
-    return re.sub(r"\{[^{}]*\}", "{}", path)
-
-
-def _literal_path(node: ast.AST) -> str | None:
-    """Return the path a ``path=`` argument builds, or ``None`` if it is not static."""
-    if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        return node.value
-    if isinstance(node, ast.JoinedStr):
-        return "".join(str(v.value) if isinstance(v, ast.Constant) else "{}" for v in node.values)
-    return None
-
-
-def _client_calls() -> dict[tuple[str, str], list[str]]:
-    """Return ``{(method, path shape): [source locations]}`` for every façade call."""
-    calls: dict[tuple[str, str], list[str]] = {}
-    for source in sorted(_OPERATIONS_DIR.glob("*.py")):
-        if source.name in ("_base.py", "__init__.py"):
-            continue
-        for node in ast.walk(ast.parse(source.read_text(encoding="utf-8"))):
-            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
-                continue
-            if node.func.attr not in _REQUEST_HELPERS:
-                continue
-            kwargs = {kw.arg: kw.value for kw in node.keywords}
-            method_node, path_node = kwargs.get("method"), kwargs.get("path")
-            if not (isinstance(method_node, ast.Constant) and isinstance(method_node.value, str)):
-                continue
-            if path_node is None or (path := _literal_path(path_node)) is None:
-                continue
-            calls.setdefault((method_node.value.upper(), _normalise(path)), []).append(f"{source.name}:{node.lineno}")
-    return calls
 
 
 def _spec_operations() -> dict[tuple[str, str], set[str]]:
@@ -198,3 +164,49 @@ class TestOperationsMatchTheContract:
             f"_FULLY_SERVED_TAGS names tags the document no longer has: {vanished}. "
             "Their entries in the guard above now assert nothing."
         )
+
+
+class TestConsumedOperationsManifest:
+    """
+    The published manifest must be the set this module asserts.
+
+    It is committed rather than computed on demand because its reader is
+    another repository: the daemon's surface guard classifies a removal
+    against it, and a guard that has to run this package's AST walk to do so
+    would need this package importable inside a Go test.
+    """
+
+    def test_manifest_is_current(self) -> None:
+        """A stale manifest tells the daemon a removed call is still unused."""
+        assert consumed_operations.MANIFEST_PATH.is_file(), (
+            f"{consumed_operations.MANIFEST_PATH} is missing — run script/gen/consumed_operations.py"
+        )
+        committed = json.loads(consumed_operations.MANIFEST_PATH.read_text(encoding="utf-8"))
+        assert committed["operations"] == consumed_operations.build_manifest()["operations"], (
+            "spec/consumed_operations.json no longer matches the calls this package makes. "
+            "Run script/gen/consumed_operations.py and commit the result."
+        )
+
+    def test_manifest_covers_the_handshake(self) -> None:
+        """
+        ``GET /info`` is in the set even though no façade builds it.
+
+        connect() issues it from transport/http.py, outside the AST walk, and
+        it is the one operation whose removal breaks this client absolutely —
+        so a manifest without it would invite exactly the wrong classification.
+        """
+        committed = json.loads(consumed_operations.MANIFEST_PATH.read_text(encoding="utf-8"))
+        assert "GET /info" in committed["operations"]
+
+    def test_manifest_is_a_strict_subset_of_the_document(self) -> None:
+        """
+        Every published operation must exist in the daemon's spec.
+
+        Without this the manifest could name a path the daemon never served,
+        and the daemon's guard would treat a removal of something else as
+        consumed. Same normalisation on both sides.
+        """
+        committed = json.loads(consumed_operations.MANIFEST_PATH.read_text(encoding="utf-8"))
+        documented = {f"{method} {path}" for method, path in _spec_operations()}
+        unknown = sorted(set(committed["operations"]) - documented)
+        assert unknown == [], f"the manifest names operations the daemon does not document: {unknown}"

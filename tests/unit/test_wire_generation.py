@@ -2,7 +2,13 @@
 # Copyright (C) 2026 OpenCCU-Loom authors.
 
 """
-Regression tests for the enum generator's Python-keyword escape.
+Regression tests for the generated wire modules' post-processing steps.
+
+Two of them, both invisible in the generator's own output:
+
+* the enum generator's Python-keyword escape (below), and
+* `script/gen/tolerant_enums.py`, which re-points every generated enum at a
+  base that accepts a wire value the client has never seen.
 
 Before the generator escaped them, it emitted bare `None = "none"` lines,
 which is a SyntaxError because `None` is a reserved word. The fix appends a
@@ -17,16 +23,18 @@ the repository that now owns it.
 
 from __future__ import annotations
 
+from enum import Enum
 import importlib
 import keyword
 from pathlib import Path
 import shutil
 import subprocess
 
+from pydantic import ValidationError
 import pytest
 
 from openccu_loom_client import wire
-from openccu_loom_client.wire import enums
+from openccu_loom_client.wire import enums, rest
 
 
 def test_module_imports_cleanly() -> None:
@@ -124,4 +132,102 @@ def test_generated_modules_are_already_formatted() -> None:
         f"generated modules are not ruff-format clean:\n{result.stdout}{result.stderr}\n"
         f"Fix the generator in script/gen/ so it emits formatted code — do not run "
         f"`ruff format` over wire/ to paper over it, which is what caused the drift before."
+    )
+
+
+# --- tolerance for enum values a newer daemon added -------------------------
+#
+# The daemon may add a member to any enum in an additive minor release. The
+# version gate passes (the contract is backwards compatible), and then response
+# parsing raises `ValidationError` because a Python enum rejects an unseen
+# value — an already-installed client broken by a change that was meant not to
+# break it. `script/gen/tolerant_enums.py` gives every generated enum a
+# `_missing_` that mints a pseudo-member carrying the raw string instead.
+
+FUTURE_VALUE = "a_value_the_daemon_added_after_this_client_was_generated"
+
+
+def _generated_enums(module: object) -> list[type[Enum]]:
+    """Every enum class the given wire module defines that actually has members."""
+    return [obj for obj in vars(module).values() if isinstance(obj, type) and issubclass(obj, Enum) and obj.__members__]
+
+
+def test_unknown_str_enum_value_in_a_response_payload_parses() -> None:
+    """A `Problem` carrying an unknown `code` parses and keeps the raw string."""
+    problem = rest.Problem.model_validate(
+        {
+            "type": "https://openccu-loom.dev/errors/validation",
+            "title": "Validation failed",
+            "status": 400,
+            "code": FUTURE_VALUE,
+        }
+    )
+    assert problem.code == FUTURE_VALUE
+    assert problem.code is not None
+    assert problem.code.value == FUTURE_VALUE
+    assert f'"code":"{FUTURE_VALUE}"' in problem.model_dump_json()
+
+
+def test_unknown_plain_enum_value_in_a_response_payload_parses() -> None:
+    """
+    The one plain (non-`str`) generated enum tolerates an unknown value too.
+
+    `Problem.type` is a bare `Enum`, so its pseudo-member cannot be built with
+    `str.__new__` and is not itself a `str`. It carries the raw string in
+    `.value` and serialises back unchanged, which is what a caller reads.
+    """
+    unknown_uri = "https://openccu-loom.dev/errors/quota_exhausted"
+    problem = rest.Problem.model_validate({"type": unknown_uri, "title": "Nope", "status": 429})
+    assert problem.type.value == unknown_uri
+    assert f'"type":"{unknown_uri}"' in problem.model_dump_json()
+
+
+def test_known_members_still_resolve_to_the_declared_member() -> None:
+    """Tolerance must not turn a known value into a pseudo-member."""
+    problem = rest.Problem.model_validate(
+        {"type": "https://openccu-loom.dev/errors/not_found", "title": "Nope", "status": 404, "code": "not_found"}
+    )
+    assert problem.code is rest.Code.not_found
+    assert problem.type is rest.Type.https___openccu_loom_dev_errors_not_found
+
+
+def test_non_string_values_are_still_rejected() -> None:
+    """
+    The negative control: tolerance is for unseen *strings*, not for anything.
+
+    Without this, a `_missing_` that accepted every input would pass every
+    other test in this block while silently swallowing a wrong-typed payload.
+    """
+    with pytest.raises(ValidationError):
+        rest.Problem.model_validate(
+            {"type": "https://openccu-loom.dev/errors/validation", "title": "x", "status": 400, "code": 17}
+        )
+
+
+@pytest.mark.parametrize("module", [rest, enums], ids=["rest", "enums"])
+def test_every_generated_enum_accepts_an_unknown_wire_value(module: object) -> None:
+    """
+    Walk both generated modules — no enum may raise on a value it has not seen.
+
+    Enumerated rather than listed by hand: the generator emits ~75 classes per
+    module and adds more with every daemon release, so a hand-written list
+    would pin the tolerance of exactly the classes that already had it.
+    """
+    classes = _generated_enums(module)
+    assert len(classes) > 50, f"only {len(classes)} enums found — this guard would pass near-vacuously"
+
+    intolerant: list[str] = []
+    for cls in classes:
+        try:
+            member = cls(FUTURE_VALUE)
+        except ValueError:
+            intolerant.append(cls.__name__)
+            continue
+        if member.value != FUTURE_VALUE:
+            intolerant.append(cls.__name__)
+
+    assert not intolerant, (
+        f"{len(intolerant)} generated enums raise on a value a newer daemon may send: "
+        f"{', '.join(sorted(intolerant))}. Run `make generate` — the tolerance comes from "
+        f"script/gen/tolerant_enums.py, which must run after every generator."
     )

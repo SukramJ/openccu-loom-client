@@ -46,6 +46,7 @@ from datetime import UTC, datetime
 import logging
 from typing import TYPE_CHECKING, Any, Final, cast
 
+from openccu_loom_client.capabilities import Capability
 from openccu_loom_client.compat.aiohomematic._upstream import (
     AlarmMessageData,
     BackupData,
@@ -109,6 +110,36 @@ if TYPE_CHECKING:
     from openccu_loom_client.model import Device
 
 _LOGGER: Final = logging.getLogger(__name__)
+
+# The capabilities this compat layer genuinely cannot work without — the hard
+# gate that replaced the api_version refusal (a major bump kept removing
+# surface no generated client referenced, and HACS routinely puts this package
+# ahead of the daemon's minor).
+#
+# Deliberately short. Over-declaring re-creates the very lockout the version
+# check caused: every token listed here is a daemon a user cannot connect to.
+#
+# - REST is the only channel this layer speaks; without it nothing works.
+# - PROBLEM_DETAILS is not decoration. `http_error_from_problem` dispatches the
+#   exception class from the problem *type URI*, not the status code, so a
+#   daemon without it collapses every failure into a bare LoomHttpError — and
+#   the config flow's invalid_auth answer is `LoomAuthError`, which would then
+#   never be raised.
+#
+# NOT declared, on purpose, because this layer degrades cleanly without them:
+# alarm.v1 (the alarm panels stay an empty list and no panel entity spawns),
+# history.v1, diagrams.v1, admin.persistence.v1, mqtt.*, matter.bridge.v1,
+# webhook.inbound.v1, mcp.*, auth.oidc.v1 / auth.ccu.v1 (this layer sends its
+# own bearer or basic credential), system.restart.supervised.v1 and
+# addon_self_update (read as optional features, never as preconditions).
+_PREFLIGHT_CAPABILITIES: Final = (Capability.REST, Capability.PROBLEM_DETAILS)
+
+# The full lifecycle additionally rides the WS broadcast plane: start() calls
+# start_events(), and every value update, hub-singleton push and alarm event
+# arrives over it. A daemon without it would leave HA with a model that is
+# correct once at boot and then frozen — worth refusing at connect rather than
+# discovering as silently stale entities.
+_LIFECYCLE_CAPABILITIES: Final = (*_PREFLIGHT_CAPABILITIES, Capability.WS_BROADCASTS)
 
 # create_backup_and_download poll window: the daemon's POST /backups is async
 # (returns a job id; the archive appears in GET /backups once the CCU produces
@@ -1245,7 +1276,7 @@ class LoomCentralAdapter:
     async def start(self) -> None:
         """Connect, bootstrap the store, open the event stream, and install the refresh bridge."""
         try:
-            await self._client.connect()
+            await self._client.connect(required_capabilities=_LIFECYCLE_CAPABILITIES)
             await self._refresh_system_information()
             await self.client_coordinator.refresh()
             self._state = CentralState.Starting
@@ -1796,10 +1827,13 @@ class LoomCentralAdapter:
         Pre-flight used by the HA config flow.
 
         Opens the session (capability handshake), reads daemon + CCU
-        metadata, and returns it without starting the event stream.
+        metadata, and returns it without starting the event stream. Declares
+        only :data:`_PREFLIGHT_CAPABILITIES` — no event stream is opened here,
+        and a config flow that refused a daemon over a capability this call
+        never touches would be the old version lockout in a new place.
         """
         try:
-            await self._client.connect()
+            await self._client.connect(required_capabilities=_PREFLIGHT_CAPABILITIES)
             await self._refresh_system_information()
         except Exception:
             # Pre-flight failure must not leave the just-opened HTTP session

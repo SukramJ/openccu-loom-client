@@ -19,7 +19,14 @@ generate-enums: ## regenerate wire/enums.py from $(OPENCCU_LOOM_REPO)/assets/sch
 	python3 script/gen/gen_enums.py \
 		--enums-json $(OPENCCU_LOOM_REPO)/assets/schemas/enums.json \
 		--out-py $(WIRE)/enums.py
+	python3 script/gen/tolerant_enums.py --py $(WIRE)/enums.py
 
+# The tolerant-enums step runs AFTER the generator in both recipes, never as a
+# separate target: a bare `make generate-rest` would otherwise hand back an
+# enum that raises on the first value a newer daemon adds. The step is
+# idempotent and content-only, so it keeps the deterministic output the
+# comment below insists on.
+#
 # --disable-timestamp is REQUIRED for deterministic output: without it
 # datamodel-codegen stamps the current wall-clock time into the rest.py header,
 # so every regeneration diffs against the last one even when the daemon API is
@@ -39,12 +46,19 @@ generate-rest: ## regenerate wire/rest.py via datamodel-codegen
 		--field-constraints \
 		--disable-timestamp \
 		--formatters ruff-format ruff-check
+	python3 script/gen/tolerant_enums.py --py $(WIRE)/rest.py
 
 generate-ws: ## regenerate wire/ws.py (envelope + push-payload re-exports from rest.py)
 	python3 script/gen/gen_ws.py \
 		--wsapi-json $(OPENCCU_LOOM_REPO)/assets/wsapi.json \
 		--rest-py $(WIRE)/rest.py \
 		--out-py $(WIRE)/ws.py
+
+generate-consumed-operations: ## refresh spec/consumed_operations.json from the façade call sites
+	python3 script/gen/consumed_operations.py
+
+check-consumed-operations: ## fail when spec/consumed_operations.json is stale
+	python3 script/gen/consumed_operations.py --check
 
 clean-wire: ## remove the generated modules (const.py is stamped, not generated)
 	rm -f $(WIRE)/enums.py $(WIRE)/rest.py $(WIRE)/ws.py
