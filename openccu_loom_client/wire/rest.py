@@ -48,9 +48,6 @@ class _TolerantEnum(Enum):
 
 
 class StartupCaptureConfig(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-    )
     enabled: bool = Field(..., description="When true, the daemon opens a diagnostics capture at boot.")
     duration_seconds: int = Field(
         ..., description="Duration of the boot-time capture. Zero falls back to the default (300 s).", ge=0, le=1800
@@ -305,7 +302,7 @@ class Info(BaseModel):
     build_date: str
     addon_build: bool = Field(
         ...,
-        description="True when this binary was built as the CCU/RaspberryMatic\nadd-on (it then runs on the CCU itself). False for the\nstandalone binary, Docker image, and HA add-on builds.\n",
+        description="True when this binary was built as the CCU/OpenCCU\nadd-on (it then runs on the CCU itself). False for the\nstandalone binary, Docker image, and HA add-on builds.\n",
     )
     uptime: str
     started_at: AwareDatetime
@@ -441,7 +438,7 @@ class SystemCCUEntry(BaseModel):
     )
     recovery_mode_supported: bool | None = Field(
         None,
-        description="Whether this CCU offers a recovery system\n(`POST .../recovery-mode`). True for OpenCCU / RaspberryMatic\nfirmware, false for a stock CCU3 and while the product is not\nyet known — so a client hides the action rather than offering\none that cannot work.\n",
+        description="Whether this CCU offers a recovery system\n(`POST .../recovery-mode`). True for OpenCCU\nfirmware, false for a stock CCU3 and while the product is not\nyet known — so a client hides the action rather than offering\none that cannot work.\n",
     )
     ccu_interfaces: list[CcuInterface] | None = Field(
         None,
@@ -2478,9 +2475,12 @@ class SimpleScheduleEntry(BaseModel):
     level_2: float | None = None
     duration: str | None = Field(
         None,
-        description='Auto-revert time, as a whole number and a unit — "500ms", "10s", "65s", "5min", "1h". The value is exact: the CCU stores a (time base, factor) pair, and the string carries the factor multiplied out in that base\'s own unit rather than rounded to a larger one, so a 65-second slot reads "65s" and not "1min". Empty when the slot carries no duration.\n',
+        description='Auto-revert time, as a whole number and a unit — "500ms", "10s", "65s", "5min", "1h". The value is exact: the CCU stores a (time base, factor) pair, and the string carries the factor multiplied out in that base\'s own unit rather than rounded to a larger one, so a 65-second slot reads "65s" and not "1min". Empty when the slot carries no duration.\nThe reserved word `permanent` is the one value that is not a time: it means the switch point does not expire, and it is what the CCU\'s own weekly-program editor offers as the alternative to entering a duration. It reads back as `permanent` and is accepted on write (case-insensitively). Do not confuse it with the empty string, which means "leave the device\'s duration untouched".\n',
     )
-    ramp_time: str | None = Field(None, description="Dimmer ramp time, same format and exactness rule as `duration`.\n")
+    ramp_time: str | None = Field(
+        None,
+        description="Dimmer ramp time, same format and exactness rule as `duration`, including the reserved word `permanent` — the CCU builds both editors from one helper, so the encoding is shared.\n",
+    )
     lock_mode: str | None = None
     lock_action: str | None = None
     permission: str | None = None
@@ -2500,9 +2500,6 @@ class FieldModel(_TolerantStrEnum):
 
 
 class ScheduleTimeCorrection(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-    )
     profile: str = Field(..., description="Profile key, e.g. P1")
     weekday: str = Field(..., description="Weekday key, e.g. MONDAY")
     period: int = Field(..., description="0-based index into the submitted periods list")
@@ -4192,9 +4189,6 @@ class ScheduleDeviceSummary(BaseModel):
 
 
 class ScheduleWriteResult(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-    )
     corrections: list[ScheduleTimeCorrection] | None = None
 
 
