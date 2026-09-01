@@ -670,12 +670,15 @@ class TestEnvelopeParsing:
             },
         }
 
-    def test_unknown_kind_is_coerced_not_dropped(self) -> None:
-        # A daemon that introduces a new `kind` enum value must not blackhole
-        # the frame — its payload/type are still actionable.
+    def test_unknown_kind_survives_as_the_raw_value(self) -> None:
+        # A daemon that introduces a new `kind` must not blackhole the frame —
+        # its payload/type are still actionable. It must also not be relabelled:
+        # this used to be coerced to "change", which handed every consumer a
+        # kind the daemon never sent. The generated enums tolerate an unseen
+        # value now, so the raw one arrives intact.
         envelope = WsTransport._parse_envelope(self._frame(kind="snapshot"))
         assert envelope is not None
-        assert envelope.kind.value == ws_module._DEFAULT_ENVELOPE_KIND
+        assert envelope.kind.value == "snapshot"
         assert envelope.seq == 7
         assert envelope.type == "datapoint.value_changed"
 
@@ -686,7 +689,7 @@ class TestEnvelopeParsing:
 
     def test_structurally_malformed_frame_is_dropped(self) -> None:
         # A frame broken beyond an unknown kind (missing required seq) is
-        # dropped, not force-coerced.
+        # dropped: enum tolerance covers an unseen value, not a missing field.
         bad = self._frame(kind="snapshot")
         del bad["seq"]
         assert WsTransport._parse_envelope(bad) is None

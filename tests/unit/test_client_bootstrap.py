@@ -1025,32 +1025,60 @@ class TestConnectionStateAndAuthFailure:
 class TestContractRecheck:
     """G6: a daemon upgraded under a live connection must be noticed."""
 
-    async def test_incompatible_version_is_typed(self, mock_daemon: MockDaemon) -> None:
+    async def test_a_major_version_difference_alone_connects(self, mock_daemon: MockDaemon) -> None:
         """
-        "Host unreachable" and "will never work" must not arrive as one class.
+        A different major is a report, not a refusal.
 
-        A caller retrying a failed setup needs to tell a condition that clears
-        on its own from one that clears only when somebody upgrades.
+        It used to be a refusal, and that was the wrong question to ask: this
+        daemon's major has moved three times in a single release window, every
+        time removing surface no generated client referenced. Refusing on the
+        number locked callers out of daemons that served them perfectly.
         """
         major = int(DAEMON_API_VERSION.split(".")[0])
         mock_daemon.get("/api/v1/info", payload={**_INFO, "api_version": f"{major + 1}.0.0"})
         client = LoomClient(config=mock_daemon.config)
+        await client.connect()
+        await client.close()
+
+    async def test_a_missing_capability_is_typed(self, mock_daemon: MockDaemon) -> None:
+        """
+        "Host unreachable" and "will never work" must not arrive as one class.
+
+        A caller retrying a failed setup needs to tell a condition that clears
+        on its own from one that clears only when somebody upgrades. That
+        distinction survived the gate's move from the version to the capability
+        set — it is what the caller declared it cannot work without.
+        """
+        mock_daemon.get("/api/v1/info", payload={**_INFO, "capabilities": ["rest.v1"]})
+        client = LoomClient(config=mock_daemon.config)
         with pytest.raises(LoomIncompatibleVersionError):
-            await client.connect()
+            await client.connect(required_capabilities=("ws.broadcasts.v1",))
         await client.close()
 
     async def test_recheck_notices_a_swapped_daemon(self, mock_daemon: MockDaemon) -> None:
-        """A daemon upgraded under a live connection is caught at its cause."""
-        major = int(DAEMON_API_VERSION.split(".")[0])
+        """
+        A daemon swapped under a live connection is caught at its cause.
+
+        The cause is a capability the caller declared and the new peer does not
+        advertise. A moved version number is not one: the re-check reports it
+        and carries on, for the same reason connect() does.
+        """
         # Both queued up front: the stub repeats its last entry, so registering
         # the second one after connect() would leave the first still on the
         # queue and the re-check would read the compatible answer again.
         mock_daemon.get("/api/v1/info", payload=_INFO)
-        mock_daemon.get("/api/v1/info", payload={**_INFO, "api_version": f"{major + 1}.0.0"})
-        async with LoomClient(config=mock_daemon.config) as client:
+        mock_daemon.get("/api/v1/info", payload={**_INFO, "capabilities": ["rest.v1"]})
+        client = LoomClient(config=mock_daemon.config)
+        await client.connect(required_capabilities=("ws.broadcasts.v1",))
+        try:
             assert client.info is not None
             with pytest.raises(LoomIncompatibleVersionError):
                 await client._http.recheck_contract()
+            # The refused contract must not have half-replaced the standing one.
+            assert client.info is not None
+            assert "ws.broadcasts.v1" in (client.info.capabilities or [])
+        finally:
+            await client.close()
 
     async def test_recheck_survives_a_transient_failure(self, mock_daemon: MockDaemon) -> None:
         """A /info that cannot be read is not evidence of incompatibility."""

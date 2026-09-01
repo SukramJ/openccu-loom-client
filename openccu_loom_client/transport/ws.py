@@ -74,7 +74,6 @@ _HEALTHY_CONNECTION_SECONDS: Final = 10.0
 # daemon introduces a `kind` enum value this build's types don't know yet.
 # Coercing (rather than dropping the frame) keeps the payload flowing, the
 # same way an unknown `type` degrades gracefully downstream.
-_DEFAULT_ENVELOPE_KIND: Final = "change"
 
 # How long we wait for a server ping before considering the connection
 # dead and forcing a reconnect. The daemon contract says 30 s ping
@@ -697,30 +696,16 @@ class WsTransport:
 
     @staticmethod
     def _parse_envelope(frame: dict[str, object]) -> WsEnvelope | None:
+        # An envelope `kind` this build has never heard of no longer reaches
+        # here: the generated enums tolerate an unseen value and carry it
+        # through as the raw string. That replaced a coercion which rewrote
+        # such a kind to "change" — a relabelling, and the wrong one, since
+        # nothing in this package branches on kind (it is carried into event
+        # metadata and nothing else). What remains is a genuinely malformed
+        # frame, which is dropped rather than crashing the reader.
         try:
             return WsEnvelope.model_validate(frame)
         except ValidationError as exc:
-            # Forward compatibility: if the *only* problem is that the daemon
-            # sent a `kind` enum value this build's types don't know, coerce
-            # it to the default live-update kind and re-validate rather than
-            # blackholing the whole frame — its payload/type may still be
-            # actionable (mirrors the graceful unknown-`type` degradation).
-            if WsTransport._is_unknown_kind_only(exc=exc):
-                coerced: dict[str, object] = {**frame, "kind": _DEFAULT_ENVELOPE_KIND}
-                try:
-                    envelope = WsEnvelope.model_validate(coerced)
-                except ValidationError as retry_exc:
-                    _LOGGER.warning(
-                        "dropping malformed WS envelope: %s | frame=%s", retry_exc, WsTransport._short_frame(frame)
-                    )
-                    return None
-                _LOGGER.debug(
-                    "coerced unknown WS envelope kind %r to %r | topic=%s",
-                    frame.get("kind"),
-                    _DEFAULT_ENVELOPE_KIND,
-                    frame.get("topic"),
-                )
-                return envelope
             _LOGGER.warning("dropping malformed WS envelope: %s | frame=%s", exc, WsTransport._short_frame(frame))
             return None
         except Exception as exc:  # noqa: BLE001 — drop malformed frames, never crash the reader
@@ -734,14 +719,6 @@ class WsTransport:
         if len(text) <= _MAX_FRAME_LOG_CHARS:
             return text
         return f"{text[:_MAX_FRAME_LOG_CHARS]}… (+{len(text) - _MAX_FRAME_LOG_CHARS} chars)"
-
-    @staticmethod
-    def _is_unknown_kind_only(*, exc: ValidationError) -> bool:
-        """Report whether the sole validation error is an unknown ``kind`` enum value."""
-        errors = exc.errors()
-        return bool(errors) and all(
-            err.get("loc") == ("kind",) and str(err.get("type", "")).startswith("enum") for err in errors
-        )
 
     async def _send(self, *, frame: dict[str, object]) -> None:
         if self._ws is None or self._ws.closed:

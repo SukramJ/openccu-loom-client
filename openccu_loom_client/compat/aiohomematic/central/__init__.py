@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Any, Final
 
 from openccu_loom_client.auth import BasicAuth, BearerAuth
 from openccu_loom_client.client import LoomClient
-from openccu_loom_client.compat.aiohomematic.central.adapter import LoomCentralAdapter
+from openccu_loom_client.compat.aiohomematic.central.adapter import _PREFLIGHT_CAPABILITIES, LoomCentralAdapter
 from openccu_loom_client.config import LoomConfig
 from openccu_loom_client.transport import HttpTransport
 
@@ -199,7 +199,11 @@ async def list_ccus(
     transport = HttpTransport(config=config, session=client_session)
     client = LoomClient(config=config, http_transport=transport)
     try:
-        await client.connect()
+        # Same short gate as the adapter's own pre-flight: this reads
+        # /system/ccus over REST and maps a rejected credential through the
+        # problem+json exception classes. It opens no event stream, so
+        # ws.broadcasts.v1 is deliberately not required here.
+        await client.connect(required_capabilities=_PREFLIGHT_CAPABILITIES)
         ccus = await client.system.list_system_ccus()
     finally:
         await client.close()

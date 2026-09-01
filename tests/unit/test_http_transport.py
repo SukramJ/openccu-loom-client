@@ -9,25 +9,35 @@ from dataclasses import replace
 import logging
 import time
 
+from pydantic import ValidationError
 import pytest
 
 from openccu_loom_client import (
+    Capability,
     LoomAuthError,
     LoomConfig,
     LoomHttpError,
+    LoomIncompatibleVersionError,
     LoomNotFoundError,
     LoomTransportError,
     LoomUpstreamUnavailableError,
     wire,
 )
+from openccu_loom_client.compat.aiohomematic.central import list_ccus
 from openccu_loom_client.transport import HttpTransport
 from tests.helpers import MockDaemon
 
+# What the compat pre-flight declares, spelled out here rather than imported
+# from the module under test: importing the constant would make the assertion
+# agree with whatever that module says, which is no assertion at all.
+_PREFLIGHT_TOKENS = ["rest.v1", "errors.problem_details.v1"]
+
 _INFO_RESPONSE = {
     "version": "1.2.3",
-    # Report the exact API version the installed types were generated
-    # against so the connect() compatibility guard passes; guard-rejection
-    # cases override this inline. See TestApiVersionGuard.
+    # The version this build's types were generated against. It no longer
+    # gates anything — TestApiVersionReporting pins the reporting rule with
+    # fixed literals on both sides — but keeping it matched here means
+    # unrelated cases produce no version log to reason about.
     "api_version": wire.DAEMON_API_VERSION,
     "commit": "deadbeef",
     "build_date": "2026-05-24T10:00:00Z",
@@ -135,65 +145,202 @@ class TestSchemaDigestHandshake:
         await transport.close()
 
 
-class TestApiVersionGuard:
-    """connect() hard-fails on an incompatible daemon API version (needs same major, minor ≥ expected)."""
+# Fixed literals, deliberately. The predecessor of this class read the
+# daemon's answer back out of ``wire.DAEMON_API_VERSION`` and asserted the
+# constant against itself, so it stayed green whatever the rule was — it
+# measured nothing. Both sides are now written down: the types are pinned to
+# _TYPES_API_VERSION via monkeypatch and each case names the daemon's answer.
+_TYPES_API_VERSION = "10.1.0"
+
+
+class TestApiVersionReporting:
+    """
+    connect() reports an API-version difference and connects anyway.
+
+    Refusing on the number was wrong in both directions. Upward: the daemon's
+    major went 7 → 8 → 9 → 10 in one release window and every bump removed
+    surface no generated client referenced. Downward: HACS updates the HA
+    integration before the daemon, so ``minor(daemon) < minor(types)`` is the
+    ordinary state of an additive daemon release. The hard gate is the
+    capability handshake — see :class:`TestCapabilityGate`.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _pin_types_version(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(wire, "DAEMON_API_VERSION", _TYPES_API_VERSION, raising=False)
 
     @staticmethod
-    def _expected_major_minor() -> tuple[int, int]:
-        parts = wire.DAEMON_API_VERSION.split(".")
-        return int(parts[0]), int(parts[1])
+    def _version_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+        return [r for r in caplog.records if "reports API version" in r.getMessage()]
 
-    async def test_matching_version_connects(self, mock_daemon: MockDaemon, transport: HttpTransport) -> None:
-        # _INFO_RESPONSE already reports DAEMON_API_VERSION → guard passes.
-        mock_daemon.get("/api/v1/info", payload=_INFO_RESPONSE)
-        await transport.connect()
+    async def test_exact_match_is_silent(
+        self, mock_daemon: MockDaemon, transport: HttpTransport, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        mock_daemon.get("/api/v1/info", payload={**_INFO_RESPONSE, "api_version": "10.1.0"})
+        with caplog.at_level(logging.INFO):
+            await transport.connect()
+        assert self._version_records(caplog) == []
         await transport.close()
 
-    async def test_newer_minor_same_major_connects(self, mock_daemon: MockDaemon, transport: HttpTransport) -> None:
-        major, minor = self._expected_major_minor()
-        mock_daemon.get("/api/v1/info", payload={**_INFO_RESPONSE, "api_version": f"{major}.{minor + 5}.0"})
-        await transport.connect()
+    async def test_patch_difference_is_silent(
+        self, mock_daemon: MockDaemon, transport: HttpTransport, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # Only major and minor are contract-bearing; a patch bump says nothing.
+        mock_daemon.get("/api/v1/info", payload={**_INFO_RESPONSE, "api_version": "10.1.7"})
+        with caplog.at_level(logging.INFO):
+            await transport.connect()
+        assert self._version_records(caplog) == []
         await transport.close()
 
-    async def test_older_minor_raises(self, mock_daemon: MockDaemon, transport: HttpTransport) -> None:
-        # The incident pattern: daemon behind the API version the types expect.
-        major, minor = self._expected_major_minor()
-        mock_daemon.get("/api/v1/info", payload={**_INFO_RESPONSE, "api_version": f"{major}.{minor - 1}.0"})
-        with pytest.raises(LoomTransportError, match="incompatible API version"):
-            await transport.connect()
+    async def test_daemon_ahead_by_a_minor_connects_and_logs_info(
+        self, mock_daemon: MockDaemon, transport: HttpTransport, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        mock_daemon.get("/api/v1/info", payload={**_INFO_RESPONSE, "api_version": "10.4.0"})
+        with caplog.at_level(logging.INFO):
+            info = await transport.connect()
+        assert info.api_version == "10.4.0"
+        records = self._version_records(caplog)
+        assert [r.levelno for r in records] == [logging.INFO]
+        await transport.close()
 
-    async def test_newer_major_raises(self, mock_daemon: MockDaemon, transport: HttpTransport) -> None:
-        major, _minor = self._expected_major_minor()
-        mock_daemon.get("/api/v1/info", payload={**_INFO_RESPONSE, "api_version": f"{major + 1}.0.0"})
-        with pytest.raises(LoomTransportError, match="incompatible API version"):
-            await transport.connect()
+    async def test_daemon_behind_by_a_minor_connects_and_logs_info(
+        self, mock_daemon: MockDaemon, transport: HttpTransport, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # The HACS ordering: the integration updates first, the daemon later.
+        # This used to hard-fail setup for a contract that was fully present.
+        mock_daemon.get("/api/v1/info", payload={**_INFO_RESPONSE, "api_version": "10.0.0"})
+        with caplog.at_level(logging.INFO):
+            info = await transport.connect()
+        assert info.api_version == "10.0.0"
+        records = self._version_records(caplog)
+        assert [r.levelno for r in records] == [logging.INFO]
+        await transport.close()
 
-    async def test_older_major_raises(self, mock_daemon: MockDaemon, transport: HttpTransport) -> None:
-        major, _minor = self._expected_major_minor()
-        mock_daemon.get("/api/v1/info", payload={**_INFO_RESPONSE, "api_version": f"{major - 1}.99.0"})
-        with pytest.raises(LoomTransportError, match="incompatible API version"):
-            await transport.connect()
+    @pytest.mark.parametrize("daemon_version", ["11.0.0", "9.5.0"])
+    async def test_major_difference_connects_and_warns(
+        self,
+        mock_daemon: MockDaemon,
+        transport: HttpTransport,
+        caplog: pytest.LogCaptureFixture,
+        daemon_version: str,
+    ) -> None:
+        mock_daemon.get("/api/v1/info", payload={**_INFO_RESPONSE, "api_version": daemon_version})
+        with caplog.at_level(logging.INFO):
+            info = await transport.connect()
+        assert info.api_version == daemon_version
+        records = self._version_records(caplog)
+        assert [r.levelno for r in records] == [logging.WARNING]
+        await transport.close()
 
-    async def test_unparseable_version_skips_guard(self, mock_daemon: MockDaemon, transport: HttpTransport) -> None:
-        # A daemon whose api_version isn't dotted-numeric must not hard-fail;
-        # the guard degrades to a no-op (the digest handshake still warns).
+    async def test_unparseable_version_is_silent(
+        self, mock_daemon: MockDaemon, transport: HttpTransport, caplog: pytest.LogCaptureFixture
+    ) -> None:
         mock_daemon.get("/api/v1/info", payload={**_INFO_RESPONSE, "api_version": "experimental"})
-        await transport.connect()
+        with caplog.at_level(logging.INFO):
+            await transport.connect()
+        assert self._version_records(caplog) == []
         await transport.close()
 
-    async def test_old_daemon_reports_the_version_not_a_missing_field(
+    async def test_older_daemon_missing_a_payload_field_still_reports_the_version_first(
+        self, mock_daemon: MockDaemon, transport: HttpTransport, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # An older daemon is missing whichever payload field this types release
+        # added last, and every Info field is required — so model validation
+        # still fails, naming that field. The version note is emitted *before*
+        # validation so the log names the actual cause next to the symptom.
+        old = {k: v for k, v in _INFO_RESPONSE.items() if k != "config_ui_url"}
+        mock_daemon.get("/api/v1/info", payload={**old, "api_version": "10.0.0"})
+        with caplog.at_level(logging.INFO), pytest.raises(ValidationError):
+            await transport.connect()
+        assert [r.levelno for r in self._version_records(caplog)] == [logging.INFO]
+
+
+class TestCapabilityGate:
+    """
+    The declared capabilities are the only hard compatibility gate at connect().
+
+    Typed as LoomIncompatibleVersionError (a LoomTransportError subclass): an
+    absent capability does not clear on its own, and a caller that retries
+    "not ready" conditions has to tell that apart from an unreachable host.
+    """
+
+    async def test_missing_required_capability_raises(self, mock_daemon: MockDaemon, transport: HttpTransport) -> None:
+        mock_daemon.get("/api/v1/info", payload=_INFO_RESPONSE)
+        with pytest.raises(LoomIncompatibleVersionError, match="missing required capabilities"):
+            await transport.connect(required_capabilities=[Capability.ALARM])
+        await transport.close()
+
+    async def test_missing_capability_raises_even_on_an_exact_version_match(
+        self, mock_daemon: MockDaemon, transport: HttpTransport, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The negative control for the case above: matching versions do not
+        # excuse an absent capability, so the gate is the capability set and
+        # not a version comparison wearing a new message.
+        monkeypatch.setattr(wire, "DAEMON_API_VERSION", _TYPES_API_VERSION, raising=False)
+        mock_daemon.get("/api/v1/info", payload={**_INFO_RESPONSE, "api_version": _TYPES_API_VERSION})
+        with pytest.raises(LoomIncompatibleVersionError, match="missing required capabilities"):
+            await transport.connect(required_capabilities=[Capability.HISTORY])
+        await transport.close()
+
+    async def test_present_capability_connects_across_a_major_difference(
+        self, mock_daemon: MockDaemon, transport: HttpTransport, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The whole point of the change: a daemon two majors away still serves
+        # a caller whose declared surface it advertises.
+        monkeypatch.setattr(wire, "DAEMON_API_VERSION", _TYPES_API_VERSION, raising=False)
+        mock_daemon.get("/api/v1/info", payload={**_INFO_RESPONSE, "api_version": "12.0.0"})
+        await transport.connect(required_capabilities=[Capability.REST, Capability.WS_BROADCASTS])
+        await transport.close()
+
+    async def test_no_declared_capabilities_never_raises(
         self, mock_daemon: MockDaemon, transport: HttpTransport
     ) -> None:
-        # An older daemon is missing whichever payload field this types
-        # release added last. Validating the model first would surface that
-        # as a pydantic error naming the field — technically true, and it
-        # sends the reader after the wrong thing. The version guard runs
-        # first, so the diagnosis names the actual cause.
-        major, minor = self._expected_major_minor()
-        old = {k: v for k, v in _INFO_RESPONSE.items() if k != "config_ui_url"}
-        mock_daemon.get("/api/v1/info", payload={**old, "api_version": f"{major}.{minor - 1}.0"})
-        with pytest.raises(LoomTransportError, match="incompatible API version"):
-            await transport.connect()
+        mock_daemon.get("/api/v1/info", payload={**_INFO_RESPONSE, "capabilities": []})
+        await transport.connect()
+        await transport.close()
+
+
+class TestCompatLayerDeclaresItsCapabilities:
+    """
+    The compat layer's ``connect()`` calls declare what they cannot work without.
+
+    The transport gate above only bites for a caller that names something, so
+    a call site passing nothing turns the whole handshake into decoration.
+    These pin the declaration through the real entry point rather than
+    re-passing the tokens from the test — asserting the effect, not the
+    collaboration.
+
+    (Lives beside the gate it makes load-bearing; a dedicated compat test
+    module would be the tidier home once one exists.)
+    """
+
+    async def test_list_ccus_refuses_a_daemon_without_problem_details(self, mock_daemon: MockDaemon) -> None:
+        # errors.problem_details.v1 is what makes http_error_from_problem
+        # dispatch LoomAuthError from the problem type URI. Without it the
+        # config flow's invalid_auth answer can never be produced, so this
+        # pre-flight has no business reporting success.
+        mock_daemon.get(
+            "/api/v1/info",
+            payload={**_INFO_RESPONSE, "capabilities": ["rest.v1", "ws.broadcasts.v1"]},
+        )
+        mock_daemon.get("/api/v1/system/ccu", payload={"entries": []})
+        with pytest.raises(LoomIncompatibleVersionError, match="missing required capabilities"):
+            await list_ccus(host=mock_daemon.host, port=mock_daemon.port, token="t")
+
+    async def test_list_ccus_connects_when_its_declared_capabilities_are_present(self, mock_daemon: MockDaemon) -> None:
+        # The negative control for the case above: with the same call site and
+        # the tokens present, the pre-flight completes — so the failure there
+        # is the declaration biting, not list_ccus being broken.
+        mock_daemon.get("/api/v1/info", payload=_INFO_RESPONSE)
+        mock_daemon.get("/api/v1/system/ccu", payload={"entries": []})
+        assert await list_ccus(host=mock_daemon.host, port=mock_daemon.port, token="t") == []
+
+    async def test_list_ccus_does_not_require_the_event_stream(self, mock_daemon: MockDaemon) -> None:
+        # Over-declaring is the lockout this change removed, in a new place.
+        # A pre-flight that opens no WS must not refuse a daemon over it.
+        mock_daemon.get("/api/v1/info", payload={**_INFO_RESPONSE, "capabilities": _PREFLIGHT_TOKENS})
+        mock_daemon.get("/api/v1/system/ccu", payload={"entries": []})
+        assert await list_ccus(host=mock_daemon.host, port=mock_daemon.port, token="t") == []
 
 
 class TestRequest:
