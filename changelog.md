@@ -1,3 +1,40 @@
+# Version 2026.9.1 (2026-09-01)
+
+- **A schedule write reports what the daemon actually stored, and the cached
+  copy follows it.** Since daemon api 10.1.0 a climate end time with an hour of
+  24 is no longer refused: it is stored as 23:55 — what the CCU's own editor
+  does with the same input — and the write answers with the corrections it
+  made, naming profile, weekday, period and field.
+
+  `put_channel_schedule` and `put_device_schedule` returned `None` and threw
+  that body away. They now return a `ScheduleWriteResult`. Discarding it would
+  have reproduced, one layer out, exactly the defect the daemon's report exists
+  to prevent: a consumer holding a schedule the device does not have.
+
+  That was not hypothetical here. The compat layer's two write paths
+  (`ClimateWeekProfileDp.set_schedule` and `_put_profiles`) wrote the schedule
+  and then refreshed their cache **from the value they had just sent**. A new
+  `apply_corrections` reconciles the local copy with what was stored, and both
+  paths use it.
+
+  Corrections whose coordinates do not resolve — an unknown profile, weekday
+  or period index — are skipped rather than guessed at: they would mean the
+  daemon and the local copy disagree about the payload's shape, and inventing
+  a target hides that instead of leaving it visible on the next read.
+
+  One limit worth knowing before acting on the answer: an absent `corrections`
+  list means _nothing was reported_, not _nothing was corrected_. A daemon
+  before api 10.1.0 answers 202 with no body at all, and a 10.1.0 daemon omits
+  the field when the schedule was stored exactly as submitted. The two are
+  indistinguishable at this layer; a caller needing the stronger reading has
+  to check the daemon's api version.
+
+- **Wire bindings regenerated from daemon 0.71.0 (api 10.1.0).** The
+  `MasterProfile*` models are gone with the daemon's `master_profiles.*`
+  surface — nothing outside the generated file referenced them.
+  `ScheduleWriteResult` and `ScheduleTimeCorrection` are new, as are the
+  `Quantity.Door` and `SmokeDetectorAlarmStatus` enum members.
+
 # Version 2026.8.38 (2026-08-30)
 
 - **Event groups are read from the daemon, not classified here.** The compat
