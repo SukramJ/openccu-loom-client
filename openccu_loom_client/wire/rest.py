@@ -54,7 +54,7 @@ class StartupCaptureConfig(BaseModel):
     )
     anonymise: bool = Field(
         ...,
-        description="Whether device-address-shaped values in the recorded archive are hashed. Responses always carry the effective value.",
+        description="Whether the archive's operator-identifying attributes are hashed — the `subject`, `user`, `username`, `remote` and `remote_addr` keys. Device addresses, channel addresses, parameter names and interface ids stay in clear text, so an operator reading their own archive can follow the trace. Responses always carry the effective value.",
     )
 
 
@@ -2380,7 +2380,7 @@ class InterfaceSpec(BaseModel):
 class VisibilityConfig(BaseModel):
     un_ignore: list[str] | None = Field(
         None,
-        description="MODEL:CHANNEL:PARAMETER patterns (with `*` wildcards) that\npromote parameters from the default-hidden set into the\nvisible data-point surface. Bare parameter names are\ntreated as *:*:PARAMETER.\n",
+        description="Patterns that promote parameters from the default-hidden set\ninto the visible data-point surface. Two forms are accepted:\na bare `PARAMETER`, which matches every VALUES paramset on\nany model and channel, or the fully-qualified\n`PARAMETER:PARAMSET@MODEL:CHANNEL`, where MODEL may be `all`\nand CHANNEL may be `all` or empty for any channel. A colon\nwithout an `@` is rejected.\n\nStored per central, effective across the whole fleet: a\npattern names a model, a channel and a parameter, none of\nwhich identify a CCU.\n",
     )
 
 
@@ -3430,7 +3430,11 @@ class DiscoveredCentral(BaseModel):
 
 
 class DownloadSystemFirmwareRequest(BaseModel):
-    url: AnyUrl = Field(..., description="http/https firmware image the CCU should fetch.")
+    url: AnyUrl | None = Field(
+        None,
+        deprecated=True,
+        description="Accepted and ignored. The CCU has no call that fetches a caller-supplied image; it downloads the firmware matching its own version and board serial.",
+    )
     central: str | None = Field(None, description="Target central (optional for single-CCU deployments).")
 
 
