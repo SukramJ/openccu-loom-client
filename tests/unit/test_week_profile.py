@@ -93,7 +93,12 @@ def _climate_schedule() -> Schedule:
             "channel": {"address": f"{_ADDRESS}:1", "number": 1, "device_address": _ADDRESS},
             "kind": "climate",
             "active_profile": "P1",
-            "active_profile_index": 1,
+            # The daemon pairs "P1" with 0: it derives the index from the
+            # CCU's 1-based ACTIVE_PROFILE and subtracts one
+            # (adapter/schedules.go readActiveProfile). Pairing "P1" with 1
+            # here fed in the base under test and made the assertion below
+            # pass while the property returned the wire value unconverted.
+            "active_profile_index": 0,
             "profiles": {
                 "P1": {"weekdays": {"MONDAY": weekday, "TUESDAY": weekday}},
                 # A foreign profile must not count towards the active one.
@@ -212,6 +217,7 @@ class TestWeekProfileDp:
         dp.update_from(schedule=_climate_schedule())
         assert dp.schedule is not None
         assert dp.schedule["kind"] == "climate"
+        # 0 on the wire, 1 here: aiohomematic's contract is 1-based.
         assert dp.device_active_profile_index == 1
 
     def test_default_type_has_no_temperatures(self) -> None:
