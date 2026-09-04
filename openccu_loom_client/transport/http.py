@@ -266,10 +266,13 @@ class HttpTransport:
         matched (same major, minor at least as high) was wrong in both
         directions:
 
-        - *Major.* The daemon's major moved 7 → 8 → 9 → 10 inside one release
-          window, and every one of those bumps removed surface no generated
-          client referenced. The number said "breaking"; nothing this client
-          calls actually broke.
+        - *Major.* The daemon's major moved 7 → 8 → 9 → 10 → 11 inside one
+          release window. The first three removed surface no generated client
+          referenced; 11 changed the meaning of one endpoint rather than
+          removing it (``POST /system/firmware/download`` stopped fetching a
+          caller-supplied URL), and this client has no method that calls it.
+          The number said "breaking" each time; nothing this client calls
+          actually broke.
         - *Minor.* HACS updates the Home Assistant integration before the
           operator updates the daemon, so ``minor(daemon) < minor(types)`` is
           the ordinary state of an additive daemon release — and it hard-failed

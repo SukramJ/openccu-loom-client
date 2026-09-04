@@ -1,3 +1,30 @@
+# Version 2026.9.3 (2026-09-04)
+
+- **`device_active_profile_index` reported one profile too low.** The property
+  passed the daemon's `active_profile_index` straight through. The two sides
+  disagree on the base and both say so: `aiohomematic` answers 1-based — HmIP's
+  `ACTIVE_PROFILE` is an int 1..6 returned unchanged, RF's
+  `WEEK_PROGRAM_POINTER` is incremented — while the daemon derives its REST
+  field from the same CCU value and subtracts one. So `P1` arrived as `0` and
+  was reported as `0`.
+
+  The test did not catch it because its fixture paired `"active_profile": "P1"`
+  with `"active_profile_index": 1`, a combination the daemon never emits. The
+  fixture supplied the very base under test, so the assertion held while the
+  property was wrong. It now carries the pairing the daemon produces, and
+  removing the conversion fails it with `assert 0 == 1`.
+
+- Adopted daemon api 11.0.0 (openccu-loom v0.73.0). Its one breaking change,
+  `POST /system/firmware/download` no longer fetching a caller-supplied URL,
+  reaches no method in this client — the endpoint has never had a hand-written
+  caller. `DownloadSystemFirmwareRequest.url` is optional and deprecated in the
+  regenerated wire layer, and the version-drift note in the HTTP transport
+  records what this major actually was: a meaning change on surface this client
+  does not call, not a removal.
+
+- Dependency and tooling pins: `aiohomematic` 2026.8.8 → 2026.9.1, plus ruff,
+  pylint, prek and the pre-commit hook revisions.
+
 # Version 2026.9.1 (2026-09-01)
 
 - **A schedule write reports what the daemon actually stored, and the cached

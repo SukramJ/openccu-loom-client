@@ -536,10 +536,24 @@ class ClimateWeekProfileDp(WeekProfileDp):
 
     @property
     def device_active_profile_index(self) -> int | None:
-        """Return the 1-based active-profile index the device reports, or ``None``."""
-        if self._schedule is not None:
-            return self._schedule.active_profile_index
-        return None
+        """
+        Return the 1-based active-profile index the device reports, or ``None``.
+
+        The two sides disagree on the base and both are documented, so the
+        conversion belongs here. ``aiohomematic`` answers 1-based: HmIP's
+        ``ACTIVE_PROFILE`` is an int 1..6 returned unchanged, and RF's
+        ``WEEK_PROGRAM_POINTER`` ("0", "1", …) is incremented
+        (``model/week_profile_data_point.py``, this property). The daemon's
+        REST field is 0-based: it derives ``active_profile_index`` from the
+        same CCU value and subtracts one, which its contract states on
+        ``hmapi.ClimateSchedule.ActiveProfileIndex``.
+
+        So ``P1`` arrives here as ``0`` and leaves as ``1``. Passing the wire
+        value straight through reported one profile too low for every device.
+        """
+        if self._schedule is None or self._schedule.active_profile_index is None:
+            return None
+        return self._schedule.active_profile_index + 1
 
     @property
     def current_profile_schedule(self) -> dict[str, Any] | None:
