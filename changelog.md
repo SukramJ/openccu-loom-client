@@ -1,3 +1,24 @@
+# Version 2026.9.4 (2026-09-08)
+
+- **A channel says which side of a direct link it can take.** The daemon added
+  `link_source_roles` / `link_target_roles` to `ChannelSummary` in api 11.2.0
+  (openccu-loom v0.76.0) so a consumer can answer "sender, receiver or both"
+  from the device fetch it already made, rather than calling
+  `linkable_channels` once per channel. `Channel` exposes both token tuples and
+  derives the one-word answer as `channel.link_role`, a new `LinkRole` enum
+  exported from `openccu_loom_client.model`.
+
+  `LinkRole.NONE` is deliberately ambiguous and documented as such: it covers
+  both "this channel carries no link roles" and "this daemon is older than
+  11.2.0 and did not send the field". The two are indistinguishable at this
+  layer, and the links operations stay the authority where the distinction
+  matters.
+
+- Wire bindings regenerated from openccu-loom v0.75.0 (api 11.1.0) and v0.76.0
+  (api 11.2.0). The only shape change across both is the pair of fields above;
+  11.1.0 moved the meaning of the config-import edit lock, which no generated
+  type can show.
+
 # Version 2026.9.3 (2026-09-04)
 
 - **`device_active_profile_index` reported one profile too low.** The property

@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from openccu_loom_client.operations.devices import DevicesOperations
@@ -16,6 +17,23 @@ if TYPE_CHECKING:
     from openccu_loom_client.model.data_point import DataPoint
     from openccu_loom_client.model.device import Device
     from openccu_loom_client.store import LoomStore
+
+
+class LinkRole(StrEnum):
+    """
+    Which side of a direct link a channel can take.
+
+    Derived from the CCU's ``LINK_SOURCE_ROLES`` / ``LINK_TARGET_ROLES``
+    token lists rather than sent as its own field. ``NONE`` means the
+    channel carries neither list — which, against a daemon older than api
+    11.2.0 (openccu-loom v0.76.0), is also what "the field was not sent"
+    looks like.
+    """
+
+    SENDER = "sender"
+    RECEIVER = "receiver"
+    BOTH = "both"
+    NONE = "none"
 
 
 class Channel:
@@ -154,6 +172,52 @@ class Channel:
         assignment or against an older daemon that omits the field.
         """
         return tuple(self._summary.functions or ())
+
+    @property
+    def link_source_roles(self) -> tuple[str, ...]:
+        """
+        Return the raw CCU ``LINK_SOURCE_ROLES`` tokens of this channel.
+
+        What the channel can act as the *source* (sender) of in a direct
+        link. Empty when it cannot take part on that side — and equally
+        empty against a daemon older than api 11.2.0 (openccu-loom
+        v0.76.0), which does not send the field. The two are
+        indistinguishable here; :meth:`link_role` says the same in one
+        word, and the links operations remain the authority when the
+        distinction matters.
+        """
+        return tuple(self._summary.link_source_roles or ())
+
+    @property
+    def link_target_roles(self) -> tuple[str, ...]:
+        """
+        Return the raw CCU ``LINK_TARGET_ROLES`` tokens of this channel.
+
+        The receiving counterpart of :meth:`link_source_roles`, with the
+        same caveat about an older daemon.
+        """
+        return tuple(self._summary.link_target_roles or ())
+
+    @property
+    def link_role(self) -> LinkRole:
+        """
+        Return which side of a direct link this channel can take.
+
+        Derived from the two token lists, which is the question an
+        operator asks — the tokens themselves only matter when pairing two
+        specific channels, and :meth:`Links.linkable_channels` answers
+        that. ``LinkRole.NONE`` means the channel carries no roles, which
+        against a pre-11.2.0 daemon also covers "the field was not sent".
+        """
+        sends = bool(self._summary.link_source_roles)
+        receives = bool(self._summary.link_target_roles)
+        if sends and receives:
+            return LinkRole.BOTH
+        if sends:
+            return LinkRole.SENDER
+        if receives:
+            return LinkRole.RECEIVER
+        return LinkRole.NONE
 
     @property
     def group_master(self) -> GroupMasterView | None:

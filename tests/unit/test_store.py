@@ -16,6 +16,7 @@ from typing import Any
 
 import pytest
 
+from openccu_loom_client.model import LinkRole
 from openccu_loom_client.store import LoomStore
 from openccu_loom_client.wire.rest import (
     CalculatedDPSummary,
@@ -1209,3 +1210,98 @@ class TestCcuDashboardDeviceSurface:
         assert calls[0]["path"] == "/devices/VCU1/firmware/update"
         # Starting an OTA is never retried.
         assert calls[0]["allow_retry"] is False
+
+
+class TestChannelLinkRoles:
+    """
+    The direct-link role a channel can take, from api 11.2.0.
+
+    The daemon added `link_source_roles` / `link_target_roles` to
+    `ChannelSummary` so a consumer can answer "sender, receiver or both"
+    from the device fetch it already made, instead of calling
+    `linkable_channels` per channel. The client's job is to not throw that
+    away, and to derive the one-word answer once rather than in every
+    caller.
+    """
+
+    @staticmethod
+    def _channel_with(roles: dict[str, Any]) -> Any:
+        store = LoomStore()
+        store.set_serial(serial="ABC1234567")
+        store.set_central_name(central_name="home")
+        store.attach_device_detail(
+            detail=DeviceDetail.model_validate(
+                {
+                    "address": "VCU1",
+                    "interface": "HmIP-RF",
+                    "interface_id": "home-HmIP-RF",
+                    "model": "HmIP-BSM",
+                    "name": "Switch",
+                    "available": True,
+                    "channels_count": 1,
+                    "updatable": False,
+                    "update_available": False,
+                    "master_pushes_config_pending": False,
+                    "has_sub_devices": False,
+                    "firmware": {},
+                    "availability": {},
+                    "channels": [
+                        {
+                            "address": "VCU1:1",
+                            "number": 1,
+                            "name": "Ch1",
+                            "type": "SWITCH_VIRTUAL_RECEIVER",
+                            "paramset_key": "VALUES",
+                            "data_points_count": 0,
+                            "is_group_master": False,
+                            "is_in_multi_group": False,
+                            "is_custom_dp_primary": False,
+                            "data_points": [],
+                            **roles,
+                        }
+                    ],
+                }
+            )
+        )
+        device = store.get_device(address="VCU1")
+        assert device is not None
+        channel = device.get_channel(channel_address="VCU1:1")
+        assert channel is not None
+        return channel
+
+    @pytest.mark.parametrize(
+        ("roles", "expected"),
+        [
+            ({"link_source_roles": ["SWITCH"]}, LinkRole.SENDER),
+            ({"link_target_roles": ["SWITCH"]}, LinkRole.RECEIVER),
+            (
+                {"link_source_roles": ["SWITCH"], "link_target_roles": ["WEATHER"]},
+                LinkRole.BOTH,
+            ),
+            ({}, LinkRole.NONE),
+            # An empty list and an absent key mean the same thing to a
+            # caller: the channel cannot be linked on that side. The daemon
+            # omits the key, but a client generated before 11.2.0 may send [].
+            ({"link_source_roles": [], "link_target_roles": []}, LinkRole.NONE),
+        ],
+    )
+    def test_link_role_is_derived_from_both_token_lists(self, roles: dict[str, Any], expected: LinkRole) -> None:
+        assert self._channel_with(roles).link_role is expected
+
+    def test_raw_tokens_are_exposed_as_tuples(self) -> None:
+        """The tokens themselves survive, for callers pairing two channels."""
+        channel = self._channel_with({"link_source_roles": ["SWITCH", "REMOTECONTROL_RECEIVER"]})
+        assert channel.link_source_roles == ("SWITCH", "REMOTECONTROL_RECEIVER")
+        assert channel.link_target_roles == ()
+
+    def test_a_daemon_that_omits_the_fields_yields_none_not_an_error(self) -> None:
+        """
+        A pre-11.2.0 daemon sends no such key.
+
+        It has to read as "no roles" rather than raising, because the client
+        supports daemons older than the release that added the field.
+        """
+        channel = self._channel_with({})
+        assert channel.link_source_roles == ()
+        assert channel.link_target_roles == ()
+        assert channel.link_role is LinkRole.NONE
