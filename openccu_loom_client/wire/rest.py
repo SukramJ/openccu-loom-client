@@ -4009,6 +4009,14 @@ class ChannelSummary(BaseModel):
         None,
         description="The channel's device-trigger event groups — the same objects\n`GET /devices/{addr}/channels/{no}/event-groups` serves, carried\ninline so a client builds its event entities from the one\nbootstrap call instead of a round trip per channel.\n\nEach group carries its own `unique_id`, `kind`, `event_types` and\nmember `parameters`, so a consumer never has to classify CCU\nparameter names or recompute a routing key for itself — doing so\nis what caps a consumer at the event kinds its author knew about.\n\nOmitted when the channel exposes no event sources, which is the\ncommon case; only trigger-capable channels grow the payload.\n",
     )
+    link_source_roles: list[str] | None = Field(
+        None,
+        description='Raw CCU `LINK_SOURCE_ROLES` tokens — what this channel can act\nas the source (sender) of in a direct link. Omitted when the\nchannel cannot take part in a direct link on that side, so a\nconsumer answers "sender / receiver / both" per channel without\nfetching the link surface.\n',
+    )
+    link_target_roles: list[str] | None = Field(
+        None,
+        description="Raw CCU `LINK_TARGET_ROLES` tokens — what this channel can act\nas the target (receiver) of in a direct link. Omitted when the\nchannel cannot take part in a direct link on that side.\n",
+    )
 
 
 class Channel(ChannelSummary):
