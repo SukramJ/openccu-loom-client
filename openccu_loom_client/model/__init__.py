@@ -18,7 +18,7 @@ through.
 from __future__ import annotations
 
 from openccu_loom_client.model.alarm_panel import MASTER_ZONE_ID, AlarmPanel
-from openccu_loom_client.model.channel import Channel
+from openccu_loom_client.model.channel import Channel, LinkRole
 from openccu_loom_client.model.custom_data_point import CustomDataPoint
 from openccu_loom_client.model.data_point import DataPoint
 from openccu_loom_client.model.device import Device
@@ -32,6 +32,7 @@ __all__ = [
     "CustomDataPoint",
     "DataPoint",
     "Device",
+    "LinkRole",
     "MASTER_ZONE_ID",
     "Program",
     "Sysvar",
