@@ -1,3 +1,42 @@
+# Version 2026.9.5 (2026-09-28)
+
+Adopts daemon api 12.0.0 (openccu-loom v0.79.0), the release that adds
+openccu-lite systems as a second kind of central.
+
+- **A central says what it offers.** `list_system_ccus` entries carry the
+  daemon's `system_type` and `features` map: per feature whether the central
+  offers it and, if not, why (`not_supported_by_system`, `missing_scope`,
+  `not_ready`). A daemon older than 12.0.0 sends no `features`; the entry
+  then carries an empty map, which means "this daemon does not report
+  features", never "this central offers nothing". Without that default every
+  entry from an older daemon failed validation.
+
+- **`LoomFeatureUnavailableError`** for the new `422 feature_unavailable`
+  problem, raised when an operation reaches a central that does not offer it.
+  It subclasses `LoomUnsupportedError`, so a handler written for "not
+  supported" keeps catching it, and `.feature` names central, key, reason and
+  the missing scope.
+
+- **`CentralFeaturesChangedEvent`** for the `central.features_changed`
+  broadcast: the complete feature set of one central after a change, routed by
+  central name.
+
+- **Rooms and functions by path.** `Device.taxonomy` and `Channel.taxonomy`
+  return the direct room and function assignments with enum, path and name.
+  `rooms` and `functions` carry names only, and names are not unique once
+  nodes nest: an openccu-lite system can hold `eg/bad` and `og/bad`. Empty
+  against a daemon older than 12.0.0.
+
+- `Capability.CENTRAL_FEATURES` and `Capability.SOUTH_OPENCCU_LITE`. Both are
+  always emitted from v0.79.0 on and deliberately not in `ALWAYS_ON`, because
+  an older daemon does not send them.
+
+- The one breaking change of 12.0.0 — `POST /rooms` and `POST /functions`
+  answer an optional integer `id` — reaches no method here: the client has no
+  hand-written caller for either endpoint. The new setup endpoints
+  (`/centrals/probe`, `/centrals/pairing`, `/setup/probe`, `/setup/pairing`)
+  and the taxonomy editing routes are left to the daemon's own UI.
+
 # Version 2026.9.4 (2026-09-08)
 
 - **A channel says which side of a direct link it can take.** The daemon added

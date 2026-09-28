@@ -1305,3 +1305,89 @@ class TestChannelLinkRoles:
         assert channel.link_source_roles == ()
         assert channel.link_target_roles == ()
         assert channel.link_role is LinkRole.NONE
+
+
+class TestTaxonomy:
+    """
+    The rooms and functions a device or channel is assigned to, by path.
+
+    Api 12.0.0 added `taxonomy` to `DeviceSummary` and `ChannelSummary`
+    because names stop being unique once nodes nest: an openccu-lite system
+    can hold a "Bad" on two floors. `rooms` and `functions` still carry the
+    names; the paths are only in `taxonomy`, so dropping it would leave a
+    consumer unable to tell the two apart.
+    """
+
+    @staticmethod
+    def _device_with(*, device: dict[str, Any], channel: dict[str, Any]) -> Any:
+        store = LoomStore()
+        store.set_serial(serial="ABC1234567")
+        store.set_central_name(central_name="home")
+        store.attach_device_detail(
+            detail=DeviceDetail.model_validate(
+                {
+                    "address": "VCU1",
+                    "interface": "HmIP-RF",
+                    "interface_id": "home-HmIP-RF",
+                    "model": "HmIP-BSM",
+                    "name": "Switch",
+                    "available": True,
+                    "channels_count": 1,
+                    "updatable": False,
+                    "update_available": False,
+                    "master_pushes_config_pending": False,
+                    "has_sub_devices": False,
+                    "firmware": {},
+                    "availability": {},
+                    **device,
+                    "channels": [
+                        {
+                            "address": "VCU1:1",
+                            "number": 1,
+                            "name": "Ch1",
+                            "type": "SWITCH_VIRTUAL_RECEIVER",
+                            "paramset_key": "VALUES",
+                            "data_points_count": 0,
+                            "is_group_master": False,
+                            "is_in_multi_group": False,
+                            "is_custom_dp_primary": False,
+                            "data_points": [],
+                            **channel,
+                        }
+                    ],
+                }
+            )
+        )
+        found = store.get_device(address="VCU1")
+        assert found is not None
+        return found
+
+    def test_nested_rooms_with_the_same_name_stay_apart(self) -> None:
+        device = self._device_with(
+            device={
+                "rooms": ["Bad"],
+                "taxonomy": [{"enum": "room", "path": "eg/bad", "name": "Bad", "parent_path": "eg"}],
+            },
+            channel={
+                "functions": ["Licht"],
+                "taxonomy": [
+                    {"enum": "room", "path": "og/bad", "name": "Bad", "parent_path": "og"},
+                    {"enum": "function", "path": "licht", "name": "Licht"},
+                ],
+            },
+        )
+        assert [(t.enum, t.path, t.parent_path) for t in device.taxonomy] == [("room", "eg/bad", "eg")]
+        channel = device.get_channel(channel_address="VCU1:1")
+        assert channel is not None
+        assert [(t.enum, t.path, t.name) for t in channel.taxonomy] == [
+            ("room", "og/bad", "Bad"),
+            ("function", "licht", "Licht"),
+        ]
+
+    def test_a_daemon_older_than_12_yields_an_empty_tuple(self) -> None:
+        """A pre-12.0.0 daemon sends no such key; that reads as no assignment."""
+        device = self._device_with(device={"rooms": ["Bad"]}, channel={})
+        assert device.taxonomy == ()
+        channel = device.get_channel(channel_address="VCU1:1")
+        assert channel is not None
+        assert channel.taxonomy == ()

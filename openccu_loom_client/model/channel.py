@@ -9,7 +9,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from openccu_loom_client.operations.devices import DevicesOperations
-from openccu_loom_client.wire.rest import ChannelSummary
+from openccu_loom_client.wire.rest import ChannelSummary, TaxonomyAssignment
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -172,6 +172,22 @@ class Channel:
         assignment or against an older daemon that omits the field.
         """
         return tuple(self._summary.functions or ())
+
+    @property
+    def taxonomy(self) -> tuple[TaxonomyAssignment, ...]:
+        """
+        Return the rooms and functions this channel is directly assigned to.
+
+        Each entry names its enum (``room``, ``function``), the node's path
+        and display name. :attr:`room` and :attr:`functions` carry names
+        only, and names are not unique once nodes nest: an openccu-lite
+        system can hold ``eg/bad`` and ``og/bad``. The path tells them
+        apart. On a CCU every enum is flat and the path is the CCU's object
+        id. Empty when the channel has no direct assignment — which a
+        daemon older than api 12.0.0 (openccu-loom v0.79.0) also reports,
+        because it does not send the field.
+        """
+        return tuple(self._summary.taxonomy or ())
 
     @property
     def link_source_roles(self) -> tuple[str, ...]:
