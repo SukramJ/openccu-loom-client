@@ -36,8 +36,14 @@ an unchanged contract produces a byte-identical file — which the
 "skip when the API is unchanged" guard in the daemon-release workflow
 depends on.
 
-An enum base this script does not know (an `IntEnum`, say — an unknown
-integer cannot be minted as a string) is a hard error, never a silent
+* `IntEnum` — an integer enum (the daemon's `days` silence durations,
+  1/7/90). The pseudo-member is built with `int.__new__`, so it *is* an
+  `int` and compares equal to the raw number. `_missing_` takes a real
+  `int` only (not a `bool`); in a pydantic model, lax mode has already
+  turned `"30"` or `30.0` into `30` before the enum sees it, as it does for
+  a known member, while a value that is no integer stays rejected.
+
+An enum base this script does not know is a hard error, never a silent
 skip: a tolerated-looking file with an intolerant class in it is worse
 than a failed generation.
 """
@@ -95,6 +101,19 @@ PLAIN_ENUM_BASE = '''class _TolerantEnum(Enum):
         member._value_ = value
         return member'''
 
+INT_ENUM_BASE = '''class _TolerantIntEnum(IntEnum):
+    """`IntEnum` that accepts wire values this client does not know yet."""
+
+    @classmethod
+    def _missing_(cls, value: object) -> _TolerantIntEnum | None:  # kwonly: disable
+        """Mint a pseudo-member carrying the raw integer instead of raising."""
+        if not isinstance(value, int) or isinstance(value, bool):
+            return None
+        member = int.__new__(cls, value)
+        member._name_ = str(value)
+        member._value_ = value
+        return member'''
+
 # Base spelling as the generator writes it -> (tolerant base name, its source).
 # Each tolerant name maps to exactly one source, so a file this script has
 # already processed can be recognised and reproduced byte-for-byte.
@@ -102,6 +121,7 @@ KNOWN_BASES: dict[str, tuple[str, str]] = {
     "StrEnum": ("_TolerantStrEnum", STR_ENUM_BASE),
     "str, Enum": ("_TolerantStrMixinEnum", STR_MIXIN_BASE),
     "Enum": ("_TolerantEnum", PLAIN_ENUM_BASE),
+    "IntEnum": ("_TolerantIntEnum", INT_ENUM_BASE),
 }
 TOLERANT_BASES: dict[str, str] = dict(KNOWN_BASES.values())
 

@@ -25,10 +25,13 @@ from __future__ import annotations
 
 from enum import Enum
 import importlib
+import importlib.util
 import keyword
 from pathlib import Path
 import shutil
 import subprocess
+import sys
+import types
 
 from pydantic import ValidationError
 import pytest
@@ -145,6 +148,8 @@ def test_generated_modules_are_already_formatted() -> None:
 # `_missing_` that mints a pseudo-member carrying the raw string instead.
 
 FUTURE_VALUE = "a_value_the_daemon_added_after_this_client_was_generated"
+# The integer twin, for the generated `IntEnum` classes.
+FUTURE_INT = 424242
 
 
 def _generated_enums(module: object) -> list[type[Enum]]:
@@ -218,12 +223,13 @@ def test_every_generated_enum_accepts_an_unknown_wire_value(module: object) -> N
 
     intolerant: list[str] = []
     for cls in classes:
+        future: int | str = FUTURE_INT if issubclass(cls, int) else FUTURE_VALUE
         try:
-            member = cls(FUTURE_VALUE)
+            member = cls(future)
         except ValueError:
             intolerant.append(cls.__name__)
             continue
-        if member.value != FUTURE_VALUE:
+        if member.value != future:
             intolerant.append(cls.__name__)
 
     assert not intolerant, (
@@ -231,3 +237,59 @@ def test_every_generated_enum_accepts_an_unknown_wire_value(module: object) -> N
         f"{', '.join(sorted(intolerant))}. Run `make generate` — the tolerance comes from "
         f"script/gen/tolerant_enums.py, which must run after every generator."
     )
+
+
+def _load_tolerant_enums_script() -> object:
+    """Import script/gen/tolerant_enums.py, which is not a package module."""
+    path = Path(__file__).resolve().parents[2] / "script" / "gen" / "tolerant_enums.py"
+    spec = importlib.util.spec_from_file_location("tolerant_enums_script", path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_an_int_enum_is_made_tolerant_of_unknown_integers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    An `IntEnum` the generator emits accepts an integer it has not seen.
+
+    The daemon's warning silences (api 12.2.0) brought the first one, `Days`
+    (1, 7, 90), and the regeneration failed on it: the script refused the
+    base. A pseudo-member built with `int.__new__` is an `int`, compares
+    equal to the raw number and serialises back unchanged.
+    """
+    script = _load_tolerant_enums_script()
+    generated = (
+        "from enum import IntEnum\n"
+        "from pydantic import BaseModel\n\n\n"
+        "class Days(IntEnum):\n"
+        "    integer_1 = 1\n"
+        "    integer_7 = 7\n\n\n"
+        "class Silence(BaseModel):\n"
+        "    days: Days\n"
+    )
+    text, count = script.rewrite(generated, Path("generated.py"))  # type: ignore[attr-defined]
+    assert count == 1
+    module = types.ModuleType("tolerant_int_enum_generated")
+    # pydantic resolves a model's annotations through sys.modules.
+    monkeypatch.setitem(sys.modules, module.__name__, module)
+    exec(compile(text, "generated.py", "exec"), module.__dict__)  # noqa: S102 - the script's own output
+    days = module.Days
+    silence = module.Silence
+
+    assert days(7) is days.integer_7  # type: ignore[operator,attr-defined]
+    unknown = silence.model_validate({"days": 30})  # type: ignore[attr-defined]
+    assert unknown.days == 30
+    assert '"days":30' in unknown.model_dump_json()
+
+    # The negative control: tolerance is for unseen integers only. pydantic's
+    # lax mode turns "7", 7.0 and True into integers before the enum sees
+    # them, with or without this script; what never becomes an integer must
+    # still be refused.
+    for wrong in ("abc", 7.5, None):
+        with pytest.raises(ValidationError):
+            silence.model_validate({"days": wrong})  # type: ignore[attr-defined]
+
+    again, _ = script.rewrite(text, Path("generated.py"))  # type: ignore[attr-defined]
+    assert again == text, "the rewrite must be idempotent"
