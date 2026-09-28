@@ -10,11 +10,13 @@ import pytest
 from openccu_loom_client.exceptions import (
     _CODE_TO_EXCEPTION,
     LoomAuthError,
+    LoomFeatureUnavailableError,
     LoomForbiddenError,
     LoomHttpError,
     LoomNotFoundError,
     LoomRateLimitedError,
     LoomServiceUnreadyError,
+    LoomUnsupportedError,
     LoomUpstreamUnavailableError,
     LoomValidationError,
     http_error_from_problem,
@@ -85,6 +87,27 @@ class TestErrorMapping:
             url="https://x/api/v1/devices",
         )
         assert isinstance(exc, expected_cls)
+
+    def test_feature_unavailable_names_the_feature(self) -> None:
+        # api 11.5.0: a central that does not offer the feature answers 422
+        # feature_unavailable with a ``feature`` member. A handler written for
+        # "not supported" keeps catching it.
+        problem = Problem.model_validate(
+            {
+                "type": "https://openccu-loom.dev/errors/feature_unavailable",
+                "title": "Feature unavailable",
+                "status": 422,
+                "code": "feature_unavailable",
+                "feature": {"central": "box", "key": "system.reboot", "reason": "missing_scope", "scope": "power"},
+            }
+        )
+        exc = http_error_from_problem(
+            status=422, problem=problem, raw_body=None, method="POST", url="https://x/api/v1/system/ccu/box/reboot"
+        )
+        assert isinstance(exc, LoomFeatureUnavailableError)
+        assert isinstance(exc, LoomUnsupportedError)
+        assert exc.feature is not None
+        assert (exc.feature.central, exc.feature.key, exc.feature.scope) == ("box", "system.reboot", "power")
 
     def test_falls_back_to_base_when_no_problem(self) -> None:
         exc = http_error_from_problem(

@@ -39,6 +39,7 @@ from openccu_loom_client.wire.ws import (
     AlarmStateChangedPayload,
     AlarmTriggeredPayload,
     AlarmWalkTestProgressPayload,
+    CentralFeaturesChangedPayload,
     CentralReadinessChangedPayload,
     CentralStateChangedPayload,
     CustomDataPointStateChangedPayload,
@@ -182,6 +183,27 @@ class CentralStateChangedEvent(LoomEvent):
 
     payload: CentralStateChangedPayload
     type_id: ClassVar[str] = "central.state_changed"
+
+    def __post_init__(self) -> None:
+        """Default the routing key to the payload's central name."""
+        if self.event_key is None:
+            self.event_key = self.payload.central
+
+
+@dataclass(slots=True, kw_only=True)
+class CentralFeaturesChangedEvent(LoomEvent):
+    """
+    The set of features a central offers changed (daemon api 11.3.0).
+
+    Carries the complete current set — not a delta — keyed by feature, each
+    with ``available``, and ``reason`` / ``scope`` when it is not: the first
+    bring-up resolved the system, or the daemon's credential gained or lost
+    a scope. A consumer shows or hides what the central can do from it
+    without polling ``GET /system/ccu``.
+    """
+
+    payload: CentralFeaturesChangedPayload
+    type_id: ClassVar[str] = "central.features_changed"
 
     def __post_init__(self) -> None:
         """Default the routing key to the payload's central name."""
@@ -891,6 +913,7 @@ _EVENT_REGISTRY: Final[dict[str, tuple[Callable[..., LoomEvent], type[BaseModel]
         CustomDataPointStateChangedPayload,
     ),
     CentralStateChangedEvent.type_id: (CentralStateChangedEvent, CentralStateChangedPayload),
+    CentralFeaturesChangedEvent.type_id: (CentralFeaturesChangedEvent, CentralFeaturesChangedPayload),
     CentralReadinessChangedEvent.type_id: (CentralReadinessChangedEvent, CentralReadinessChangedPayload),
     SystemStatusChangedEvent.type_id: (SystemStatusChangedEvent, SystemStatusChangedPayload),
     DaemonStatusChangedEvent.type_id: (DaemonStatusChangedEvent, DaemonStatusPayload),

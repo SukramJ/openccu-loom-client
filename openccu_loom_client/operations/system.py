@@ -216,10 +216,15 @@ class SystemOperations(_OperationsBase):
 
         The daemon wraps the list in an ``{"entries": [...]}`` envelope;
         unwrap it, while tolerating a bare list for forward-compatibility.
+
+        A daemon older than api 11.3 reports no ``features``; such an entry
+        gets an empty map. Empty therefore means "this daemon does not report
+        features", never "this central offers nothing" — do not hide an
+        action because its key is missing.
         """
         payload = await self._transport.request(method="GET", path="/system/ccu")
         entries = payload.get("entries", []) if isinstance(payload, dict) else (payload or [])
-        return [SystemCCUEntry.model_validate(c) for c in entries]
+        return [SystemCCUEntry.model_validate(_with_features_default(entry=c)) for c in entries]
 
     # ---- CCU maintenance (admin) ----
     #
@@ -361,3 +366,10 @@ class SystemOperations(_OperationsBase):
             allow_retry=True,
         )
         return StartupCaptureConfig.model_validate(payload)
+
+
+def _with_features_default(*, entry: Any) -> Any:
+    """Give an entry from a daemon older than api 11.3 the empty ``features`` map it lacks."""
+    if isinstance(entry, dict) and "features" not in entry:
+        return {**entry, "features": {}}
+    return entry

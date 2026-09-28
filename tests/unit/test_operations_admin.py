@@ -286,6 +286,40 @@ class TestSystemAdminExtensions:
         mock.get("/api/v1/system/ccu", payload=[])
         assert await SystemOperations(transport=t).list_system_ccus() == []
 
+    async def test_list_system_ccus_tolerates_a_daemon_without_features(self, http) -> None:
+        # A daemon older than api 11.3 reports no per-central ``features``.
+        # The entry must still parse, and the empty map it gets means "not
+        # reported" — not "this central offers nothing".
+        t, mock = http
+        assert "features" not in _CCU_ENTRY
+        mock.get("/api/v1/system/ccu", payload={"entries": [_CCU_ENTRY]})
+        (ccu,) = await SystemOperations(transport=t).list_system_ccus()
+        assert ccu.features == {}
+
+    async def test_list_system_ccus_carries_the_features(self, http) -> None:
+        # api 11.3.0: each central reports what it offers and why not.
+        t, mock = http
+        mock.get(
+            "/api/v1/system/ccu",
+            payload={
+                "entries": [
+                    {
+                        **_CCU_ENTRY,
+                        "system_type": "openccu-lite",
+                        "features": {
+                            "hub.sysvars": {"available": False, "reason": "not_supported_by_system"},
+                            "system.reboot": {"available": False, "reason": "missing_scope", "scope": "power"},
+                            "device.control": {"available": True},
+                        },
+                    }
+                ]
+            },
+        )
+        (ccu,) = await SystemOperations(transport=t).list_system_ccus()
+        assert ccu.features["device.control"].available is True
+        assert ccu.features["system.reboot"].scope == "power"
+        assert ccu.features["hub.sysvars"].available is False
+
     async def test_list_system_ccus_carries_the_ccu_reported_facts(self, http) -> None:
         # api 3.5.0 / 3.8.0: security posture, astro position, time zone,
         # recovery availability and the CCU's own interface list ride along
