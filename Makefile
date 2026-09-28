@@ -32,6 +32,11 @@ generate-enums: ## regenerate wire/enums.py from $(OPENCCU_LOOM_REPO)/assets/sch
 # so every regeneration diffs against the last one even when the daemon API is
 # byte-for-byte identical. That spurious diff defeats the "skip when the API is
 # unchanged" guard in .github/workflows/regenerate-on-daemon-release.yml.
+#
+# The prepended pylint pragma lets a daemon schema share its name with a Python
+# builtin: the class names follow the daemon's component names (`Warning` since
+# api 12.2.0), and renaming them here would break the wire-name mapping every
+# caller relies on. It covers only this generated module.
 generate-rest: ## regenerate wire/rest.py via datamodel-codegen
 	@command -v datamodel-codegen >/dev/null 2>&1 || { \
 		echo "datamodel-codegen not on PATH — install via 'pip install -e .[dev]'"; exit 1; }
@@ -45,6 +50,8 @@ generate-rest: ## regenerate wire/rest.py via datamodel-codegen
 		--use-double-quotes \
 		--field-constraints \
 		--disable-timestamp \
+		--custom-file-header "# pylint: disable=redefined-builtin" \
+		--custom-file-header-mode prepend \
 		--formatters ruff-format ruff-check
 	python3 script/gen/tolerant_enums.py --py $(WIRE)/rest.py
 
