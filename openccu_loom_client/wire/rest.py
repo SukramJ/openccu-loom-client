@@ -99,8 +99,12 @@ class CustomDPInvokeRequest(BaseModel):
 
 
 class CreatedNamedResource(BaseModel):
-    id: str = Field(..., description="CCU-assigned identifier of the created object.")
-    name: str = Field(..., description="Name as the CCU stored it.")
+    id: int | None = Field(
+        None,
+        description="The CCU's numeric object id; absent for a system without one\n(openccu-lite), whose nodes are addressed by `path`.\n",
+    )
+    name: str = Field(..., description="Name as the system stored it.")
+    path: str = Field(..., description="The node's path inside its enum (on a CCU the object id as a string).")
 
 
 class LinkParamset(BaseModel):
@@ -260,6 +264,7 @@ class Type(_TolerantEnum):
     https___openccu_loom_dev_errors_bad_request = "https://openccu-loom.dev/errors/bad_request"
     https___openccu_loom_dev_errors_service_unready = "https://openccu-loom.dev/errors/service_unready"
     https___openccu_loom_dev_errors_upstream_unavailable = "https://openccu-loom.dev/errors/upstream_unavailable"
+    https___openccu_loom_dev_errors_feature_unavailable = "https://openccu-loom.dev/errors/feature_unavailable"
 
 
 class Code(_TolerantStrEnum):
@@ -274,6 +279,22 @@ class Code(_TolerantStrEnum):
     bad_request = "bad_request"
     service_unready = "service_unready"
     upstream_unavailable = "upstream_unavailable"
+    feature_unavailable = "feature_unavailable"
+
+
+class Reason(_TolerantStrEnum):
+    not_supported_by_system = "not_supported_by_system"
+    missing_scope = "missing_scope"
+    not_ready = "not_ready"
+
+
+class Feature(BaseModel):
+    central: str
+    key: str = Field(..., description="The feature key, for example `system.reboot` or `hub.sysvars`.")
+    reason: Reason
+    scope: str | None = Field(
+        None, description="The credential scope that would grant it, when `reason` is `missing_scope`."
+    )
 
 
 class Error(BaseModel):
@@ -293,6 +314,10 @@ class Problem(BaseModel):
     detail: str | None = None
     instance: str | None = None
     code: Code | None = Field(None, description="Short tag (also surfaced as the `X-Problem-Code` response header).")
+    feature: Feature | None = Field(
+        None,
+        description="Set on a `feature_unavailable` problem (HTTP 422): the\noperation needs a feature the target central does not offer\nright now. The same key and reason appear in that central's\n`features` map on `GET /system/ccu`.\n",
+    )
     errors: list[Error] | None = None
 
 
@@ -322,7 +347,7 @@ class Info(BaseModel):
     )
     capabilities: list[str] = Field(
         ...,
-        description='Runtime feature set. Always-on entries:\n`rest.v1`, `ws.broadcasts.v1`, `errors.problem_details.v1`.\nConditional entries surface only when configured:\n`mqtt.discovery.v1`, `mqtt.raw.v1`, `matter.bridge.v1`,\n`auth.oidc.v1`, `auth.ccu.v1`, `webhook.inbound.v1`,\n`diagrams.v1`, `admin.persistence.v1`, `history.v1`,\n`mcp.v1`, `mcp.write.v1`, `system.restart.supervised.v1`,\n`addon_self_update`, `alarm.v1` (the `/alarm` surface is\nmounted — absent, the alarm subsystem is off and every\n`/alarm` route answers 404).\n\n`mcp.write.v1` implies `mcp.v1`; `addon_self_update` predates\nthe `<area>.<feature>.v<n>` convention and keeps its spelling\nbecause renaming a token a client already matches on is a\nbreaking change.\n\nA token means the daemon is CONFIGURED for that capability,\nnot that the subsystem is working at this instant. It answers\n"may I use this path at all", which is what a client needs to\nbuild its feature set; a broker that is briefly unreachable is\nnot a missing capability, and a token that came and went with\nconnectivity would force every client to re-derive its\nsurface on each poll. For what is running right now, read\n`/health`, whose components report liveness.\n\nOpen-ended on purpose: the daemon may advertise additional\ncapabilities (e.g. `system.restart.supervised.v1`, `mcp.v1`)\nas features are added. Clients MUST treat this as a forward-\ncompatible string set and ignore values they do not recognise\n— never reject an `Info` payload because of an unknown entry.\n',
+        description='Runtime feature set. Always-on entries:\n`rest.v1`, `ws.broadcasts.v1`, `errors.problem_details.v1`,\n`central.features.v1` (each central reports what it offers in\n`features` on `GET /system/ccu`, and an operation a central\ndoes not offer answers the `feature_unavailable` problem),\n`south.openccu_lite.v1` (a central can be an openccu-lite\nsystem: `system_type: openccu-lite`).\nConditional entries surface only when configured:\n`mqtt.discovery.v1`, `mqtt.raw.v1`, `matter.bridge.v1`,\n`auth.oidc.v1`, `auth.ccu.v1`, `webhook.inbound.v1`,\n`diagrams.v1`, `admin.persistence.v1`, `history.v1`,\n`mcp.v1`, `mcp.write.v1`, `system.restart.supervised.v1`,\n`addon_self_update`, `alarm.v1` (the `/alarm` surface is\nmounted — absent, the alarm subsystem is off and every\n`/alarm` route answers 404).\n\n`mcp.write.v1` implies `mcp.v1`; `addon_self_update` predates\nthe `<area>.<feature>.v<n>` convention and keeps its spelling\nbecause renaming a token a client already matches on is a\nbreaking change.\n\nA token means the daemon is CONFIGURED for that capability,\nnot that the subsystem is working at this instant. It answers\n"may I use this path at all", which is what a client needs to\nbuild its feature set; a broker that is briefly unreachable is\nnot a missing capability, and a token that came and went with\nconnectivity would force every client to re-derive its\nsurface on each poll. For what is running right now, read\n`/health`, whose components report liveness.\n\nOpen-ended on purpose: the daemon may advertise additional\ncapabilities (e.g. `system.restart.supervised.v1`, `mcp.v1`)\nas features are added. Clients MUST treat this as a forward-\ncompatible string set and ignore values they do not recognise\n— never reject an `Info` payload because of an unknown entry.\n',
     )
 
 
@@ -382,6 +407,20 @@ class SuitableMembersResponse(BaseModel):
     leftover: list[SuitableMemberEntry]
 
 
+class CentralFeatureState(BaseModel):
+    available: bool
+    reason: Reason | None = Field(None, description="Why the feature is unavailable; absent when it is available.")
+    scope: str | None = Field(
+        None,
+        description="The credential scope that would grant the feature, when\n`reason` is `missing_scope` (for example `power` or `backup`).\n",
+    )
+
+
+class SystemType(_TolerantStrEnum):
+    ccu = "ccu"
+    openccu_lite = "openccu-lite"
+
+
 class CcuInterface(BaseModel):
     type: str = Field(..., description="CCU interface type string (e.g. `HmIP-RF`).")
     address: str = Field(..., description="Interface identifier the CCU uses in callbacks.")
@@ -438,7 +477,15 @@ class SystemCCUEntry(BaseModel):
     )
     recovery_mode_supported: bool | None = Field(
         None,
-        description="Whether this CCU offers a recovery system\n(`POST .../recovery-mode`). True for OpenCCU\nfirmware, false for a stock CCU3 and while the product is not\nyet known — so a client hides the action rather than offering\none that cannot work.\n",
+        description="Whether this CCU offers a recovery system\n(`POST .../recovery-mode`). True for OpenCCU\nfirmware, false for a stock CCU3 and while the product is not\nyet known — so a client hides the action rather than offering\none that cannot work. Derived from the `system.recovery_mode`\nentry of `features`.\n",
+    )
+    system_type: SystemType | None = Field(
+        None,
+        description="The kind of system behind the central. `ccu` is a CCU with\nReGaHss and the WebUI JSON-RPC (eQ-3 CCU, OpenCCU,\nRaspberryMatic); `openccu-lite` is a system managed through the\nocculited API. Absent until the central's first bring-up has\nresolved it.\n",
+    )
+    features: dict[str, CentralFeatureState] = Field(
+        ...,
+        description="What the central can do right now, keyed by feature\n(`hub.sysvars`, `hub.programs`, `hub.service_messages`,\n`system.reboot`, `system.backup.create`, `taxonomy.tree`,\n`install_mode`, …). Every known key is present. An unavailable\nfeature carries the reason: the system has no such feature, the\ndaemon's credential lacks the scope that grants it, or the\ncentral has not finished its first bring-up. A client hides an\nunavailable action instead of offering one that fails. Pushed\nlive as the `central.features_changed` WebSocket event.\n",
     )
     ccu_interfaces: list[CcuInterface] | None = Field(
         None,
@@ -494,6 +541,38 @@ class ConfigSnapshot(BaseModel):
         None,
         description="Static daemon-side behaviour switches. Keys are stable;\nvalues reflect the current effective policy. See the\n`/config` path-level description for the canonical key\ncatalogue.\n",
     )
+
+
+class TaxonomyNodeCreateRequest(BaseModel):
+    parent_path: str | None = Field(
+        None, description="The parent node's path inside the enum; absent or empty for a root node."
+    )
+    name: str
+
+
+class TaxonomyNodeCreated(BaseModel):
+    path: str = Field(..., description="The new node's path inside the enum.")
+
+
+class TaxonomyNodeUpdateRequest(BaseModel):
+    name: str | None = None
+    parent_path: str | None = Field(None, description="Move below this node; an empty string moves to the root.")
+    position: int | None = Field(None, description="Zero-based place among the new siblings; absent appends.")
+
+
+class TaxonomyNode(BaseModel):
+    id: str
+    path: str = Field(..., description="The node's path inside the enum.")
+    name: str
+    icon: str | None = None
+    children: list[TaxonomyNode] | None = None
+
+
+class TaxonomyAssignment(BaseModel):
+    enum: str = Field(..., description="The enum id, for example `room` or `function`.")
+    path: str = Field(..., description="The node's path inside the enum, node ids joined by `/`.")
+    name: str = Field(..., description="The node's display name.")
+    parent_path: str | None = Field(None, description="The parent node's path inside the enum; absent for a root node.")
 
 
 class UpdateStatus(_TolerantStrEnum):
@@ -1611,6 +1690,12 @@ class CentralReadinessChangedPayload(BaseModel):
     interfaces_total: int = Field(..., ge=0)
 
 
+class CentralFeaturesChangedPayload(BaseModel):
+    central: str
+    system_type: SystemType | None = None
+    features: dict[str, CentralFeatureState]
+
+
 class SystemStatusChangedPayload(BaseModel):
     central: str
     component: str
@@ -1946,7 +2031,7 @@ class Class1(_TolerantStrEnum):
     panic = "panic"
 
 
-class Reason(_TolerantStrEnum):
+class Reason2(_TolerantStrEnum):
     unreachable = "unreachable"
     blocked = "blocked"
     device_error = "device_error"
@@ -2186,6 +2271,11 @@ class Floor(_TolerantStrEnum):
 class Gate(_TolerantStrEnum):
     matter = "matter"
     history = "history"
+    feature_hub_programs = "feature:hub.programs"
+    feature_hub_sysvars = "feature:hub.sysvars"
+    feature_hub_inbox = "feature:hub.inbox"
+    feature_heating_groups_read = "feature:heating_groups.read"
+    feature_system_backup_create = "feature:system.backup.create"
 
 
 class Warn(_TolerantStrEnum):
@@ -2207,7 +2297,10 @@ class SurfaceInfo(BaseModel):
     floor: Floor | None = Field(
         None, description="Where the surface can never be hidden. Absent when the\noperator may hide it anywhere.\n"
     )
-    gate: Gate | None = Field(None, description="Runtime capability the surface additionally needs.")
+    gate: Gate | None = Field(
+        None,
+        description="Runtime capability the surface additionally needs. A\n`feature:<key>` gate is open while at least one central\noffers that feature (see `features` on `GET /system/ccu`).\n",
+    )
     warn: Warn | None = Field(
         None,
         description="Condition under which hiding asks for confirmation. The\nclient evaluates the condition; the daemon only declares it.\n",
@@ -2382,6 +2475,71 @@ class VisibilityConfig(BaseModel):
         None,
         description="Patterns that promote parameters from the default-hidden set\ninto the visible data-point surface. Two forms are accepted:\na bare `PARAMETER`, which matches every VALUES paramset on\nany model and channel, or the fully-qualified\n`PARAMETER:PARAMSET@MODEL:CHANNEL`, where MODEL may be `all`\nand CHANNEL may be `all` or empty for any channel. A colon\nwithout an `@` is rejected.\n\nStored per central, effective across the whole fleet: a\npattern names a model, a channel and a parameter, none of\nwhich identify a CCU.\n",
     )
+
+
+class CentralProbeRequest(BaseModel):
+    host: str
+    port: int | None = Field(None, description="The web server port; 0 or absent means 80, or 443 with tls.")
+    tls: bool | None = None
+    tls_insecure_skip_verify: bool | None = None
+
+
+class SystemType2(_TolerantStrEnum):
+    ccu = "ccu"
+    openccu_lite = "openccu-lite"
+    unknown = "unknown"
+
+
+class HMIPKeyMode(BaseModel):
+    keyserver_mode: str
+    device_keys: int
+    offline_pairing: bool
+
+
+class Access(_TolerantStrEnum):
+    full = "full"
+    control = "control"
+    read = "read"
+
+
+class CentralPairingRequest(BaseModel):
+    host: str
+    port: int | None = None
+    tls: bool | None = None
+    tls_fingerprint: str | None = Field(
+        None,
+        description="The certificate to pin (from the probe); needed over HTTPS for a certificate no trusted authority signed.",
+    )
+    access: Access | None = Field(None, description="What to ask the box's administrator for; full is the default.")
+
+
+class CentralPairingStarted(BaseModel):
+    pairing_id: str
+    code: str = Field(..., description="The six digits the box's administrator enters on the box.")
+    fingerprint: str | None = Field(
+        None, description="The certificate fingerprint both sides agreed on; empty over plain HTTP."
+    )
+    expires_in: int = Field(..., description="Seconds the pairing request stays valid.")
+
+
+class State1(_TolerantStrEnum):
+    pending = "pending"
+    approved = "approved"
+    rejected = "rejected"
+    expired = "expired"
+    error = "error"
+
+
+class CentralPairingStatus(BaseModel):
+    state: State1
+    scopes: list[str] | None = Field(None, description="The scopes an approved pairing granted.")
+    error: str | None = None
+
+
+class SystemType3(_TolerantStrEnum):
+    ccu = "ccu"
+    openccu_lite = "openccu-lite"
+    auto = "auto"
 
 
 class SysvarMarker(_TolerantStrEnum):
@@ -2708,11 +2866,6 @@ class EditSessionResponse(BaseModel):
     expires: AwareDatetime
 
 
-class FunctionEntry(BaseModel):
-    name: str
-    device_count: int
-
-
 class Incident(BaseModel):
     id: str
     when: AwareDatetime
@@ -2797,12 +2950,22 @@ class RPCRecordingStatus(BaseModel):
     randomize: bool | None = None
 
 
+class NodeRef(BaseModel):
+    central: str
+    path: str
+    parent_path: str | None = Field(None, description="The parent node's path; absent for a root node.")
+
+
 class RoomEntry(BaseModel):
     name: str
     device_count: int
+    refs: list[NodeRef] | None = Field(
+        None,
+        description='The taxonomy nodes carrying this name, per central. Two nodes\nof one name (a "Küche" on two floors) are one entry with two\nrefs; omitted when no device carries a node reference.\n',
+    )
 
 
-class State1(_TolerantStrEnum):
+class State2(_TolerantStrEnum):
     idle = "idle"
     checking = "checking"
     downloading = "downloading"
@@ -2821,7 +2984,7 @@ class AddonUpdateStatus(BaseModel):
     last_check: AwareDatetime | None = Field(
         None, description="Time of the last successful check; absent before the first."
     )
-    state: State1 = Field(
+    state: State2 = Field(
         ...,
         description="Lifecycle of the updater. `installing` is terminal from the caller's perspective — the daemon restarts on success.",
     )
@@ -2974,7 +3137,7 @@ class AlarmModeReadiness(BaseModel):
     warnings: list[str] | None = Field(None, description="Sensor ids with non-blocking health warnings for this mode.")
 
 
-class State2(_TolerantStrEnum):
+class State3(_TolerantStrEnum):
     disarmed = "disarmed"
     arming = "arming"
     armed = "armed"
@@ -3001,7 +3164,7 @@ class Countdown(BaseModel):
 class AlarmZoneStatus(BaseModel):
     id: str
     name: str
-    state: State2 = Field(..., description="Arm-state-machine state.")
+    state: State3 = Field(..., description="Arm-state-machine state.")
     mode: Mode | None = Field(None, description="Currently active (or, while arming, target) protection mode.")
     bypassed: list[str] | None = Field(None, description="Sensor ids currently bypassed for the active/pending arm.")
     incident: Incident1 | None = Field(
@@ -3092,13 +3255,13 @@ class AlarmCodeRequest(BaseModel):
     enabled: bool
 
 
-class State3(_TolerantStrEnum):
+class State4(_TolerantStrEnum):
     arming = "arming"
     armed = "armed"
 
 
 class AlarmArmAccepted(BaseModel):
-    state: State3 = Field(..., description="Resulting zone state.")
+    state: State4 = Field(..., description="Resulting zone state.")
     bypassed: list[str] | None = Field(None, description="Sensor ids actually bypassed for this arm.")
     exit_delay_s: int | None = Field(
         None, description="Exit delay in seconds the zone is now counting down; 0 when armed immediately."
@@ -3415,6 +3578,11 @@ class DeviceInstallModeRequest(BaseModel):
     seconds: int | None = Field(60, ge=0)
 
 
+class SystemType4(_TolerantStrEnum):
+    ccu = "ccu"
+    openccu_lite = "openccu-lite"
+
+
 class DiscoveredCentral(BaseModel):
     serial: str
     name: str
@@ -3425,6 +3593,9 @@ class DiscoveredCentral(BaseModel):
     )
     manufacturer: str | None = None
     model: str | None = None
+    system_type: SystemType4 | None = Field(
+        None, description="How the discovered system is reached, from its UPnP description; the wizard pre-selects it."
+    )
     last_seen: AwareDatetime
     already_configured: bool
 
@@ -3575,6 +3746,11 @@ class PatchChannelRequest(BaseModel):
     functions: list[str] | None = Field(
         None, description="Replaces the channel's function (Gewerk)\nassignments. Unknown names are silently skipped.\n"
     )
+    room_paths: list[str] | None = Field(
+        None,
+        description="Assign by node reference (`room/eg/kueche`) instead of by name;\nwins over `rooms` when both are given. A reference names one of\ntwo rooms that share a name. Paths come from `GET /taxonomy`.\n",
+    )
+    function_paths: list[str] | None = Field(None, description="As `room_paths`, for functions (`function/licht`).")
 
 
 class PatchDeviceRequest(BaseModel):
@@ -3585,6 +3761,11 @@ class PatchDeviceRequest(BaseModel):
     )
     rooms: list[str] | None = None
     functions: list[str] | None = None
+    room_paths: list[str] | None = Field(
+        None,
+        description="Assign by node reference (`room/eg/kueche`) instead of by name;\nwins over `rooms` when both are given. A reference names one of\ntwo rooms that share a name. Paths come from `GET /taxonomy`.\n",
+    )
+    function_paths: list[str] | None = Field(None, description="As `room_paths`, for functions (`function/licht`).")
 
 
 class PatchSysvarRequest(BaseModel):
@@ -3633,7 +3814,7 @@ class PutConfigSectionResponse(BaseModel):
     )
 
 
-class State4(BaseModel):
+class State5(BaseModel):
     state: str | None = Field(None, description="State-machine bucket (e.g. connected, degraded, disconnected).")
     closed: bool | None = Field(None, description="True once the client has been shut down.")
     total_requests: int | None = None
@@ -3649,7 +3830,7 @@ class ReliabilityState(BaseModel):
     circuit_state: int | None = Field(
         None, description="Circuit-breaker state code: 0 = closed, 1 = open, 2 = half-open.\n"
     )
-    state: State4 | None = Field(
+    state: State5 | None = Field(
         None, description="Live InterfaceClient state. Omitted when the client exposes none.\n"
     )
 
@@ -3712,11 +3893,30 @@ class Locale(BaseModel):
     theme: Theme
 
 
+class SystemType5(_TolerantStrEnum):
+    ccu = "ccu"
+    openccu_lite = "openccu-lite"
+    auto = "auto"
+
+
 class Ccu(BaseModel):
     name: str = Field(..., min_length=1)
     host: str = Field(..., min_length=1)
+    system_type: SystemType5 | None = Field(None, description="Kind of system; empty means ccu.")
     username: str | None = None
     password: str | None = None
+    api_token: str | None = Field(
+        None, description="The occulited API token an openccu-lite system requires (`olt_` + 32 lower-case hex digits)."
+    )
+    tls: bool | None = None
+    tls_fingerprint: str | None = Field(
+        None, description="SHA-256 (lower-case hex) of an openccu-lite system's certificate to pin; requires tls."
+    )
+    port: int | None = Field(None, description="The system's web server port; 0 or absent means 80, or 443 with tls.")
+    pairing_id: str | None = Field(
+        None,
+        description="An approved pairing (POST /setup/pairing) whose token the central takes instead of api_token.",
+    )
     interfaces: list[str] = Field(..., min_length=1)
 
 
@@ -3872,6 +4072,12 @@ class GroupEntry(BaseModel):
     members: list[GroupMemberEntry]
 
 
+class TaxonomyEnum(BaseModel):
+    id: str = Field(..., description="The enum id, for example `room` or `function`.")
+    names: dict[str, str] | None = Field(None, description="The enum's display name per language tag.")
+    nodes: list[TaxonomyNode]
+
+
 class DeviceSummary(BaseModel):
     address: str
     central: str | None = Field(
@@ -3910,6 +4116,10 @@ class DeviceSummary(BaseModel):
     )
     rooms: list[str] | None = None
     functions: list[str] | None = Field(None, description='Resolved "Gewerke" (function) labels for the device.')
+    taxonomy: list[TaxonomyAssignment] | None = Field(
+        None,
+        description="Every taxonomy node the device or one of its channels is\ndirectly assigned to, in every enum (rooms, functions and\nwhatever else the system defines), with the node's path.\n`rooms` and `functions` keep carrying the names; this adds\nwhat names cannot say when two nodes share one or nodes nest.\nOmitted when the device has no assignment.\n",
+    )
     master_pushes_config_pending: bool = Field(
         ...,
         description="True when the device's interface delivers reliable CONFIG_PENDING\nevents on MASTER writes (HmIP-RF, HmIP-Wired). The SPA then waits\nfor the true→false transition before refreshing MASTER. False for\nBidCos-*, VirtualDevices, CUxD — those rely on the save-path\nreload because CONFIG_PENDING never fires (or fires unreliably).\n",
@@ -3992,6 +4202,10 @@ class ChannelSummary(BaseModel):
     functions: list[str] | None = Field(
         None,
         description='The channel\'s resolved "Gewerke" (function) labels — the\nchannel-level twin of `DeviceSummary.functions`. Lets clients\nmap functions at channel granularity instead of folding them\nup to the device. Omitted when the channel carries no function\nassignment.\n',
+    )
+    taxonomy: list[TaxonomyAssignment] | None = Field(
+        None,
+        description="The taxonomy nodes the channel is directly assigned to, in\nevery enum, with their paths. Omitted when there are none.\n",
     )
     is_custom_dp_primary: bool | None = Field(
         None,
@@ -4087,7 +4301,7 @@ class SecurityZoneChangedPayload(BaseModel):
 class SecurityFaultChangedPayload(BaseModel):
     fault_id: str
     class_: Class1 = Field(..., alias="class")
-    reason: Reason
+    reason: Reason2
     severity: Severity2
     source: AlarmSource
     open: bool = Field(..., description="True when the fault was raised, false when it cleared.")
@@ -4140,6 +4354,13 @@ class HubDataPoints(BaseModel):
     install_mode: list[HubInstallModeDataPoint] | None = None
 
 
+class LiteProbeInfo(BaseModel):
+    implementation: str | None = None
+    api_majors: dict[str, int] | None = None
+    pairing_available: bool
+    hmip_key_mode: HMIPKeyMode | None = None
+
+
 class CentralRow(BaseModel):
     name: str = Field(
         ...,
@@ -4161,9 +4382,29 @@ class CentralRow(BaseModel):
     )
     json_rpc_port: int | None = Field(
         None,
-        description="HTTP port for JSON-RPC and web endpoints. 0 defaults to 80 (plain) / 443 (TLS).",
+        description="HTTP(S) port of the system's web server — JSON-RPC and web endpoints on a CCU, the occulited API on openccu-lite. 0 defaults to 80 (plain) / 443 (TLS).",
         ge=0,
         le=65535,
+    )
+    system_type: SystemType3 | None = Field(
+        None,
+        description="Kind of system behind the central. Empty means `ccu`, so a row written before the field existed keeps its meaning. An `openccu-lite` central needs `api_token_plain` or `api_token_env` and must not carry username, password or port overrides; a `ccu` central must not carry an API token or a fingerprint. A write that breaks a rule is refused with 400 naming the field.",
+    )
+    api_token_env: str | None = Field(
+        None,
+        description="Environment variable name whose value is the openccu-lite API token (preferred over api_token_plain). Omitted for callers below the admin role.",
+    )
+    api_token_plain: str | None = Field(
+        None,
+        description="The openccu-lite API token, sealed at rest. Never returned in the clear: reads carry the mask `***`, and a write that sends the mask back (or omits the key, or sends null) keeps the stored token; an explicit empty string clears it.",
+    )
+    tls_fingerprint: str | None = Field(
+        None,
+        description="SHA-256 (lower-case hex) of the openccu-lite system's certificate. When set, TLS trusts exactly this certificate. Requires tls.",
+    )
+    pairing_id: str | None = Field(
+        None,
+        description="The id of an approved client pairing (POST /centrals/pairing). The central takes that pairing's token and pinned fingerprint on the server; the token never travels through the client.",
     )
     username: str | None = None
     password_env: str | None = Field(
@@ -4242,6 +4483,15 @@ class CentralLinksStatus(BaseModel):
     )
 
 
+class FunctionEntry(BaseModel):
+    name: str
+    device_count: int
+    refs: list[NodeRef] | None = Field(
+        None,
+        description='The taxonomy nodes carrying this name, per central. Two nodes\nof one name (a "Küche" on two floors) are one entry with two\nrefs; omitted when no device carries a node reference.\n',
+    )
+
+
 class Area(BaseModel):
     id: str = Field(..., description="Server-generated on create; ignored in the create body.")
     name: str
@@ -4285,7 +4535,7 @@ class SecurityZoneState(BaseModel):
 class SecurityFault(BaseModel):
     id: str
     class_: str = Field(..., alias="class")
-    reason: Reason
+    reason: Reason2
     severity: str
     source: AlarmSource
     since: AwareDatetime
@@ -4351,6 +4601,16 @@ class GroupCentralEntry(BaseModel):
     groups: list[GroupEntry]
 
 
+class TaxonomyCentral(BaseModel):
+    central: str
+    revision: int = Field(..., description="The source's revision counter; 0 for a system without one (a CCU).")
+    writable: bool = Field(
+        ..., description="Whether nodes can be created, renamed and deleted (feature `taxonomy.edit`)."
+    )
+    tree: bool = Field(..., description="Whether nodes can nest (feature `taxonomy.tree`); a CCU's enums are flat.")
+    enums: list[TaxonomyEnum]
+
+
 class DeviceDetail(DeviceSummary):
     firmware: DeviceFirmware
     availability: DeviceAvailability
@@ -4378,6 +4638,18 @@ class UnIgnoreCandidateGroup(BaseModel):
     channel_count: int = Field(..., description="distinct (model, channel) pairs")
 
 
+class CentralProbeResult(BaseModel):
+    system_type: SystemType2
+    ready: bool = Field(
+        ...,
+        description="Whether the system serves its API now; an openccu-lite box that is starting is identified but not ready.",
+    )
+    tls_fingerprint: str | None = Field(
+        None, description="SHA-256 (lower-case hex) of the certificate the server presented over HTTPS, to pin."
+    )
+    lite: LiteProbeInfo | None = None
+
+
 class SecuritySnapshot(BaseModel):
     severity: Severity2 = Field(..., description="The folded overall state.")
     classes: list[SecurityClassState] = Field(
@@ -4401,6 +4673,10 @@ class ListGroupsResponse(BaseModel):
     entries: list[GroupCentralEntry]
 
 
+class TaxonomyResponse(BaseModel):
+    centrals: list[TaxonomyCentral]
+
+
 class UnIgnoreCandidateList(BaseModel):
     candidates: list[str]
     include_master: bool | None = None
@@ -4411,3 +4687,6 @@ class UnIgnoreCandidateList(BaseModel):
     reasons: list[UnIgnoreReason] | None = Field(
         None, description="Every suppression category the groups can carry, in display order."
     )
+
+
+TaxonomyNode.model_rebuild()
