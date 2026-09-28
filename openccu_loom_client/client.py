@@ -71,6 +71,7 @@ from openccu_loom_client.operations import (
     SecurityOperations,
     SystemOperations,
     VisibilityOperations,
+    WarningsOperations,
 )
 from openccu_loom_client.store import LoomStore
 from openccu_loom_client.transport import HttpTransport, WsTransport
@@ -257,6 +258,9 @@ class LoomClient:
         self.diagnostics: Final = DiagnosticsOperations(transport=self._http)
         self.backup: Final = BackupOperations(transport=self._http)
         self.visibility: Final = VisibilityOperations(transport=self._http)
+        # Operator warnings and the calling user's silences (daemon ≥ 0.80.0,
+        # api 12.2.0; an older one answers 404).
+        self.warnings: Final = WarningsOperations(transport=self._http)
 
     # ---- public state access ----
 
