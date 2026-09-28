@@ -369,6 +369,48 @@ class FailureReason(_TolerantStrMixinEnum):
     Unknown = "unknown"
 
 
+class Feature(_TolerantStrMixinEnum):
+    Connectivity = "connectivity"
+    DeviceAdmin = "device.admin"
+    DeviceCommunicationTest = "device.communication_test"
+    DeviceConfigure = "device.configure"
+    DeviceControl = "device.control"
+    DeviceFirmwareUpdate = "device.firmware_update"
+    DeviceRename = "device.rename"
+    HeatingGroupsRead = "heating_groups.read"
+    HeatingGroupsWrite = "heating_groups.write"
+    HubAlarmMessages = "hub.alarm_messages"
+    HubInbox = "hub.inbox"
+    HubPrograms = "hub.programs"
+    HubServiceMessages = "hub.service_messages"
+    HubServiceMessagesAck = "hub.service_messages.ack"
+    HubServiceMessagesMute = "hub.service_messages.suppress"
+    HubSystemUpdate = "hub.system_update"
+    HubSystemUpdateInstall = "hub.system_update.install"
+    HubSysvars = "hub.sysvars"
+    InstallMode = "install_mode"
+    InstallModeLocal = "install_mode.local"
+    RadioDutyCycle = "radio.duty_cycle"
+    SystemAuthDelegation = "system.auth_delegation"
+    SystemBackupCreate = "system.backup.create"
+    SystemBackupRestore = "system.backup.restore"
+    SystemPosition = "system.position"
+    SystemPowerOff = "system.poweroff"
+    SystemReboot = "system.reboot"
+    SystemRecoveryMode = "system.recovery_mode"
+    SystemSafeMode = "system.safe_mode"
+    TaxonomyAssign = "taxonomy.assign"
+    TaxonomyEdit = "taxonomy.edit"
+    TaxonomyRead = "taxonomy.read"
+    TaxonomyTree = "taxonomy.tree"
+
+
+class FeatureReason(_TolerantStrMixinEnum):
+    MissingScope = "missing_scope"
+    NotReady = "not_ready"
+    NotSupported = "not_supported_by_system"
+
+
 class Field(_TolerantStrMixinEnum):
     AcousticAlarmActive = "acoustic_alarm_active"
     AcousticAlarmSelection = "acoustic_alarm_selection"
@@ -1038,6 +1080,12 @@ class SystemEventType(_TolerantStrMixinEnum):
     ReAddedDevice = "readdedDevice"
     ReplaceDevice = "replaceDevice"
     UpdateDevice = "updateDevice"
+
+
+class SystemType(_TolerantStrMixinEnum):
+    Auto = "auto"
+    CCU = "ccu"
+    OpenCCULite = "openccu-lite"
 
 
 class ValueBehavior(_TolerantStrMixinEnum):

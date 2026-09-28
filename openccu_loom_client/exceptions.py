@@ -27,7 +27,7 @@ from typing import Any
 
 from aiohomematic.exceptions import BaseHomematicException
 
-from openccu_loom_client.wire.rest import Code, Problem
+from openccu_loom_client.wire.rest import Code, Feature, Problem
 
 # Stable problem-type URI prefix the daemon uses for its error catalogue.
 # See assets/openapi.yaml -> components.schemas.Problem.type.enum.
@@ -153,6 +153,24 @@ class LoomUnsupportedError(LoomHttpError):
     """The operation is not supported on this interface or device."""
 
 
+class LoomFeatureUnavailableError(LoomUnsupportedError):
+    """
+    The target central does not offer the feature the operation needs (422).
+
+    The daemon answers ``feature_unavailable`` (api 11.5.0) when a central's
+    system has no such thing, its credential lacks the scope, or it is not
+    ready yet. A subclass of :class:`LoomUnsupportedError`, so a handler
+    written for "not supported" keeps catching it; :attr:`feature` names the
+    central, the feature key, the reason and — for a missing scope — the
+    scope that would grant it.
+    """
+
+    @property
+    def feature(self) -> Feature | None:
+        """The ``feature`` member of the problem, when the daemon sent one."""
+        return self.problem.feature if self.problem is not None else None
+
+
 class LoomRateLimitedError(LoomHttpError):
     """Daemon refused due to throttling — retry after ``retry_after_seconds``."""
 
@@ -181,6 +199,7 @@ _CODE_TO_EXCEPTION: dict[Code, type[LoomHttpError]] = {
     Code.unauthorized: LoomAuthError,
     Code.forbidden: LoomForbiddenError,
     Code.unsupported: LoomUnsupportedError,
+    Code.feature_unavailable: LoomFeatureUnavailableError,
     Code.rate_limited: LoomRateLimitedError,
     Code.service_unready: LoomServiceUnreadyError,
     Code.upstream_unavailable: LoomUpstreamUnavailableError,

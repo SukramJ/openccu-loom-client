@@ -30,6 +30,7 @@ import pytest
 
 from openccu_loom_client.events import (
     AddonUpdateStateChangedEvent,
+    CentralFeaturesChangedEvent,
     CentralStateChangedEvent,
     CustomDataPointStateChangedEvent,
     DaemonStatusChangedEvent,
@@ -147,6 +148,25 @@ class TestDispatch:
         assert ev.parameter == "LEVEL"
         assert ev.payload.value == 0.5
         assert ev.seq == 1
+
+    def test_central_features_changed_payload_lands_typed(self) -> None:
+        # api 11.3.0: the complete feature set of one central, routed by its name.
+        env = self._envelope(
+            type_="central.features_changed",
+            payload={
+                "central": "box",
+                "system_type": "openccu-lite",
+                "features": {
+                    "system.reboot": {"available": False, "reason": "missing_scope", "scope": "power"},
+                    "device.control": {"available": True},
+                },
+            },
+        )
+        ev = event_from_envelope(envelope=env)
+        assert isinstance(ev, CentralFeaturesChangedEvent)
+        assert ev.event_key == "box"
+        assert ev.payload.features["system.reboot"].scope == "power"
+        assert ev.payload.features["device.control"].available is True
 
     def test_device_created_payload_lands_typed(self) -> None:
         env = self._envelope(
