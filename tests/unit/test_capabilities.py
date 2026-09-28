@@ -47,6 +47,18 @@ class TestCapabilityTokens:
         assert Capability.ADMIN_PERSISTENCE == "admin.persistence.v1"
         assert Capability.MQTT_RAW == "mqtt.raw.v1"
         assert Capability.ADDON_SELF_UPDATE == "addon_self_update"
+        assert Capability.CENTRAL_FEATURES == "central.features.v1"
+        assert Capability.SOUTH_OPENCCU_LITE == "south.openccu_lite.v1"
+
+    def test_the_12_0_tokens_are_not_always_on(self) -> None:
+        """
+        openccu-loom v0.79.0 always emits them, an older daemon never does.
+
+        ``ALWAYS_ON`` promises "every daemon", and this client talks to older
+        daemons too.
+        """
+        assert Capability.CENTRAL_FEATURES not in ALWAYS_ON
+        assert Capability.SOUTH_OPENCCU_LITE not in ALWAYS_ON
 
     def test_tokens_are_unique(self) -> None:
         """No two names may wrap the same token — that would make one of them dead."""

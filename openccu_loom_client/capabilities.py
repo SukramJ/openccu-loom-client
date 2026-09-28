@@ -39,6 +39,16 @@ class Capability(StrEnum):
     WS_BROADCASTS = "ws.broadcasts.v1"
     PROBLEM_DETAILS = "errors.problem_details.v1"
 
+    # Always emitted from openccu-loom v0.79.0 (api 12.0.0) on; an older
+    # daemon does not send them, so they are not part of ALWAYS_ON.
+    #: Every central reports its ``features`` on ``GET /system/ccu``, and
+    #: an operation a central does not offer answers
+    #: ``422 feature_unavailable``
+    #: (:class:`~openccu_loom_client.exceptions.LoomFeatureUnavailableError`).
+    CENTRAL_FEATURES = "central.features.v1"
+    #: A central can be an openccu-lite system (``system_type``
+    #: ``openccu-lite``).
+    SOUTH_OPENCCU_LITE = "south.openccu_lite.v1"
     # Emitted when the matching subsystem is configured.
     ALARM = "alarm.v1"
     HISTORY = "history.v1"

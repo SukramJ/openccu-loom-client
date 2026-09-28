@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from openccu_loom_client.model.device_client import DeviceClient
 from openccu_loom_client.operations.devices import DevicesOperations
-from openccu_loom_client.wire.rest import DeviceAvailability, DeviceFirmware, DeviceSummary
+from openccu_loom_client.wire.rest import DeviceAvailability, DeviceFirmware, DeviceSummary, TaxonomyAssignment
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -185,6 +185,19 @@ class Device:
     def rooms(self) -> tuple[str, ...]:
         """Defensive tuple view so callers can't mutate the wire model."""
         return tuple(self._summary.rooms or ())
+
+    @property
+    def taxonomy(self) -> tuple[TaxonomyAssignment, ...]:
+        """
+        Return the rooms and functions the device itself is assigned to.
+
+        The path-carrying twin of :attr:`rooms`: names are not unique once
+        nodes nest (an openccu-lite system can hold ``eg/bad`` and
+        ``og/bad``), paths are. Empty when the device has no direct
+        assignment — which a daemon older than api 12.0.0 (openccu-loom
+        v0.79.0) also reports, because it does not send the field.
+        """
+        return tuple(self._summary.taxonomy or ())
 
     @property
     def firmware_detail(self) -> DeviceFirmware | None:
