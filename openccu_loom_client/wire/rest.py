@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from enum import Enum, StrEnum
+from enum import Enum, IntEnum, StrEnum
 from typing import Any
 
 from pydantic import AnyUrl, AwareDatetime, BaseModel, ConfigDict, Field, SecretStr
@@ -40,6 +40,20 @@ class _TolerantEnum(Enum):
             return None
         member = object.__new__(cls)
         member._name_ = value
+        member._value_ = value
+        return member
+
+
+class _TolerantIntEnum(IntEnum):
+    """`IntEnum` that accepts wire values this client does not know yet."""
+
+    @classmethod
+    def _missing_(cls, value: object) -> _TolerantIntEnum | None:  # kwonly: disable
+        """Mint a pseudo-member carrying the raw integer instead of raising."""
+        if not isinstance(value, int) or isinstance(value, bool):
+            return None
+        member = int.__new__(cls, value)
+        member._name_ = str(value)
         member._value_ = value
         return member
 
@@ -319,6 +333,37 @@ class Problem(BaseModel):
         description="Set on a `feature_unavailable` problem (HTTP 422): the\noperation needs a feature the target central does not offer\nright now. The same key and reason appear in that central's\n`features` map on `GET /system/ccu`.\n",
     )
     errors: list[Error] | None = None
+
+
+class Days(_TolerantIntEnum):
+    integer_1 = 1
+    integer_7 = 7
+    integer_90 = 90
+
+
+class WarningSilenceRequest(BaseModel):
+    days: Days = Field(..., description="How long the warning stays muted for the calling user.")
+
+
+class Severity(_TolerantStrEnum):
+    warning = "warning"
+    error = "error"
+
+
+class Warning(BaseModel):
+    id: str = Field(
+        ..., description="Stable id, `<source>:<key>` (e.g. `health:mqtt`, `incident:xmlrpc`, `servicemsg:ccu1`)."
+    )
+    severity: Severity
+    central: str | None = Field(None, description="Set when the warning belongs to one central.")
+    message_key: str = Field(..., description="UI catalogue key that renders this row.")
+    args: dict[str, str] | None = Field(None, description="Interpolation values for `message_key`.")
+    silenced: bool = Field(..., description="Whether the CALLING user silenced this warning.")
+    silenced_until: AwareDatetime | None = None
+
+
+class WarningList(BaseModel):
+    items: list[Warning]
 
 
 class Info(BaseModel):
@@ -1295,7 +1340,7 @@ class Kind1(_TolerantStrEnum):
     discovery = "discovery"
 
 
-class Severity(_TolerantStrEnum):
+class Severity1(_TolerantStrEnum):
     info = "info"
     warning = "warning"
     error = "error"
@@ -1304,7 +1349,7 @@ class Severity(_TolerantStrEnum):
 class MatterDiagnosticEvent(BaseModel):
     at: AwareDatetime
     kind: Kind1
-    severity: Severity
+    severity: Severity1
     message: str = Field(..., description="One sentence an operator can act on.")
     detail: dict[str, str] | None = Field(None, description="Identifiers that make the message specific.")
 
@@ -1412,13 +1457,13 @@ class MatterMdnsService(BaseModel):
     txt: dict[str, str]
 
 
-class Severity1(_TolerantStrEnum):
+class Severity2(_TolerantStrEnum):
     error = "error"
     warning = "warning"
 
 
 class MatterMdnsFinding(BaseModel):
-    severity: Severity1
+    severity: Severity2
     code: str = Field(..., description="Stable identifier; the message is prose and may be reworded")
     message: str
     service: str | None = Field(
@@ -1981,7 +2026,7 @@ class EntityNameCatalogue(BaseModel):
     )
 
 
-class Severity2(_TolerantStrEnum):
+class Severity3(_TolerantStrEnum):
     ok = "ok"
     info = "info"
     warning = "warning"
@@ -2010,7 +2055,7 @@ class ActiveClass(_TolerantStrEnum):
 
 
 class SecurityStateChangedPayload(BaseModel):
-    severity: Severity2
+    severity: Severity3
     previous_severity: PreviousSeverity | None = Field(
         None,
         description="The severity the fold left. Omitted on the first report\nafter start-up, where there is no previous value.\n",
@@ -4302,7 +4347,7 @@ class SecurityFaultChangedPayload(BaseModel):
     fault_id: str
     class_: Class1 = Field(..., alias="class")
     reason: Reason2
-    severity: Severity2
+    severity: Severity3
     source: AlarmSource
     open: bool = Field(..., description="True when the fault was raised, false when it cleared.")
     acknowledged: bool = Field(
@@ -4319,7 +4364,7 @@ class SecurityFaultChangedPayload(BaseModel):
 
 class SecurityNotificationPayload(BaseModel):
     class_: Class1 = Field(..., alias="class")
-    severity: Severity2
+    severity: Severity3
     verb: Verb
     subject: str = Field(..., description="One line, at most 120 characters, suitable as a notification title.")
     message: str = Field(..., description="A full sentence naming cause, place and time.")
@@ -4504,7 +4549,7 @@ class Area(BaseModel):
 class SecurityClassState(BaseModel):
     class_: Class7 = Field(..., alias="class")
     active: bool
-    severity: Severity2 = Field(
+    severity: Severity3 = Field(
         ...,
         description="What this class contributes to the folded severity right now — not what its name implies. Colour the class from this, never from `active`: a low battery must not look like a fire. `intrusion` is arm-aware, so an active source whose zone is disarmed grades `info` rather than `alarm`; `warning` means the arm state behind at least one active source could not be resolved. `ok` while inactive.\n",
     )
@@ -4651,7 +4696,7 @@ class CentralProbeResult(BaseModel):
 
 
 class SecuritySnapshot(BaseModel):
-    severity: Severity2 = Field(..., description="The folded overall state.")
+    severity: Severity3 = Field(..., description="The folded overall state.")
     classes: list[SecurityClassState] = Field(
         ...,
         description="One entry per class the installation has sources for, in escalation order. A class without sources is absent, not inactive.\n",
