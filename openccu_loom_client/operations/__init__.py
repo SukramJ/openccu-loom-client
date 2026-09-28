@@ -26,6 +26,7 @@ from openccu_loom_client.operations.security import SecurityOperations
 from openccu_loom_client.operations.sessions import SessionsOperations
 from openccu_loom_client.operations.system import SystemOperations
 from openccu_loom_client.operations.visibility import VisibilityOperations
+from openccu_loom_client.operations.warnings import WarningsOperations
 
 __all__ = [
     # General
@@ -43,4 +44,5 @@ __all__ = [
     "SessionsOperations",
     "SystemOperations",
     "VisibilityOperations",
+    "WarningsOperations",
 ]

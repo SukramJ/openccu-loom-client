@@ -1,3 +1,26 @@
+# Version 2026.9.6 (2026-09-28)
+
+Adopts daemon api 12.2.0 (openccu-loom v0.80.0).
+
+- **Operator warnings.** `client.warnings` wraps the daemon's warning list
+  and its per-user silences. `list_warnings()` returns the active warnings
+  (unhealthy components, recent errors, service-message backlogs), each
+  saying whether the calling user silenced it. `silence_warning()` mutes one
+  for 1, 7 or 90 days, and `unsilence_warning()` lifts that again; both take
+  the warning's `warning_id`. A silence ends early when the warning's
+  condition clears. Silencing a warning that is no longer active raises
+  `LoomNotFoundError` — as does every call against a daemon older than
+  12.2.0, which has no such routes; a period the daemon does not offer
+  raises `LoomValidationError`.
+
+- **The regeneration handles the new shapes.** The silence period is the
+  first integer enum in the contract, and the tolerant-enum step refused it,
+  so the daemon-release regeneration failed; generated `IntEnum` classes now
+  accept an unknown integer the way the string enums accept an unknown
+  string. The warning schema is named `Warning`, like the Python builtin, so
+  the generated module carries a pylint pragma for that instead of a renamed
+  class.
+
 # Version 2026.9.5 (2026-09-28)
 
 Adopts daemon api 12.0.0 (openccu-loom v0.79.0), the release that adds
