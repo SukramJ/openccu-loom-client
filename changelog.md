@@ -1,3 +1,25 @@
+# Unreleased
+
+Adopts daemon api 12.3.0 (client token pairing, the daemon's ADR 0076).
+
+- **Token pairing.** `start_pairing()` asks the daemon for an API token
+  without anybody copying a secret: it commits to a random nonce, derives
+  the six-digit code (`PairingSession.code`) both sides compute, and
+  `PairingSession.wait()` long-polls until the daemon's administrator
+  types that code — the approved token arrives exactly once in the
+  result. Runs before any credential exists, so it takes host/port/tls
+  directly; the token then feeds `LoomConfig(auth=BearerAuth(...))`.
+  `viewer` and `operator` are pairable, `admin` never is. The code binds
+  to the TLS certificate this client saw: a daemon reporting a different
+  one raises `PairingFingerprintMismatchError` and withdraws the request.
+- **Branchable pairing errors.** `LoomPairingOffError` (503, switched
+  off — do not retry), `LoomPairingNotLocalError` (403) and
+  `LoomPairingSlowDownError` (429, poll slower; handled internally by
+  `wait()`), mapped from the daemon's new problem codes.
+- **`PairingRequestsChangedEvent`** binds the daemon's
+  `pairing.requests_changed` broadcast (pending count; the admin list
+  stays behind its admin route).
+
 # Version 2026.9.6 (2026-09-28)
 
 Adopts daemon api 12.2.0 (openccu-loom v0.80.0).
