@@ -33,6 +33,9 @@ from openccu_loom_client.exceptions import (
     LoomIncompatibleVersionError,
     LoomInternalError,
     LoomNotFoundError,
+    LoomPairingNotLocalError,
+    LoomPairingOffError,
+    LoomPairingSlowDownError,
     LoomRateLimitedError,
     LoomServiceUnreadyError,
     LoomTransportError,
@@ -41,6 +44,7 @@ from openccu_loom_client.exceptions import (
     LoomUpstreamUnavailableError,
     LoomValidationError,
 )
+from openccu_loom_client.pairing import PairingFingerprintMismatchError, PairingSession, start_pairing
 from openccu_loom_client.store import LoomStore
 
 __all__ = [
@@ -61,6 +65,9 @@ __all__ = [
     "LoomIncompatibleVersionError",
     "LoomInternalError",
     "LoomNotFoundError",
+    "LoomPairingNotLocalError",
+    "LoomPairingOffError",
+    "LoomPairingSlowDownError",
     "LoomRateLimitedError",
     "LoomServiceUnreadyError",
     "LoomStore",
@@ -69,6 +76,9 @@ __all__ = [
     "LoomUnsupportedOperationError",
     "LoomUpstreamUnavailableError",
     "LoomValidationError",
+    "PairingFingerprintMismatchError",
+    "PairingSession",
     "SessionAuth",
     "__version__",
+    "start_pairing",
 ]

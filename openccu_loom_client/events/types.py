@@ -63,6 +63,7 @@ from openccu_loom_client.wire.ws import (
     MatterFabric,
     MatterFabricRemovedPayload,
     OptimisticRollbackPayload,
+    PairingRequestsChangedPayload,
     ProgramChangedPayload,
     ProgramExecutedPayload,
     ScheduleChangedPayload,
@@ -261,6 +262,22 @@ class DaemonStatusChangedEvent(LoomEvent):
 
     payload: DaemonStatusPayload
     type_id: ClassVar[str] = "daemon_status.changed"
+
+
+@dataclass(slots=True, kw_only=True)
+class PairingRequestsChangedEvent(LoomEvent):
+    """
+    The daemon's pending client-pairing list changed (daemon api ≥ 12.3.0).
+
+    Daemon-level topic ``system.pairing``, no routing key. Carries only
+    the pending count — codes and request details stay behind the
+    admin-gated ``GET /pairing-requests``. A consumer showing an admin
+    surface refetches that list on this signal; this client's own
+    :func:`~openccu_loom_client.pairing.start_pairing` never needs it.
+    """
+
+    payload: PairingRequestsChangedPayload
+    type_id: ClassVar[str] = "pairing.requests_changed"
 
 
 @dataclass(slots=True, kw_only=True)
@@ -917,6 +934,7 @@ _EVENT_REGISTRY: Final[dict[str, tuple[Callable[..., LoomEvent], type[BaseModel]
     CentralReadinessChangedEvent.type_id: (CentralReadinessChangedEvent, CentralReadinessChangedPayload),
     SystemStatusChangedEvent.type_id: (SystemStatusChangedEvent, SystemStatusChangedPayload),
     DaemonStatusChangedEvent.type_id: (DaemonStatusChangedEvent, DaemonStatusPayload),
+    PairingRequestsChangedEvent.type_id: (PairingRequestsChangedEvent, PairingRequestsChangedPayload),
     SysvarChangedEvent.type_id: (SysvarChangedEvent, SysvarChangedPayload),
     ProgramExecutedEvent.type_id: (ProgramExecutedEvent, ProgramExecutedPayload),
     ProgramChangedEvent.type_id: (ProgramChangedEvent, ProgramChangedPayload),

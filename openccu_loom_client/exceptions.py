@@ -187,6 +187,35 @@ class LoomInternalError(LoomHttpError):
     """Daemon-internal failure that doesn't match any other category."""
 
 
+class LoomPairingOffError(LoomServiceUnreadyError):
+    """
+    Pairing is switched off on this daemon (503, ``pairing_off``).
+
+    An administrator enables it under ``north.rest.auth.pairing.enabled``
+    or creates a token manually — the attempt is over, do not retry.
+    """
+
+
+class LoomPairingNotLocalError(LoomForbiddenError):
+    """
+    The daemon only pairs with local-network callers (403, ``pairing_not_local``).
+
+    Judged by the connection's peer address on the daemon side; behind a
+    reverse proxy the proxy is the peer, so this surfacing usually means
+    the daemon was asked across a route it considers public.
+    """
+
+
+class LoomPairingSlowDownError(LoomRateLimitedError):
+    """
+    Polling faster than the announced interval (429, ``pairing_slow_down``).
+
+    Unlike its parent this is not "give up": wait the announced interval
+    (or ``retry_after_seconds``) and poll again. :func:`~openccu_loom_client.pairing.start_pairing`
+    handles it internally; it only reaches callers driving the protocol by hand.
+    """
+
+
 # URI -> exception class. The mapping is exhaustive against
 # `openccu_loom_client.wire.rest.Code`; tests assert that every Code enum
 # value has a binding here so the mapping stays in sync with the
@@ -204,6 +233,9 @@ _CODE_TO_EXCEPTION: dict[Code, type[LoomHttpError]] = {
     Code.service_unready: LoomServiceUnreadyError,
     Code.upstream_unavailable: LoomUpstreamUnavailableError,
     Code.internal: LoomInternalError,
+    Code.pairing_off: LoomPairingOffError,
+    Code.pairing_not_local: LoomPairingNotLocalError,
+    Code.pairing_slow_down: LoomPairingSlowDownError,
 }
 
 
