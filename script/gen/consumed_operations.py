@@ -52,7 +52,14 @@ REQUEST_HELPERS = frozenset({"request", "_request_list"})
 # from transport/http.py before any façade exists — so it is the one operation
 # whose removal would break this client absolutely, and the AST walk below
 # cannot see it.
-EXTRA_OPERATIONS = ("GET /info",)
+EXTRA_OPERATIONS = (
+    "GET /info",
+    # The pairing flow (pairing.py) runs before any façade or credential
+    # exists, so the AST walk over operations/ cannot see its calls.
+    "POST /pairing",
+    "GET /pairing/{}",
+    "DELETE /pairing/{}",
+)
 
 
 def normalise(path: str) -> str:
