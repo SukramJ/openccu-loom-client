@@ -1,3 +1,17 @@
+# Unreleased
+
+- **Compat: device removal takes aiohomematic's call shape.**
+  `delete_device(*, interface_id, device_address)` — HA's device-removal
+  hook calls exactly this and previously raised TypeError before the
+  daemon was ever asked; the daemon routes by address alone, so
+  `interface_id` is accepted and unused.
+- **Compat: a 403 on the backup trigger is no longer swallowed.**
+  `create_backup_and_download()` re-raises `LoomForbiddenError` (an
+  operator-role token hitting the admin-tier route) instead of degrading
+  it to `None`, so consumers can say "needs an admin token" instead of a
+  generic failure. Every other trigger failure still yields `None`,
+  matching aiohomematic.
+
 # Version 2026.9.7 (2026-09-29)
 
 Adopts daemon api 12.3.0 (openccu-loom v0.81.0): client token pairing, the daemon's ADR 0076.

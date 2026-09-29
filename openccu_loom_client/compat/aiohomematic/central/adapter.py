@@ -98,7 +98,7 @@ from openccu_loom_client.events import (
     AuthFailedEvent as LoomAuthFailedEvent,
     ConnectionStateChangedEvent as LoomConnectionStateChangedEvent,
 )
-from openccu_loom_client.exceptions import BaseLoomException, LoomHttpError, LoomNotFoundError
+from openccu_loom_client.exceptions import BaseLoomException, LoomForbiddenError, LoomHttpError, LoomNotFoundError
 from openccu_loom_client.wire.enums import CentralState, DataPointCategory
 from openccu_loom_client.wire.rest import BackupEntry
 
@@ -221,8 +221,17 @@ class _DeviceCoordinator:
     def devices(self) -> Iterable[Device]:
         return self._client.store.devices
 
-    async def delete_device(self, *, address: str) -> None:
-        await self._client.devices.delete_device(address=address)
+    async def delete_device(self, *, interface_id: str, device_address: str) -> None:
+        """
+        Delete a device, in aiohomematic's call shape.
+
+        aiohomematic routes by (interface_id, device_address); the daemon
+        routes by address alone, so interface_id is accepted for call-shape
+        parity and unused. HA's device-removal hook calls exactly this
+        shape (homematicip_local __init__.py).
+        """
+        del interface_id
+        await self._client.devices.delete_device(address=device_address)
 
     async def refresh_firmware_data(self) -> None:
         # The daemon owns the firmware cache; a global re-pull is the
@@ -1860,6 +1869,12 @@ class LoomCentralAdapter:
         """
         try:
             trigger = await self._client.backup.trigger_backup()
+        except LoomForbiddenError:
+            # An operator-role token hitting the admin-tier backup route —
+            # a permission fact, not a transient failure. Re-raised so the
+            # HA surfaces can say "needs an admin token on the daemon"
+            # instead of a generic "backup failed".
+            raise
         except Exception:  # noqa: BLE001 — a failed trigger is reported as None, like aiohomematic
             _LOGGER.warning("create_backup: trigger failed")
             return None
