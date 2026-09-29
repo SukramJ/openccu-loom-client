@@ -552,8 +552,17 @@ class _IncidentStore:
         scheduled on the adapter's looper. A client-side no-op left the list
         unchanged and the panel's "clear" button dead.
         """
+
+        async def _clear() -> None:
+            try:
+                await self._client.diagnostics.clear_incidents()
+            except LoomForbiddenError:
+                _LOGGER.warning("clear_incidents refused: the daemon token lacks admin rights (operator role)")
+            except BaseLoomException as exc:
+                _LOGGER.warning("clear_incidents failed: %s", exc)
+
         self._looper.create_task(
-            target=self._client.diagnostics.clear_incidents(),
+            target=_clear(),
             name="loom-clear-incidents",
         )
 
