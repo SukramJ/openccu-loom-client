@@ -1,6 +1,6 @@
-# Unreleased
+# Version 2026.9.7 (2026-09-29)
 
-Adopts daemon api 12.3.0 (client token pairing, the daemon's ADR 0076).
+Adopts daemon api 12.3.0 (openccu-loom v0.81.0): client token pairing, the daemon's ADR 0076.
 
 - **Token pairing.** `start_pairing()` asks the daemon for an API token
   without anybody copying a secret: it commits to a random nonce, derives
