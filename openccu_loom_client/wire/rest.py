@@ -281,6 +281,9 @@ class Type(_TolerantEnum):
     https___openccu_loom_dev_errors_service_unready = "https://openccu-loom.dev/errors/service_unready"
     https___openccu_loom_dev_errors_upstream_unavailable = "https://openccu-loom.dev/errors/upstream_unavailable"
     https___openccu_loom_dev_errors_feature_unavailable = "https://openccu-loom.dev/errors/feature_unavailable"
+    https___openccu_loom_dev_errors_pairing_off = "https://openccu-loom.dev/errors/pairing_off"
+    https___openccu_loom_dev_errors_pairing_not_local = "https://openccu-loom.dev/errors/pairing_not_local"
+    https___openccu_loom_dev_errors_pairing_slow_down = "https://openccu-loom.dev/errors/pairing_slow_down"
 
 
 class Code(_TolerantStrEnum):
@@ -296,6 +299,9 @@ class Code(_TolerantStrEnum):
     service_unready = "service_unready"
     upstream_unavailable = "upstream_unavailable"
     feature_unavailable = "feature_unavailable"
+    pairing_off = "pairing_off"
+    pairing_not_local = "pairing_not_local"
+    pairing_slow_down = "pairing_slow_down"
 
 
 class Reason(_TolerantStrEnum):
@@ -345,6 +351,88 @@ class Days(_TolerantIntEnum):
 
 class WarningSilenceRequest(BaseModel):
     days: Days = Field(..., description="How long the warning stays muted for the calling user.")
+
+
+class PairingRequestsChangedPayload(BaseModel):
+    pending: int
+
+
+class Role(_TolerantStrEnum):
+    viewer = "viewer"
+    operator = "operator"
+
+
+class PairingAsk(BaseModel):
+    app: str = Field(..., description="Short app id (letters, digits, `. _ -`, ≤48 chars).")
+    app_version: str | None = None
+    instance: str | None = Field(None, description="Which installation of the app, e.g. a hostname.")
+    name: str | None = Field(
+        None, description="Human-readable name the admin card shows; defaults to app (+ instance)."
+    )
+    role: Role = Field(..., description="The role the token shall carry. `admin` is never pairable.")
+    purpose: str | None = Field(None, description="One sentence the administrator reads next to the request.")
+    commit: str = Field(
+        ..., description="Hex SHA-256 of the client's random nonce (≥16 bytes), revealed with the first poll."
+    )
+
+
+class PairingAnswer(BaseModel):
+    id: str
+    poll: str = Field(
+        ...,
+        description="The request's own secret; sent as `Authorization Pairing <secret>` on poll and withdraw, never in a URL.",
+    )
+    nonce: str = Field(..., description="Hex; the server's half of the code derivation.")
+    expires_in: int
+    interval: int = Field(..., description="Minimum seconds between plain polls.")
+    fingerprint: str = Field(
+        ...,
+        description="Hex SHA-256 of the certificate DER the daemon serves; empty over plain HTTP. A client that saw a different certificate must abort — the code would authenticate the interceptor.",
+    )
+
+
+class State(_TolerantStrEnum):
+    pending = "pending"
+    approved = "approved"
+    rejected = "rejected"
+    expired = "expired"
+
+
+class PairingResult(BaseModel):
+    state: State
+    token: str | None = Field(
+        None, description="The minted API token; present exactly once, on the poll that first sees the approval."
+    )
+    subject: str | None = None
+    role: str | None = None
+
+
+class PairingView(BaseModel):
+    id: str
+    app: str
+    app_version: str | None = None
+    instance: str | None = None
+    name: str
+    address: str
+    role: str
+    purpose: str | None = None
+    code: str = Field(
+        ..., description="The six digits the asking client displays; the administrator compares and types them."
+    )
+    fingerprint: str | None = None
+    created: AwareDatetime
+    expires: AwareDatetime
+    look_alike: bool | None = Field(
+        None, description="Another pending request shares this one's address or app+instance — compare carefully."
+    )
+
+
+class PairingRequestList(BaseModel):
+    items: list[PairingView]
+
+
+class PairingApproveRequest(BaseModel):
+    code: str = Field(..., description="The six digits read on the asking client.")
 
 
 class Severity(_TolerantStrEnum):
@@ -1264,7 +1352,7 @@ class Function(BaseModel):
     device_count: int
 
 
-class Role(_TolerantStrEnum):
+class Role1(_TolerantStrEnum):
     admin = "admin"
     operator = "operator"
     viewer = "viewer"
@@ -1280,7 +1368,7 @@ class Scheme(_TolerantStrEnum):
 
 class Identity(BaseModel):
     subject: str
-    role: Role
+    role: Role1
     scheme: Scheme | None = Field(
         None,
         description="How the request authenticated. `ingress` is the Home Assistant Ingress passthrough the add-on deployment uses.",
@@ -1293,14 +1381,14 @@ class Identity(BaseModel):
 
 class UserListEntry(BaseModel):
     username: str
-    role: Role
+    role: Role1
 
 
 class TokenListEntry(BaseModel):
     id: str = Field(..., description="Stable management identifier (16 hex chars from sha256 of the token).")
     fingerprint: str = Field(..., description="Last six characters of the token; full value is never exposed")
     subject: str
-    role: Role
+    role: Role1
 
 
 class Query(BaseModel):
@@ -1333,7 +1421,7 @@ class CreateTokenResponse(BaseModel):
     token: str = Field(..., description="Raw bearer token. URL-safe base64 (~43 chars).")
     fingerprint: str
     subject: str
-    role: Role
+    role: Role1
 
 
 class Kind1(_TolerantStrEnum):
@@ -1934,7 +2022,7 @@ class AlarmTriggeredPayload(BaseModel):
     )
 
 
-class State(_TolerantStrEnum):
+class State1(_TolerantStrEnum):
     disarmed = "disarmed"
     arming = "arming"
     pending = "pending"
@@ -1951,7 +2039,7 @@ class AlarmPanelEntity(BaseModel):
     zone_id: str
     name: str
     category: str
-    state: State
+    state: State1
     supported_modes: list[str] | None = None
     available: bool
     master: bool | None = None
@@ -2439,7 +2527,7 @@ class ConfigSnapshotResponse(BaseModel):
     )
 
 
-class Role4(_TolerantStrEnum):
+class Role5(_TolerantStrEnum):
     viewer = "viewer"
     operator = "operator"
     admin = "admin"
@@ -2448,17 +2536,17 @@ class Role4(_TolerantStrEnum):
 class UserCreate(BaseModel):
     username: str = Field(..., description="Login name; must be unique.")
     password: str = Field(..., description="Plaintext password; the daemon hashes it before storage.")
-    role: Role4
+    role: Role5
 
 
 class UserUpdate(BaseModel):
     password: str | None = Field(None, description="New plaintext password. Omit to leave unchanged.")
-    role: Role4 | None = Field(None, description="New role. Omit to leave unchanged.")
+    role: Role5 | None = Field(None, description="New role. Omit to leave unchanged.")
 
 
 class UserSummary(BaseModel):
     subject: str = Field(..., description="Login name / stable identity key.")
-    role: Role4
+    role: Role5
     created_at: AwareDatetime
     last_seen_at: AwareDatetime | None = Field(
         None, description="Last successful authentication time. Absent when never authenticated."
@@ -2467,7 +2555,7 @@ class UserSummary(BaseModel):
 
 class TokenCreate(BaseModel):
     subject: str = Field(..., description='Logical owner of the token (e.g. "homeassistant", "ci-runner").')
-    role: Role4
+    role: Role5
     expires_in_days: int | None = Field(
         None,
         description="Optional token lifetime in days. When set and positive, the token\nis rejected after this many days. Omitted or non-positive creates a\ntoken that never expires.\n",
@@ -2484,7 +2572,7 @@ class TokenCreated(BaseModel):
 class TokenSummary(BaseModel):
     fingerprint: str = Field(..., description="Stable opaque identifier used as the delete key.")
     subject: str
-    role: Role4
+    role: Role5
     created_at: AwareDatetime
     last_seen_at: AwareDatetime | None = Field(
         None, description="Last successful authentication time. Absent when never used."
@@ -2569,7 +2657,7 @@ class CentralPairingStarted(BaseModel):
     expires_in: int = Field(..., description="Seconds the pairing request stays valid.")
 
 
-class State1(_TolerantStrEnum):
+class State2(_TolerantStrEnum):
     pending = "pending"
     approved = "approved"
     rejected = "rejected"
@@ -2578,7 +2666,7 @@ class State1(_TolerantStrEnum):
 
 
 class CentralPairingStatus(BaseModel):
-    state: State1
+    state: State2
     scopes: list[str] | None = Field(None, description="The scopes an approved pairing granted.")
     error: str | None = None
 
@@ -3012,7 +3100,7 @@ class RoomEntry(BaseModel):
     )
 
 
-class State2(_TolerantStrEnum):
+class State3(_TolerantStrEnum):
     idle = "idle"
     checking = "checking"
     downloading = "downloading"
@@ -3031,7 +3119,7 @@ class AddonUpdateStatus(BaseModel):
     last_check: AwareDatetime | None = Field(
         None, description="Time of the last successful check; absent before the first."
     )
-    state: State2 = Field(
+    state: State3 = Field(
         ...,
         description="Lifecycle of the updater. `installing` is terminal from the caller's perspective — the daemon restarts on success.",
     )
@@ -3184,7 +3272,7 @@ class AlarmModeReadiness(BaseModel):
     warnings: list[str] | None = Field(None, description="Sensor ids with non-blocking health warnings for this mode.")
 
 
-class State3(_TolerantStrEnum):
+class State4(_TolerantStrEnum):
     disarmed = "disarmed"
     arming = "arming"
     armed = "armed"
@@ -3211,7 +3299,7 @@ class Countdown(BaseModel):
 class AlarmZoneStatus(BaseModel):
     id: str
     name: str
-    state: State3 = Field(..., description="Arm-state-machine state.")
+    state: State4 = Field(..., description="Arm-state-machine state.")
     mode: Mode | None = Field(None, description="Currently active (or, while arming, target) protection mode.")
     bypassed: list[str] | None = Field(None, description="Sensor ids currently bypassed for the active/pending arm.")
     incident: Incident1 | None = Field(
@@ -3302,13 +3390,13 @@ class AlarmCodeRequest(BaseModel):
     enabled: bool
 
 
-class State4(_TolerantStrEnum):
+class State5(_TolerantStrEnum):
     arming = "arming"
     armed = "armed"
 
 
 class AlarmArmAccepted(BaseModel):
-    state: State4 = Field(..., description="Resulting zone state.")
+    state: State5 = Field(..., description="Resulting zone state.")
     bypassed: list[str] | None = Field(None, description="Sensor ids actually bypassed for this arm.")
     exit_delay_s: int | None = Field(
         None, description="Exit delay in seconds the zone is now counting down; 0 when armed immediately."
@@ -3607,7 +3695,7 @@ class CreateSysvarRequest(BaseModel):
 
 class CreateTokenRequest(BaseModel):
     subject: str = Field(..., description='Logical owner of the token (e.g. "homeassistant", "ci-runner").')
-    role: Role4
+    role: Role5
 
 
 class DetermineParameterRequest(BaseModel):
@@ -3861,7 +3949,7 @@ class PutConfigSectionResponse(BaseModel):
     )
 
 
-class State5(BaseModel):
+class State6(BaseModel):
     state: str | None = Field(None, description="State-machine bucket (e.g. connected, degraded, disconnected).")
     closed: bool | None = Field(None, description="True once the client has been shut down.")
     total_requests: int | None = None
@@ -3877,7 +3965,7 @@ class ReliabilityState(BaseModel):
     circuit_state: int | None = Field(
         None, description="Circuit-breaker state code: 0 = closed, 1 = open, 2 = half-open.\n"
     )
-    state: State5 | None = Field(
+    state: State6 | None = Field(
         None, description="Live InterfaceClient state. Omitted when the client exposes none.\n"
     )
 
