@@ -1,4 +1,4 @@
-# Unreleased
+# Version 2026.9.8 (2026-09-29)
 
 - **Compat: device removal takes aiohomematic's call shape.**
   `delete_device(*, interface_id, device_address)` — HA's device-removal
