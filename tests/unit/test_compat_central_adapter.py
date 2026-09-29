@@ -35,7 +35,7 @@ from openccu_loom_client.compat.aiohomematic.central.adapter import (
     _ui_schema_to_parameter_data,
 )
 from openccu_loom_client.events import ConnectionStateChangedEvent as LoomConnectionStateChangedEvent
-from openccu_loom_client.exceptions import LoomConflictError, LoomNotFoundError
+from openccu_loom_client.exceptions import LoomConflictError, LoomForbiddenError, LoomNotFoundError
 from openccu_loom_client.wire import DAEMON_API_VERSION
 from openccu_loom_client.wire.enums import DataPointCategory
 from openccu_loom_client.wire.rest import AlarmMessage, DataPointSummary, Kind2 as Kind, Link, ServiceMessage, Snapshot
@@ -1396,4 +1396,58 @@ class TestCreateBackupAndDownload:
     async def test_returns_none_when_the_trigger_yields_no_id(self, connected) -> None:
         central, mock_daemon = connected
         mock_daemon.post(f"{_BASE}/backups", payload={}, status=202)
+        assert await central.create_backup_and_download() is None
+
+
+class TestDeleteDeviceCallShape:
+    """The adapter takes aiohomematic's (interface_id, device_address) shape."""
+
+    async def test_delete_device_routes_by_address(self, connected) -> None:
+        central, mock_daemon = connected
+        mock_daemon.delete(f"{_BASE}/devices/ABC0000001", status=204)
+
+        await central.device_coordinator.delete_device(interface_id="HmIP-RF", device_address="ABC0000001")
+
+        deletes = [r for r in mock_daemon.requests if r.method == "DELETE"]
+        assert [r.path for r in deletes] == [f"{_BASE}/devices/ABC0000001"]
+
+    async def test_delete_device_propagates_a_403(self, connected) -> None:
+        central, mock_daemon = connected
+        mock_daemon.delete(
+            f"{_BASE}/devices/ABC0000001",
+            status=403,
+            payload={
+                "type": "https://openccu-loom.dev/errors/forbidden",
+                "title": "Forbidden",
+                "status": 403,
+                "code": "forbidden",
+            },
+            content_type="application/problem+json",
+        )
+        with pytest.raises(LoomForbiddenError):
+            await central.device_coordinator.delete_device(interface_id="HmIP-RF", device_address="ABC0000001")
+
+
+class TestBackupForbiddenIsNotSwallowed:
+    """A 403 on the backup trigger re-raises instead of degrading to None."""
+
+    async def test_trigger_403_raises(self, connected) -> None:
+        central, mock_daemon = connected
+        mock_daemon.post(
+            f"{_BASE}/backups",
+            status=403,
+            payload={
+                "type": "https://openccu-loom.dev/errors/forbidden",
+                "title": "Forbidden",
+                "status": 403,
+                "code": "forbidden",
+            },
+            content_type="application/problem+json",
+        )
+        with pytest.raises(LoomForbiddenError):
+            await central.create_backup_and_download()
+
+    async def test_other_trigger_failures_still_yield_none(self, connected) -> None:
+        central, mock_daemon = connected
+        mock_daemon.post(f"{_BASE}/backups", status=500, payload={"status": 500})
         assert await central.create_backup_and_download() is None

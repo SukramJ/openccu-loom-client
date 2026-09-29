@@ -190,6 +190,7 @@ async def start_pairing(
     port: int | None = None,
     tls: bool = True,
     verify_tls: bool = True,
+    base_path: str = DEFAULT_BASE_PATH,
     app_version: str = "",
     instance: str = "",
     name: str = "",
@@ -207,7 +208,7 @@ async def start_pairing(
     """
     resolved_port = port if port is not None else (DEFAULT_HTTPS_PORT if tls else DEFAULT_HTTP_PORT)
     scheme = "https" if tls else "http"
-    base = f"{scheme}://{host}:{resolved_port}{DEFAULT_BASE_PATH}"
+    base = f"{scheme}://{host}:{resolved_port}{base_path}"
     client_nonce = secrets.token_bytes(32)
     commit = hashlib.sha256(client_nonce).hexdigest()
     ask = {
