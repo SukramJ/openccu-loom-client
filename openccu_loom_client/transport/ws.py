@@ -541,14 +541,23 @@ class WsTransport:
     @staticmethod
     def _is_gate_bounce(*, exc: aiohttp.WSServerHandshakeError) -> bool:
         """
-        Tell whether the box gate redirected the upgrade request.
+        Tell whether the box gate turned the upgrade request away.
 
-        ``ws_connect`` follows redirects and offers no switch to stop it, so
-        the gate's 3xx usually arrives as the *final* page's status (the box's
-        login page, a 200) with the redirect in ``history``. Both shapes count.
+        Two shapes, measured against a real box (daemon 0.83.0 round): a
+        non-browser caller — which a WS upgrade is — gets a plain 401
+        **text/html** error page, while an ``Accept: text/html`` caller gets
+        a 302 to the shell login. ``ws_connect`` follows redirects and
+        offers no switch to stop it, so the 302 shape usually arrives as
+        the final page's status with the redirect in ``history``. A genuine
+        daemon 401 is distinguishable by contract: the daemon answers every
+        error as ``application/problem+json``, so a 401 whose content type
+        is anything else cannot be its answer.
         """
         if HTTPStatus.MULTIPLE_CHOICES <= exc.status < HTTPStatus.BAD_REQUEST:
             return True
+        if exc.status == HTTPStatus.UNAUTHORIZED:
+            content_type = exc.headers.get("Content-Type", "") if exc.headers is not None else ""
+            return not content_type.startswith("application/problem+json")
         return any(HTTPStatus.MULTIPLE_CHOICES <= hop.status < HTTPStatus.BAD_REQUEST for hop in exc.history)
 
     @staticmethod

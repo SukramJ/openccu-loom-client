@@ -611,7 +611,7 @@ class HttpTransport:
                 # follow one so the auth header can't leak to another host.
                 allow_redirects=False,
             ) as resp:
-                self._raise_on_gate_bounce(status=resp.status)
+                self._raise_on_gate_bounce(status=resp.status, content_type=resp.headers.get("Content-Type", ""))
                 raw = await self._read_capped(resp=resp, url=url, max_bytes=max_bytes)
                 if HTTPStatus.OK <= resp.status < HTTPStatus.MULTIPLE_CHOICES:
                     return raw
@@ -711,7 +711,7 @@ class HttpTransport:
                 # Authorization header — and the archive — to another host.
                 allow_redirects=False,
             ) as resp:
-                self._raise_on_gate_bounce(status=resp.status)
+                self._raise_on_gate_bounce(status=resp.status, content_type=resp.headers.get("Content-Type", ""))
                 if resp.status == HTTPStatus.NO_CONTENT:
                     return None
                 raw = await resp.read()
@@ -742,17 +742,26 @@ class HttpTransport:
             raise LoomTransportError(msg)
         return self._session
 
-    def _raise_on_gate_bounce(self, *, status: int) -> None:
+    def _raise_on_gate_bounce(self, *, status: int, content_type: str) -> None:
         """
-        Flag a redirect as a box-gate bounce in ingress mode.
+        Flag a gate bounce in ingress mode.
 
-        Behind an openccu-lite box a 3xx comes from the gate, never from the
-        daemon: the gate answers a redirect to the box's login page whenever
-        the session it reads from ``?sid=`` is missing or no longer valid,
-        and the request goes no further. Outside ingress mode this is a no-op
-        and a 3xx keeps its old treatment as an HTTP error.
+        Behind an openccu-lite box the gate answers a request whose ``?sid=``
+        is missing or no longer valid itself — the request never reaches the
+        daemon. Measured against a real box (daemon 0.83.0 round): browsers
+        (``Accept: text/html``) get a 302 to the shell login, every other
+        caller gets a plain 401 **text/html** error page. A genuine daemon
+        401 is distinguishable by contract: the daemon answers every error
+        as ``application/problem+json`` (the ``errors.problem_details.v1``
+        capability), so a 401 without that content type cannot be its
+        answer. Outside ingress mode this is a no-op and both shapes keep
+        their old treatment as HTTP errors.
         """
-        if self._box_gate is not None and HTTPStatus.MULTIPLE_CHOICES <= status < HTTPStatus.BAD_REQUEST:
+        if self._box_gate is None:
+            return
+        if HTTPStatus.MULTIPLE_CHOICES <= status < HTTPStatus.BAD_REQUEST:
+            raise _GateBounceError(status=status)
+        if status == HTTPStatus.UNAUTHORIZED and not content_type.startswith("application/problem+json"):
             raise _GateBounceError(status=status)
 
     async def _gated[T](
@@ -838,7 +847,7 @@ class HttpTransport:
                 allow_redirects=False,
                 **extra,
             ) as resp:
-                self._raise_on_gate_bounce(status=resp.status)
+                self._raise_on_gate_bounce(status=resp.status, content_type=resp.headers.get("Content-Type", ""))
                 if resp.status == HTTPStatus.NO_CONTENT:
                     return None
                 raw = await resp.read()

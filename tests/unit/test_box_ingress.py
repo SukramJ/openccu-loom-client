@@ -26,7 +26,9 @@ from typing import Any
 
 import aiohttp
 from aiohttp import web
+from multidict import CIMultiDict, CIMultiDictProxy
 import pytest
+from yarl import URL
 
 from openccu_loom_client import (
     BearerAuth,
@@ -84,6 +86,7 @@ class GateRequest:
 class _Stub:
     status: int = 200
     payload: Any = None
+    content_type: str | None = None
 
 
 @dataclass(slots=True)
@@ -102,6 +105,10 @@ class FakeBoxGate:
     # Simulates a box account without access to the add-on: every session,
     # however fresh, is bounced.
     refuse_all: bool = False
+    # Plays an older box whose gate redirects EVERY caller to the shell
+    # login, browsers and API clients alike (the shape the occulited
+    # checkout's gate script documents).
+    legacy_redirects: bool = False
     _responses: dict[tuple[str, str], deque[_Stub]] = field(default_factory=dict)
     _active_ws: list[web.WebSocketResponse] = field(default_factory=list)
     _ws_accepted: asyncio.Condition = field(default_factory=asyncio.Condition)
@@ -109,9 +116,13 @@ class FakeBoxGate:
 
     # ---- registration ----
 
-    def add_response(self, method: str, path: str, *, payload: Any = None, status: int = 200) -> None:
+    def add_response(
+        self, method: str, path: str, *, payload: Any = None, status: int = 200, content_type: str | None = None
+    ) -> None:
         """Queue a daemon response for ``method path`` (daemon-side path, prefix stripped)."""
-        self._responses.setdefault((method.upper(), path), deque()).append(_Stub(status=status, payload=payload))
+        self._responses.setdefault((method.upper(), path), deque()).append(
+            _Stub(status=status, payload=payload, content_type=content_type)
+        )
 
     def invalidate_all(self) -> None:
         """Expire every live session, as a box restart or a session timeout would."""
@@ -207,7 +218,13 @@ class FakeBoxGate:
         sid = request.query.get("sid")
         if self.refuse_all or sid is None or sid not in self.sids:
             rec.bounced = True
-            raise web.HTTPFound(location=f"{_SHELL_LOGIN}?next={_PREFIX}/")
+            # Measured against a real openccu-lite box (0.83.0 round): the
+            # gate redirects BROWSERS (Accept: text/html) to the shell login
+            # and answers every other caller — API clients, WS upgrades —
+            # with a plain 401 text/html error page instead.
+            if self.legacy_redirects or "text/html" in request.headers.get("Accept", ""):
+                raise web.HTTPFound(location=f"{_SHELL_LOGIN}?next={_PREFIX}/")
+            return web.Response(status=401, text="<html>401 Unauthorized</html>", content_type="text/html")
         forwarded = {k: v for k, v in request.headers.items() if k.lower() != "x-occulite-session"}
         forwarded["X-Occulite-Session"] = sid
         rec.forwarded_headers = forwarded
@@ -220,6 +237,8 @@ class FakeBoxGate:
         stub = queue.popleft() if len(queue) > 1 else queue[0]
         if stub.payload is None:
             return web.Response(status=stub.status)
+        if stub.content_type is not None:
+            return web.json_response(stub.payload, status=stub.status, content_type=stub.content_type)
         return web.json_response(stub.payload, status=stub.status)
 
     async def _websocket(self, *, request: web.Request, sid: str) -> web.WebSocketResponse:
@@ -375,6 +394,35 @@ class TestHttpThroughGate:
         assert not any(r.path.startswith(_PREFIX) for r in gate.requests)
         await transport.close()
 
+    async def test_relogin_works_through_a_legacy_redirecting_gate(
+        self, gate: FakeBoxGate, http: HttpTransport
+    ) -> None:
+        # Older boxes redirect every caller; the 3xx bounce shape must keep
+        # working next to the 401 shape current boxes answer API clients.
+        gate.legacy_redirects = True
+        gate.add_response("GET", "/api/v1/things", payload={"ok": True})
+        gate.invalidate_all()
+        assert await http.request(method="GET", path="/things") == {"ok": True}
+        assert gate.logins == 2
+
+    async def test_daemon_problem_401_is_not_a_bounce(self, gate: FakeBoxGate, http: HttpTransport) -> None:
+        # A 401 the DAEMON answers travels through the gate with a valid sid
+        # and is application/problem+json by contract. It must surface as the
+        # daemon auth error it is — not trigger a box relogin.
+        gate.add_response(
+            "GET",
+            "/api/v1/things",
+            payload={"type": "about:blank", "title": "Unauthorized", "status": 401},
+            status=401,
+            content_type="application/problem+json",
+        )
+        logins_before = gate.logins
+        with pytest.raises(LoomHttpError) as err:
+            await http.request(method="GET", path="/things")
+        assert err.value.status == 401
+        assert not isinstance(err.value, LoomBoxGateError)
+        assert gate.logins == logins_before
+
     async def test_unreachable_box_login_is_a_transport_error(self) -> None:
         # Nothing listens on port 1. An unreachable box must surface as the
         # transport condition it is — retryable — and never as the
@@ -501,6 +549,21 @@ class TestWsThroughGate:
             assert gate.bounced(path="/api/v1/events") == 2
         finally:
             await ws._session.close()
+
+    def test_ws_bounce_detector_tells_gate_401_from_daemon_401(self) -> None:
+        def handshake_error(*, status: int, content_type: str | None) -> aiohttp.WSServerHandshakeError:
+            url = URL("wss://box.local/addons/loom/api/v1/events")
+            info = aiohttp.RequestInfo(url=url, method="GET", headers=CIMultiDictProxy(CIMultiDict()), real_url=url)
+            headers = CIMultiDictProxy(CIMultiDict({"Content-Type": content_type} if content_type else {}))
+            return aiohttp.WSServerHandshakeError(info, (), status=status, message="x", headers=headers)
+
+        is_bounce = WsTransport._is_gate_bounce
+        # The box gate's two measured shapes:
+        assert is_bounce(exc=handshake_error(status=401, content_type="text/html"))
+        assert is_bounce(exc=handshake_error(status=302, content_type=None))
+        # The daemon's own 401 is problem+json by contract — not a bounce:
+        assert not is_bounce(exc=handshake_error(status=401, content_type="application/problem+json"))
+        assert not is_bounce(exc=handshake_error(status=403, content_type="application/problem+json"))
 
     async def test_refused_box_login_stops_the_reconnect_loop(
         self, gate: FakeBoxGate, monkeypatch: pytest.MonkeyPatch
