@@ -55,7 +55,7 @@ through without a box login. Set `LoomConfig.box_ingress` to go that way:
 from openccu_loom_client import BearerAuth, BoxIngressConfig, LoomConfig
 
 config = LoomConfig(
-    host="openccu-lite.local",          # the box
+    host="openccu-lite.local",  # the box
     auth=BearerAuth(token="<daemon API token>"),
     box_ingress=BoxIngressConfig(username="admin", password="<box password>"),
 )
@@ -69,6 +69,14 @@ itself is refused). The box session only opens the gate — the daemon still
 authenticates the request through `auth`. In this mode `tls` describes the
 box's listener, `BoxIngressConfig.port` defaults to 443 (80 without TLS),
 `path_prefix` to `/addons/loom`, and `LoomConfig.port` is unused.
+
+Home Assistant reaches this through the aiohomematic compat layer:
+`CentralConfig` and `list_ccus` take `box_username`, `box_password`,
+`box_port` and `box_path_prefix` (`check_config` validates them) and build the
+`BoxIngressConfig` from them. In box mode the daemon credential is optional —
+without a token or username/password the client sends only the box session
+(`NoAuth`), and the daemon resolves it to the box user and that user's role.
+An unknown `box_*` keyword raises `TypeError` instead of being ignored.
 
 ## Status of the wire contract
 

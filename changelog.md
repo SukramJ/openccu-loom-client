@@ -1,3 +1,13 @@
+# Unreleased
+
+- **Box ingress in the aiohomematic compat layer.** `CentralConfig`,
+  `list_ccus` and `check_config` accept `box_username`, `box_password`,
+  `box_port` and `box_path_prefix` and route the connection through an
+  openccu-lite box; there the daemon credential is optional (new `NoAuth`:
+  the box session alone authenticates). A misspelled `box_*` keyword now
+  raises `TypeError` instead of being silently ignored, which used to
+  connect directly.
+
 # Version 2026.10.1 (2026-10-01)
 
 - **Wire layer regenerated for daemon 0.83.0 (api 13.2.0).**

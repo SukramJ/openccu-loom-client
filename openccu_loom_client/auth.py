@@ -112,6 +112,29 @@ class BearerAuth(AuthMethod):
 
 
 @dataclass(frozen=True, slots=True, repr=False)
+class NoAuth(AuthMethod):
+    """
+    No daemon credential — the box session is the credential.
+
+    Only meaningful together with :attr:`LoomConfig.box_ingress`. Behind an
+    openccu-lite box every request already carries the box session that
+    opened the ingress gate, and the daemon resolves that session itself
+    through its box-shell SSO: the request lands as the box user, with the
+    role the box grants that user. A separate daemon token or password is
+    then optional, and this method attaches nothing. Without box ingress
+    the daemon sees an anonymous request and rejects it.
+    """
+
+    def apply_to_headers(self, *, headers: dict[str, str]) -> None:
+        """Leave ``headers`` untouched — there is no daemon credential to send."""
+
+    @property
+    def identity_hint(self) -> str:
+        """Return a log-safe identity hint naming the box session as credential."""
+        return "none (box session)"
+
+
+@dataclass(frozen=True, slots=True, repr=False)
 class SessionAuth(AuthMethod):
     """
     Cookie-based session issued by POST /auth/login.
