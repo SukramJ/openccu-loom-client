@@ -21,7 +21,7 @@ from typing import Any
 from aiohomematic.central.events import EventBus as AioEventBus
 import pytest
 
-from openccu_loom_client import BasicAuth, BearerAuth
+from openccu_loom_client import BasicAuth, BearerAuth, BoxIngressConfig, LoomConfig, NoAuth
 from openccu_loom_client.compat.aiohomematic._upstream import BackupData, ParamsetKey
 from openccu_loom_client.compat.aiohomematic.central import CentralConfig, check_config
 import openccu_loom_client.compat.aiohomematic.central.adapter as adapter_module
@@ -753,6 +753,133 @@ class TestCheckConfig:
         assert await check_config(central_name="home", host="loom.test") == []
         failures = await check_config(central_name="", host="")
         assert len(failures) == 2
+
+    async def test_box_username_without_password_fails(self) -> None:
+        failures = await check_config(central_name="home", host="box.test", box_username="admin", box_password="")
+        assert failures == ["box_password is required when box_username is given"]
+        failures = await check_config(central_name="home", host="box.test", box_username="admin")
+        assert failures == ["box_password is required when box_username is given"]
+
+    async def test_box_password_without_username_fails(self) -> None:
+        failures = await check_config(central_name="home", host="box.test", box_password="pw")
+        assert failures == ["box_username is required when box_password is given"]
+
+    async def test_complete_box_config_passes(self) -> None:
+        failures = await check_config(
+            central_name="home",
+            host="box.test",
+            box_username="admin",
+            box_password="pw",
+            box_port=8443,
+            box_path_prefix="/addons/other",
+        )
+        assert failures == []
+
+    async def test_misspelled_box_kwarg_raises(self) -> None:
+        with pytest.raises(TypeError, match="box_usernmae"):
+            await check_config(central_name="home", host="box.test", box_usernmae="admin")
+
+    async def test_non_box_unknown_kwarg_is_ignored(self) -> None:
+        assert await check_config(central_name="home", host="loom.test", interface_configs=frozenset()) == []
+
+
+class TestCentralConfigBoxIngress:
+    """The box_* keywords reach LoomConfig.box_ingress; an unknown box_* key is never swallowed."""
+
+    async def test_box_params_build_box_ingress(self) -> None:
+        central = await _make_config(
+            box_username="admin", box_password="box-pw", box_port=8443, box_path_prefix="/addons/other"
+        ).create_central()
+        box = central._client.config.box_ingress
+        assert isinstance(box, BoxIngressConfig)
+        assert box.username == "admin"
+        assert box.password == "box-pw"
+        assert box.port == 8443
+        assert box.path_prefix == "/addons/other"
+        # A daemon token given alongside the box keywords is still sent.
+        assert isinstance(central._client.config.auth, BearerAuth)
+
+    async def test_box_path_prefix_defaults(self) -> None:
+        central = await _make_config(box_username="admin", box_password="box-pw").create_central()
+        box = central._client.config.box_ingress
+        assert box is not None
+        assert box.port is None
+        assert box.path_prefix == BoxIngressConfig(username="x", password="y").path_prefix
+
+    async def test_without_box_params_connects_directly(self) -> None:
+        central = await _make_config().create_central()
+        assert central._client.config.box_ingress is None
+
+    async def test_box_mode_without_daemon_credential_uses_no_auth(self) -> None:
+        central = await _make_config(token=None, box_username="admin", box_password="box-pw").create_central()
+        assert isinstance(central._client.config.auth, NoAuth)
+        headers: dict[str, str] = {}
+        central._client.config.auth.apply_to_headers(headers=headers)
+        assert headers == {}
+
+    async def test_box_mode_with_empty_token_uses_no_auth(self) -> None:
+        central = await _make_config(token="", box_username="admin", box_password="box-pw").create_central()
+        assert isinstance(central._client.config.auth, NoAuth)
+
+    async def test_box_mode_basic_credential_wins_over_no_auth(self) -> None:
+        central = await _make_config(
+            token=None, username="admin", password="secret", box_username="admin", box_password="box-pw"
+        ).create_central()
+        assert isinstance(central._client.config.auth, BasicAuth)
+
+    def test_no_credentials_outside_box_mode_still_raises(self) -> None:
+        with pytest.raises(ValueError, match="CentralConfig needs an auth method, a token, or username\\+password"):
+            CentralConfig(host="loom.test", token=None, box_password="pw")
+
+    def test_misspelled_box_kwarg_raises(self) -> None:
+        with pytest.raises(TypeError, match="box_usernmae"):
+            _make_config(box_usernmae="admin", box_password="box-pw")
+
+    async def test_non_box_unknown_kwarg_is_still_ignored(self) -> None:
+        central = await _make_config(callback_host="1.2.3.4").create_central()
+        assert central.name == "home"
+
+
+class TestListCcusBoxIngress:
+    """list_ccus builds the same box config and switches to NoAuth only without a token."""
+
+    @staticmethod
+    async def _built_config(**kwargs: Any) -> LoomConfig:
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from openccu_loom_client.compat.aiohomematic.central import list_ccus
+
+        client = MagicMock()
+        client.connect = AsyncMock()
+        client.close = AsyncMock()
+        client.system.list_system_ccus = AsyncMock(return_value=[])
+        with (
+            patch("openccu_loom_client.compat.aiohomematic.central.HttpTransport"),
+            patch("openccu_loom_client.compat.aiohomematic.central.LoomClient", return_value=client) as client_cls,
+        ):
+            assert await list_ccus(host="box.test", tls=True, **kwargs) == []
+        config = client_cls.call_args.kwargs["config"]
+        assert isinstance(config, LoomConfig)
+        return config
+
+    async def test_box_params_build_box_ingress_with_no_auth(self) -> None:
+        config = await self._built_config(
+            box_username="admin", box_password="box-pw", box_port=8443, box_path_prefix="/addons/other"
+        )
+        assert config.box_ingress == BoxIngressConfig(
+            username="admin", password="box-pw", port=8443, path_prefix="/addons/other"
+        )
+        assert isinstance(config.auth, NoAuth)
+
+    async def test_token_wins_over_no_auth_in_box_mode(self) -> None:
+        config = await self._built_config(token="tok-123456", box_username="admin", box_password="box-pw")
+        assert config.box_ingress is not None
+        assert isinstance(config.auth, BearerAuth)
+
+    async def test_without_box_params_blank_token_stays_bearer(self) -> None:
+        config = await self._built_config()
+        assert config.box_ingress is None
+        assert isinstance(config.auth, BearerAuth)
 
 
 class TestUnIgnoreCandidates:
