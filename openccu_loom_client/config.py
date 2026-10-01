@@ -39,6 +39,39 @@ DEFAULT_BASE_PATH = "/api/v1"
 # size-dependent — separate timeout in the snapshot caller).
 DEFAULT_REQUEST_TIMEOUT_SECONDS = 30.0
 
+# Where an openccu-lite box mounts the daemon behind its web server. The box
+# strips this prefix before forwarding, so the daemon itself still serves its
+# API at ``base_path``.
+DEFAULT_BOX_INGRESS_PATH_PREFIX = "/addons/loom"
+
+# Ports the box's web server listens on; TLS terminates at the box.
+DEFAULT_BOX_HTTPS_PORT = 443
+DEFAULT_BOX_HTTP_PORT = 80
+
+
+@dataclass(slots=True, kw_only=True)
+class BoxIngressConfig:
+    """
+    Reach the daemon through an openccu-lite box's ingress instead of directly.
+
+    The box serves the daemon at ``https://<box>/addons/loom/`` and fronts
+    that path with a session gate: a request without a valid box session
+    never reaches the daemon, the gate answers a redirect to the box's login
+    page instead. These credentials are the box account the client logs in
+    with to obtain that session; they open the gate and nothing more. The
+    daemon behind it still authenticates the request through
+    :attr:`LoomConfig.auth`.
+
+    ``port`` defaults to 443 with :attr:`LoomConfig.tls` and to 80 without.
+    """
+
+    username: str
+    # Kept out of the dataclass repr so a config dump or a traceback that
+    # captures locals never carries the box password.
+    password: str = field(repr=False)
+    port: int | None = None
+    path_prefix: str = DEFAULT_BOX_INGRESS_PATH_PREFIX
+
 
 @dataclass(slots=True, kw_only=True)
 class LoomConfig:
@@ -93,6 +126,11 @@ class LoomConfig:
     # where a fast, possibly-empty start beats a slow, complete one; 0 skips
     # the wait entirely.
     readiness_wait_seconds: float = 180.0
+    # Route every request through an openccu-lite box's ingress (see
+    # :class:`BoxIngressConfig`). When set, ``host`` names the box, ``tls``
+    # describes the box's listener, and ``port`` is unused — the box port
+    # comes from :attr:`BoxIngressConfig.port`.
+    box_ingress: BoxIngressConfig | None = None
 
     def __post_init__(self) -> None:
         """Default the port from the TLS flag when not explicitly set."""
@@ -105,24 +143,67 @@ class LoomConfig:
 
     @property
     def http_base_url(self) -> str:
-        """Full REST base URL including scheme, host, port and `/api/v1`."""
+        """
+        Full REST base URL including scheme, host, port and `/api/v1`.
+
+        In box-ingress mode the box port and the ingress path prefix take the
+        place of the daemon port.
+        """
         scheme = "https" if self.tls else "http"
-        return f"{scheme}://{self.host}:{self.port}{self.base_path}"
+        return f"{scheme}://{self._authority}{self._ingress_prefix}{self.base_path}"
 
     @property
     def ws_url(self) -> str:
-        """WebSocket URL for the /events endpoint."""
+        """WebSocket URL for the /events endpoint (through the box in ingress mode)."""
         scheme = "wss" if self.tls else "ws"
-        return f"{scheme}://{self.host}:{self.port}{self.base_path}/events"
+        return f"{scheme}://{self._authority}{self._ingress_prefix}{self.base_path}/events"
+
+    @property
+    def box_api_base_url(self) -> str | None:
+        """
+        Return the box's own API base — scheme, host and box port, no prefix.
+
+        The box's login and logout live at the box root, not under the ingress
+        prefix, so the session manager builds its URLs from this. ``None``
+        unless :attr:`box_ingress` is set.
+        """
+        if self.box_ingress is None:
+            return None
+        scheme = "https" if self.tls else "http"
+        return f"{scheme}://{self._authority}"
+
+    @property
+    def _authority(self) -> str:
+        """Return ``host:port`` of the listener requests go to."""
+        if self.box_ingress is None:
+            return f"{self.host}:{self.port}"
+        box_port = self.box_ingress.port
+        if box_port is None:
+            box_port = DEFAULT_BOX_HTTPS_PORT if self.tls else DEFAULT_BOX_HTTP_PORT
+        return f"{self.host}:{box_port}"
+
+    @property
+    def _ingress_prefix(self) -> str:
+        """Return the ingress path prefix (no trailing slash), or ``""`` outside ingress mode."""
+        if self.box_ingress is None:
+            return ""
+        return self.box_ingress.path_prefix.rstrip("/")
 
     def create_central_url(self) -> str:
         """
-        Return the central's base URL — scheme, host and port, no API path.
+        Return the central's base URL, without the API path.
 
+        Scheme, authority and — in box-ingress mode — the ingress prefix.
         Mirrors aiohomematic's ``CentralConfig.create_central_url`` so the
         compat surface satisfies ``CentralConfigProtocol``. Consumers like
         homematicip_local's device-icon handler append their own path, so
         this deliberately omits ``base_path`` (unlike :attr:`http_base_url`).
+
+        Box-ingress caveat: a consumer builds its OWN requests from this URL,
+        outside this client's transport, so they carry no ``?sid=`` — the
+        box's gate turns them away. The URL still points at the ingress (the
+        daemon's direct port may be firewalled), but such side-channel
+        fetches only work when the consumer brings a box session of its own.
         """
         scheme = "https" if self.tls else "http"
-        return f"{scheme}://{self.host}:{self.port}"
+        return f"{scheme}://{self._authority}{self._ingress_prefix}"

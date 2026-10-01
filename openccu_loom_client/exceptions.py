@@ -74,6 +74,40 @@ class LoomIncompatibleVersionError(LoomTransportError):
     """
 
 
+class LoomBoxGateError(LoomTransportError):
+    """
+    An openccu-lite box's session gate turned the request away.
+
+    Only raised in box-ingress mode (``LoomConfig.box_ingress``). The gate in
+    front of ``/addons/`` answers a redirect to the box's login page whenever
+    the request carries no valid box session; the client then logs in afresh
+    and retries exactly once. This is what is left when that retry was
+    bounced too — the request never reached the daemon, so nothing the daemon
+    would have done has happened.
+
+    A subclass of :class:`LoomTransportError` because, from the daemon's
+    point of view, it is one: the daemon never saw the request. A gate that
+    keeps refusing a fresh session usually means the box account lacks
+    access to the add-on, or the ingress path prefix is wrong — neither
+    clears on its own, so surface it rather than loop.
+    """
+
+
+class LoomBoxLoginError(LoomBoxGateError):
+    """
+    Logging in to the openccu-lite box failed.
+
+    Only raised in box-ingress mode. The box answered the login and said no:
+    it rejected the configured ``BoxIngressConfig`` credentials, or its
+    answer carried no session. A box that cannot be reached at all raises
+    plain :class:`LoomTransportError` instead — that one clears on its own
+    and is worth retrying; this one does not, so tell the user rather than
+    retry (the WS reconnect loop stops on it for the same reason). A
+    subclass of :class:`LoomBoxGateError` so a handler for "the gate is
+    closed" also covers the reason it could not be opened.
+    """
+
+
 class LoomUnsupportedOperationError(BaseLoomException):
     """
     The operation has no equivalent on the daemon-mediated backend.

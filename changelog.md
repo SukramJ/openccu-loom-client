@@ -1,3 +1,14 @@
+# Unreleased
+
+- **Box-ingress login.** `LoomConfig.box_ingress` (`BoxIngressConfig`:
+  box username, password, port, path prefix) reaches the daemon through an
+  openccu-lite box at `/addons/loom/`: the client logs in to the box, sends
+  the box session as `?sid=` on REST requests and WebSocket connects, and on
+  a gate redirect logs in again and retries once before raising
+  `LoomBoxGateError` (`LoomBoxLoginError` for a refused login). The daemon
+  credential in `auth` is sent unchanged; without `box_ingress` nothing
+  changes.
+
 # Version 2026.9.8 (2026-09-29)
 
 - **Compat: device removal takes aiohomematic's call shape.**

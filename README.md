@@ -45,6 +45,31 @@ hand-written:
   `DataPointStateChangedEvent` (keyed by `unique_id`) HA entities
   subscribe to.
 
+## Connecting through an openccu-lite box
+
+An openccu-lite box can serve the daemon through its own web server at
+`https://<box>/addons/loom/`, behind a session gate that lets nothing
+through without a box login. Set `LoomConfig.box_ingress` to go that way:
+
+```python
+from openccu_loom_client import BearerAuth, BoxIngressConfig, LoomConfig
+
+config = LoomConfig(
+    host="openccu-lite.local",          # the box
+    auth=BearerAuth(token="<daemon API token>"),
+    box_ingress=BoxIngressConfig(username="admin", password="<box password>"),
+)
+```
+
+The client logs in to the box (`POST /api/auth/v1/login`) on connect and
+carries the box session as `?sid=` on every REST request and every WebSocket
+(re)connect; when the gate turns a request away it logs in again and retries
+once, then raises `LoomBoxGateError` (`LoomBoxLoginError` when the login
+itself is refused). The box session only opens the gate — the daemon still
+authenticates the request through `auth`. In this mode `tls` describes the
+box's listener, `BoxIngressConfig.port` defaults to 443 (80 without TLS),
+`path_prefix` to `/addons/loom`, and `LoomConfig.port` is unused.
+
 ## Status of the wire contract
 
 The daemon's external-client contract is tracked in
