@@ -1,4 +1,4 @@
-# Unreleased
+# Version 2026.10.2 (2026-10-01)
 
 - **Box ingress in the aiohomematic compat layer.** `CentralConfig`,
   `list_ccus` and `check_config` accept `box_username`, `box_password`,
