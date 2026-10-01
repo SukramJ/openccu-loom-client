@@ -640,6 +640,9 @@ class LoomClient:
                 on_auth_failed=self._on_auth_failed,
                 on_connection_state=self._on_connection_state,
                 on_heartbeat=self._on_heartbeat,
+                # One box login for both planes: the WS upgrade rides the
+                # session the REST transport opened (None outside ingress).
+                box_gate=self._http.box_gate,
             )
             await self._ws.start()
         else:

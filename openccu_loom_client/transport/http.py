@@ -16,6 +16,9 @@ contract specifics:
   total-deadline budget (``request_timeout_seconds``), so the worst-case
   wall-clock is that budget — not N × per-request timeout. Never applied to
   non-idempotent verbs (POST / PATCH) unless the caller opts in.
+- Box-ingress mode (``LoomConfig.box_ingress``): every request carries the
+  openccu-lite box session as ``?sid=``, and a redirect from the box's gate
+  triggers one fresh login and one retry (see :meth:`HttpTransport._gated`).
 - One-shot capability handshake against ``GET /info`` at
   :meth:`HttpTransport.connect`. The **capabilities** the caller declares
   are the hard gate: a missing one raises. The daemon's ``api_version``
@@ -31,6 +34,7 @@ on top in subsequent phases.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from http import HTTPStatus
 import json
 import logging
@@ -39,8 +43,10 @@ from typing import TYPE_CHECKING, Any, Final, Self
 import aiohttp
 
 from openccu_loom_client import wire
+from openccu_loom_client.boxgate import BoxGateSession
 from openccu_loom_client.exceptions import (
     BaseLoomException,
+    LoomBoxGateError,
     LoomIncompatibleVersionError,
     LoomServiceUnreadyError,
     LoomTransportError,
@@ -90,6 +96,25 @@ _DEFAULT_MAX_DOWNLOAD_BYTES: Final = 512 * 1024 * 1024
 # the label, so the generic octet-stream is the honest one to send.
 _UPLOAD_CONTENT_TYPE: Final = "application/octet-stream"
 
+# Name of the query parameter an openccu-lite box's gate reads the session
+# from. The query form is the headless-safe one: the gate strips any
+# client-sent session header and stamps the validated session itself.
+_BOX_SID_PARAM: Final = "sid"
+
+
+class _GateBounceError(Exception):
+    """
+    Internal signal: the box gate answered a redirect instead of the daemon.
+
+    Deliberately not a :class:`BaseLoomException` — it never leaves this
+    module, and it must not match the retry loop's retryable classes.
+    """
+
+    def __init__(self, *, status: int) -> None:
+        """Record the redirect status the gate answered with."""
+        self.status = status
+        super().__init__(f"box gate answered {status}")
+
 
 class HttpTransport:
     """
@@ -118,6 +143,13 @@ class HttpTransport:
         # can re-apply the same gate to a daemon swapped underneath a live
         # session — the version numbers no longer catch that for us.
         self._required_capabilities: tuple[str, ...] = ()
+        # Box-ingress session, shared with the WS transport via
+        # :attr:`box_gate` so both planes ride one box login.
+        self._box_gate: Final[BoxGateSession | None] = (
+            BoxGateSession(config=config, session_getter=self._require_session)
+            if config.box_ingress is not None
+            else None
+        )
 
     # ---- context manager ----
 
@@ -162,6 +194,11 @@ class HttpTransport:
             created_here = True
 
         try:
+            if self._box_gate is not None:
+                # Log in to the box first, so a wrong box credential surfaces
+                # as the login error it is rather than as a gate refusal of
+                # the handshake below.
+                await self._box_gate.sid()
             info_payload = await self.request(method="GET", path="/info")
             # BEFORE model validation, deliberately. The types package
             # mirrors one daemon API version, and a payload field this
@@ -336,10 +373,19 @@ class HttpTransport:
         """Tear down the session (only if this transport owns it)."""
         if self._session is None or self._session.closed:
             return
+        if self._box_gate is not None:
+            # Best effort and never raising: end the box session while the
+            # HTTP session it rides on is still open.
+            await self._box_gate.logout()
         if self._external_session is None:
             await self._session.close()
         self._session = None
         self._info = None
+
+    @property
+    def box_gate(self) -> BoxGateSession | None:
+        """Return the box-ingress session manager, or ``None`` outside ingress mode."""
+        return self._box_gate
 
     @property
     def info(self) -> Info | None:
@@ -444,14 +490,33 @@ class HttpTransport:
                 await asyncio.sleep(delay)
                 remaining = deadline - loop.time()
             try:
-                return await self._do_once(
-                    method=method,
-                    url=url,
-                    params=params,
-                    json_body=json_body,
-                    headers=merged_headers,
-                    client_timeout=aiohttp.ClientTimeout(total=remaining),
-                )
+                if self._box_gate is None:
+                    return await self._do_once(
+                        method=method,
+                        url=url,
+                        params=params,
+                        json_body=json_body,
+                        headers=merged_headers,
+                        client_timeout=aiohttp.ClientTimeout(total=remaining),
+                    )
+
+                async def attempt(gated_params: dict[str, Any] | None) -> Any:
+                    # The deadline is re-read per call: a gate retry runs on
+                    # what is left of the shared budget, not on a fresh one.
+                    return await self._do_once(
+                        method=method,
+                        url=url,
+                        params=gated_params,
+                        json_body=json_body,
+                        headers=merged_headers,
+                        client_timeout=aiohttp.ClientTimeout(total=max(deadline - loop.time(), 0.001)),
+                    )
+
+                return await self._gated(gate=self._box_gate, params=params, attempt=attempt, method=method, url=url)
+            except LoomBoxGateError:
+                # The gate already had its one relogin-and-retry; a backoff
+                # retry here would turn that into a login loop.
+                raise
             except _RETRYABLE_EXCEPTIONS as exc:
                 last_exc = exc
                 _LOGGER.debug(
@@ -511,18 +576,42 @@ class HttpTransport:
             sock_connect=self._config.request_timeout_seconds,
             sock_read=self._config.request_timeout_seconds,
         )
+        if self._box_gate is None:
+            return await self._bytes_once(
+                method=method, url=url, params=params, headers=merged, client_timeout=timeout, max_bytes=max_bytes
+            )
+
+        async def attempt(gated_params: dict[str, Any] | None) -> bytes:
+            return await self._bytes_once(
+                method=method, url=url, params=gated_params, headers=merged, client_timeout=timeout, max_bytes=max_bytes
+            )
+
+        return await self._gated(gate=self._box_gate, params=params, attempt=attempt, method=method, url=url)
+
+    async def _bytes_once(
+        self,
+        *,
+        method: str,
+        url: str,
+        params: dict[str, Any] | None,
+        headers: dict[str, str],
+        client_timeout: aiohttp.ClientTimeout,
+        max_bytes: int | None,
+    ) -> bytes:
+        """Run one binary download attempt; see :meth:`request_bytes`."""
         assert self._session is not None  # noqa: S101 — narrowed by the connected-state guard above
         try:
             async with self._session.request(
                 method,
                 url,
                 params=params,
-                headers=merged,
-                timeout=timeout,
+                headers=headers,
+                timeout=client_timeout,
                 # No legitimate redirect in the daemon contract; refuse to
                 # follow one so the auth header can't leak to another host.
                 allow_redirects=False,
             ) as resp:
+                self._raise_on_gate_bounce(status=resp.status, content_type=resp.headers.get("Content-Type", ""))
                 raw = await self._read_capped(resp=resp, url=url, max_bytes=max_bytes)
                 if HTTPStatus.OK <= resp.status < HTTPStatus.MULTIPLE_CHOICES:
                     return raw
@@ -579,25 +668,50 @@ class HttpTransport:
             raise LoomTransportError(msg)
         url = self._config.http_base_url + path
         merged = self._build_headers(extra=headers)
-        form = aiohttp.FormData()
-        form.add_field(field_name, content, filename=filename, content_type=content_type)
         timeout = aiohttp.ClientTimeout(
             total=total_timeout_seconds,
             sock_connect=self._config.request_timeout_seconds,
             sock_read=self._config.request_timeout_seconds,
         )
+
+        async def attempt(gated_params: dict[str, Any] | None) -> Any:
+            # A FormData instance is consumed by one send, so each attempt
+            # builds its own.
+            form = aiohttp.FormData()
+            form.add_field(field_name, content, filename=filename, content_type=content_type)
+            return await self._upload_once(
+                method=method, url=url, params=gated_params, form=form, headers=merged, client_timeout=timeout
+            )
+
+        if self._box_gate is None:
+            return await attempt(params)
+        return await self._gated(gate=self._box_gate, params=params, attempt=attempt, method=method, url=url)
+
+    async def _upload_once(
+        self,
+        *,
+        method: str,
+        url: str,
+        params: dict[str, Any] | None,
+        form: aiohttp.FormData,
+        headers: dict[str, str],
+        client_timeout: aiohttp.ClientTimeout,
+    ) -> Any:
+        """Run one multipart upload attempt; see :meth:`request_upload`."""
+        assert self._session is not None  # noqa: S101 — narrowed by the connected-state guard in request_upload
         try:
             async with self._session.request(
                 method,
                 url,
                 params=params,
                 data=form,
-                headers=merged,
-                timeout=timeout,
+                headers=headers,
+                timeout=client_timeout,
                 # Same reasoning as ``_do_once``: a 3xx would carry the
                 # Authorization header — and the archive — to another host.
                 allow_redirects=False,
             ) as resp:
+                self._raise_on_gate_bounce(status=resp.status, content_type=resp.headers.get("Content-Type", ""))
                 if resp.status == HTTPStatus.NO_CONTENT:
                     return None
                 raw = await resp.read()
@@ -620,6 +734,77 @@ class HttpTransport:
             raise LoomTransportError(msg) from exc
 
     # ---- internals ----
+
+    def _require_session(self) -> aiohttp.ClientSession:
+        """Return the open session; the box-gate manager rides on it."""
+        if self._session is None or self._session.closed:
+            msg = "HttpTransport not connected — call connect() first"
+            raise LoomTransportError(msg)
+        return self._session
+
+    def _raise_on_gate_bounce(self, *, status: int, content_type: str) -> None:
+        """
+        Flag a gate bounce in ingress mode.
+
+        Behind an openccu-lite box the gate answers a request whose ``?sid=``
+        is missing or no longer valid itself — the request never reaches the
+        daemon. Measured against a real box (daemon 0.83.0 round): browsers
+        (``Accept: text/html``) get a 302 to the shell login, every other
+        caller gets a plain 401 **text/html** error page. A genuine daemon
+        401 is distinguishable by contract: the daemon answers every error
+        as ``application/problem+json`` (the ``errors.problem_details.v1``
+        capability), so a 401 without that content type cannot be its
+        answer. Outside ingress mode this is a no-op and both shapes keep
+        their old treatment as HTTP errors.
+        """
+        if self._box_gate is None:
+            return
+        if HTTPStatus.MULTIPLE_CHOICES <= status < HTTPStatus.BAD_REQUEST:
+            raise _GateBounceError(status=status)
+        if status == HTTPStatus.UNAUTHORIZED and not content_type.startswith("application/problem+json"):
+            raise _GateBounceError(status=status)
+
+    async def _gated[T](
+        self,
+        *,
+        gate: BoxGateSession,
+        params: dict[str, Any] | None,
+        attempt: Callable[[dict[str, Any] | None], Awaitable[T]],
+        method: str,
+        url: str,
+    ) -> T:
+        """
+        Run ``attempt`` with the box session attached, relogging in once on a bounce.
+
+        The session id is fetched fresh for each attempt, so a session another
+        request has just renewed is picked up rather than re-sent stale.
+
+        Exactly one relogin-and-retry, for every verb including POST: a
+        bounced request was answered by the gate and never reached the daemon,
+        so nothing it would have done has happened and re-sending it cannot
+        apply a side effect twice. A second bounce right after a fresh login
+        raises :class:`LoomBoxGateError` instead of looping.
+        """
+        sid = await gate.sid()
+        try:
+            return await attempt(self._with_sid(params=params, sid=sid))
+        except _GateBounceError as exc:
+            _LOGGER.debug("box gate bounced %s %s with %d — logging in again", method, url, exc.status)
+        sid = await gate.relogin(stale_sid=sid)
+        try:
+            return await attempt(self._with_sid(params=params, sid=sid))
+        except _GateBounceError as exc:
+            msg = (
+                f"box gate at {self._config.host} refused {method} {url} with {exc.status} "
+                "even after a fresh box login — check the box account's access to the add-on "
+                "and the ingress path prefix"
+            )
+            raise LoomBoxGateError(msg) from None
+
+    @staticmethod
+    def _with_sid(*, params: dict[str, Any] | None, sid: str) -> dict[str, Any]:
+        """Return a copy of ``params`` with the box session id attached."""
+        return {**(params or {}), _BOX_SID_PARAM: sid}
 
     def _build_headers(self, *, extra: dict[str, str] | None) -> dict[str, str]:
         headers: dict[str, str] = {
@@ -662,6 +847,7 @@ class HttpTransport:
                 allow_redirects=False,
                 **extra,
             ) as resp:
+                self._raise_on_gate_bounce(status=resp.status, content_type=resp.headers.get("Content-Type", ""))
                 if resp.status == HTTPStatus.NO_CONTENT:
                     return None
                 raw = await resp.read()
