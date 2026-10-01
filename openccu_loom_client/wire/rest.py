@@ -129,6 +129,110 @@ class LinkParamset(BaseModel):
     )
 
 
+class RSSIMatrixInterface(BaseModel):
+    address: str
+    description: str | None = None
+    connected: bool | None = None
+    default: bool | None = None
+    duty_cycle: int | None = None
+
+
+class RSSIMatrixPartner(BaseModel):
+    address: str
+    rx_dbm: int | None = Field(None, description="Strength at which the device hears this partner; null when unknown.")
+    tx_dbm: int | None = Field(None, description="Strength at which this partner hears the device; null when unknown.")
+
+
+class Verdict(_TolerantStrEnum):
+    switch = "switch"
+    keep = "keep"
+    marginal = "marginal"
+    unheard = "unheard"
+    unmeasured = "unmeasured"
+    roaming = "roaming"
+
+
+class ReceiverProposal(BaseModel):
+    address: str = Field(..., description="Device address.")
+    name: str | None = None
+    central: str | None = None
+    current_interface: str | None = Field(None, description="Serial of the assigned RF interface.")
+    best_interface: str | None = Field(None, description="Serial of the interface that hears the device best.")
+    current_rx_dbm: int | None = Field(None, description="Strength at which the assigned interface hears the device.")
+    best_rx_dbm: int | None = None
+    roaming: bool | None = Field(None, description="Dynamic assignment is enabled for the device.")
+    verdict: Verdict = Field(
+        ...,
+        description="switch — the best interface is at least margin_db stronger than the assigned one; keep — the assigned interface is (within the margin) the best; marginal — a stronger interface exists but under the margin; unheard — no interface reports a reading for the device; unmeasured — the matrix carries no row for the device; roaming — dynamic assignment is on, no proposal is made.",
+    )
+
+
+class RFInterfaceAssignRequest(BaseModel):
+    interface_address: str = Field(..., description="Serial of the RF interface to assign.")
+    roaming: bool = Field(..., description="Allow dynamic re-assignment by signal strength.")
+
+
+class ConfigRepairRequest(BaseModel):
+    dry_run: bool | None = True
+    channels: list[str] | None = Field(
+        None, description="Restrict the repair to these channel addresses; every channel of the device otherwise."
+    )
+
+
+class Status(_TolerantStrEnum):
+    clean = "clean"
+    repaired = "repaired"
+    would_repair = "would_repair"
+    foreign_parameters = "foreign_parameters"
+    failed = "failed"
+
+
+class ConfigRepairCorrection(BaseModel):
+    parameter: str
+    stored: Any | None = None
+    corrected: Any | None = None
+    reason: str | None = None
+
+
+class ParamsetApplyTarget(BaseModel):
+    address: str = Field(..., description="Channel address.")
+    name: str | None = Field(None, description="Channel display name.")
+    device_address: str | None = None
+    device_name: str | None = None
+    device_model: str | None = None
+    interface_id: str | None = None
+
+
+class ParamsetApplyRequest(BaseModel):
+    values: dict[str, Any] = Field(..., description="MASTER parameter values to apply, as in a single-channel PUT.")
+    targets: list[str] = Field(..., description="Target channel addresses.", min_length=1)
+    dry_run: bool | None = False
+
+
+class Status1(_TolerantStrEnum):
+    applied = "applied"
+    would_apply = "would_apply"
+    refused = "refused"
+    failed = "failed"
+
+
+class ReadbackDivergence(BaseModel):
+    parameter: str
+    sent: Any | None = None
+    stored: Any | None = Field(None, description="null when the parameter is absent from the stored paramset.")
+
+
+class ParamsetWriteResult(BaseModel):
+    written: list[str] = Field(..., description="Parameter names sent to the CCU, sorted.")
+    readback_divergences: list[ReadbackDivergence] = Field(
+        ...,
+        description="Every parameter whose stored value after the write differs from the sent value. Empty (with no readback_error) means every sent value is stored as sent.",
+    )
+    readback_error: str | None = Field(
+        None, description="Set when the post-write read failed; the divergences are unknown in that case, not empty."
+    )
+
+
 class UISchemaChannel(BaseModel):
     address: str
     number: int
@@ -632,7 +736,7 @@ class SystemCCUEntry(BaseModel):
     )
 
 
-class Status(_TolerantStrEnum):
+class Status2(_TolerantStrEnum):
     healthy = "healthy"
     degraded = "degraded"
     unhealthy = "unhealthy"
@@ -651,7 +755,7 @@ class Component(BaseModel):
 
 
 class Health(BaseModel):
-    status: Status
+    status: Status2
     components: list[Component]
 
 
@@ -1364,6 +1468,7 @@ class Scheme(_TolerantStrEnum):
     session = "session"
     oidc = "oidc"
     ingress = "ingress"
+    occulite = "occulite"
 
 
 class Identity(BaseModel):
@@ -1371,11 +1476,11 @@ class Identity(BaseModel):
     role: Role1
     scheme: Scheme | None = Field(
         None,
-        description="How the request authenticated. `ingress` is the Home Assistant Ingress passthrough the add-on deployment uses.",
+        description="How the request authenticated. `ingress` is the Home Assistant Ingress passthrough the add-on deployment uses; `occulite` is the box-shell single sign-on over the openccu-lite ingress (ADR 0079) — the gate's session, live-verified against the box. The SPA reads it to skip its own login and hide the logout action.",
     )
     expires_at: AwareDatetime | None = Field(
         None,
-        description='The instant the credential behind this identity stops being accepted, in UTC. Absent means the credential has no server-side expiry — a `basic`, `ingress` or unbounded `bearer` identity. It is the deadline a long-lived consumer needs: a WebSocket captures its identity at the upgrade and is closed when this instant passes, so a client that reads it can refill its credential through the in-band `{op:"reauth"}` frame instead of discovering the rotation through a 401.',
+        description='The instant the credential behind this identity stops being accepted, in UTC. Absent means the credential has no server-side expiry — a `basic`, `ingress`, `occulite` (the box owns that session\'s lifetime) or unbounded `bearer` identity. It is the deadline a long-lived consumer needs: a WebSocket captures its identity at the upgrade and is closed when this instant passes, so a client that reads it can refill its credential through the in-band `{op:"reauth"}` frame instead of discovering the rotation through a 401.',
     )
 
 
@@ -2245,13 +2350,13 @@ class HubDaemonConnectionDataPoint(BaseModel):
     connected: bool
 
 
-class Status1(_TolerantStrEnum):
+class Status3(_TolerantStrEnum):
     online = "online"
     offline = "offline"
 
 
 class DaemonStatusPayload(BaseModel):
-    status: Status1 = Field(
+    status: Status3 = Field(
         ...,
         description="The same two words the MQTT bridge retains on `<base>/bridge/status`, so a client bridging both planes needs no translation.",
     )
@@ -4072,13 +4177,13 @@ class SetupStatusResponse(BaseModel):
     required: bool
 
 
-class Status2(_TolerantStrEnum):
+class Status4(_TolerantStrEnum):
     shutdown_signalled = "shutdown_signalled"
     shutdown_in_progress = "shutdown_in_progress"
 
 
 class SystemRestartResponse(BaseModel):
-    status: Status2 | None = Field(
+    status: Status4 | None = Field(
         None,
         description="`shutdown_signalled` — this request sent the shutdown signal. `shutdown_in_progress` — a shutdown signalled less than 30 s ago is still running, so no second signal was sent; retry later if it did not complete.",
     )
@@ -4143,6 +4248,44 @@ class WiringSeam(BaseModel):
         None,
         description="Ordering constraints that were already broken when the seam was attached. Empty is the normal case; a non-empty list is a wiring defect the daemon reports about itself — the collaborator IS wired, so nothing else about the daemon looks wrong.\n",
     )
+
+
+class RSSIMatrixDevice(BaseModel):
+    address: str
+    name: str | None = Field(None, description="Display name when the device is in the model.")
+    partners: list[RSSIMatrixPartner]
+
+
+class ReceiverProposalResponse(BaseModel):
+    items: list[ReceiverProposal]
+
+
+class ConfigRepairOutcome(BaseModel):
+    channel: str = Field(..., description="Channel address.")
+    status: Status = Field(
+        ...,
+        description="clean — stored values already match the description, nothing written; repaired — a full valid MASTER was written; would_repair — dry run, a write would correct the listed values; foreign_parameters — the stored paramset carries entries the description does not know (listed in `foreign`); the rewrite of the valid parameters was still attempted, but no paramset write can remove the foreign entries; failed — a read or the write failed, see `error`.",
+    )
+    corrections: list[ConfigRepairCorrection] | None = Field(
+        None, description="Values the rewrite replaces, with the stored and the corrected value."
+    )
+    foreign: list[str] | None = Field(None, description="Stored parameter names the description does not carry.")
+    error: str | None = None
+    result: ParamsetWriteResult | None = None
+
+
+class ParamsetApplyTargetsResponse(BaseModel):
+    items: list[ParamsetApplyTarget]
+
+
+class ParamsetApplyOutcome(BaseModel):
+    address: str = Field(..., description="Target channel address.")
+    status: Status1 = Field(
+        ...,
+        description="applied — written, see result; would_apply — dry run passed every gate; refused — the description-identity gate or the per-target validation rejected the target before any write; failed — the write itself failed upstream.",
+    )
+    reason: str | None = Field(None, description="Why the target was refused or the write failed.")
+    result: ParamsetWriteResult | None = None
 
 
 class UISchemaParameter(BaseModel):
@@ -4261,7 +4404,11 @@ class DeviceSummary(BaseModel):
     )
     config_restore_supported: bool | None = Field(
         None,
-        description='True when the device\'s interface exposes `restoreConfigToDevice`\n(HmIP-RF, BidCos-RF). The SPA gates the "restore config" action on\nit. False for BidCos-Wired, CUxD and VirtualDevices.\n',
+        description='True when the device\'s interface daemon implements\n`restoreConfigToDevice` (BidCos-RF only — the HmIP process\nlists the method but answers every call for its devices with a\ngeneric fault, measured live). The SPA gates the "restore\nconfig" action on it.\n',
+    )
+    config_cache_clear_supported: bool | None = Field(
+        None,
+        description='True when the device\'s interface daemon implements\n`clearConfigCache` (the BidCos daemons: BidCos-RF and\nBidCos-Wired). The SPA gates the "clear config cache" action on\nit. False for HmIP-*, CUxD and VirtualDevices.\n',
     )
     communication_test_supported: bool | None = Field(
         None,
@@ -4707,6 +4854,24 @@ class ListSchedulesResponse(BaseModel):
     items: list[ScheduleDeviceSummary]
 
 
+class RSSIMatrixCentral(BaseModel):
+    central: str
+    interface_id: str
+    error: str | None = Field(None, description="Set when this central's matrix read failed.")
+    interfaces: list[RSSIMatrixInterface] | None = Field(
+        None, description="The central's RF interfaces (matrix partners that are gateways)."
+    )
+    devices: list[RSSIMatrixDevice]
+
+
+class ConfigRepairResponse(BaseModel):
+    items: list[ConfigRepairOutcome]
+
+
+class ParamsetApplyResponse(BaseModel):
+    items: list[ParamsetApplyOutcome]
+
+
 class UISchema(BaseModel):
     channel: UISchemaChannel
     groups: list[UISchemaGroup] | None = Field(
@@ -4810,6 +4975,10 @@ class SecuritySnapshot(BaseModel):
 
 class ListGroupsResponse(BaseModel):
     entries: list[GroupCentralEntry]
+
+
+class RSSIMatrixResponse(BaseModel):
+    items: list[RSSIMatrixCentral]
 
 
 class TaxonomyResponse(BaseModel):
