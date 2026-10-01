@@ -1,4 +1,10 @@
-# Unreleased
+# Version 2026.10.1 (2026-10-01)
+
+- **Wire layer regenerated for daemon 0.83.0 (api 13.2.0).**
+  `DAEMON_API_VERSION` and `SCHEMA_DIGEST` move with it; the 13.2.0
+  surface adds the daemon's device-administration round (read-back
+  reports, multi-apply, config repair, BidCos-RF radio management)
+  and the box-shell SSO scheme.
 
 - **Box-ingress login.** `LoomConfig.box_ingress` (`BoxIngressConfig`:
   box username, password, port, path prefix) reaches the daemon through an
