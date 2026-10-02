@@ -748,36 +748,36 @@ class TestRenameDeviceByIseId:
             await _JsonRpcClient(client=client).rename_device(ise_id=9999, new_name="x")
 
 
+_BOX_TOKEN = "olt_0123456789abcdef0123456789abcdef"
+
+
 class TestCheckConfig:
     async def test_check_config_static_validation(self) -> None:
         assert await check_config(central_name="home", host="loom.test") == []
         failures = await check_config(central_name="", host="")
         assert len(failures) == 2
 
-    async def test_box_username_without_password_fails(self) -> None:
-        failures = await check_config(central_name="home", host="box.test", box_username="admin", box_password="")
-        assert failures == ["box_password is required when box_username is given"]
-        failures = await check_config(central_name="home", host="box.test", box_username="admin")
-        assert failures == ["box_password is required when box_username is given"]
-
-    async def test_box_password_without_username_fails(self) -> None:
-        failures = await check_config(central_name="home", host="box.test", box_password="pw")
-        assert failures == ["box_username is required when box_password is given"]
+    @pytest.mark.parametrize("extra", [{"box_port": 8443}, {"box_path_prefix": "/addons/other"}])
+    async def test_box_details_without_a_box_token_fail(self, extra: dict[str, Any]) -> None:
+        failures = await check_config(central_name="home", host="box.test", **extra)
+        assert failures == ["box_token is required when box_port or box_path_prefix is given"]
 
     async def test_complete_box_config_passes(self) -> None:
         failures = await check_config(
             central_name="home",
             host="box.test",
-            box_username="admin",
-            box_password="pw",
+            box_token=_BOX_TOKEN,
             box_port=8443,
             box_path_prefix="/addons/other",
         )
         assert failures == []
 
-    async def test_misspelled_box_kwarg_raises(self) -> None:
-        with pytest.raises(TypeError, match="box_usernmae"):
-            await check_config(central_name="home", host="box.test", box_usernmae="admin")
+    @pytest.mark.parametrize("kwarg", ["box_tokne", "box_username", "box_password"])
+    async def test_unknown_box_kwarg_raises(self, kwarg: str) -> None:
+        # box_username / box_password are gone with the box-account mode; a
+        # caller still passing them must fail loudly, not connect directly.
+        with pytest.raises(TypeError, match=kwarg):
+            await check_config(central_name="home", host="box.test", **{kwarg: "x"})
 
     async def test_non_box_unknown_kwarg_is_ignored(self) -> None:
         assert await check_config(central_name="home", host="loom.test", interface_configs=frozenset()) == []
@@ -786,54 +786,52 @@ class TestCheckConfig:
 class TestCentralConfigBoxIngress:
     """The box_* keywords reach LoomConfig.box_ingress; an unknown box_* key is never swallowed."""
 
-    async def test_box_params_build_box_ingress(self) -> None:
+    async def test_box_params_build_box_ingress_with_no_auth(self) -> None:
         central = await _make_config(
-            box_username="admin", box_password="box-pw", box_port=8443, box_path_prefix="/addons/other"
+            token=None, box_token=_BOX_TOKEN, box_port=8443, box_path_prefix="/addons/other"
         ).create_central()
         box = central._client.config.box_ingress
-        assert isinstance(box, BoxIngressConfig)
-        assert box.username == "admin"
-        assert box.password == "box-pw"
-        assert box.port == 8443
-        assert box.path_prefix == "/addons/other"
-        # A daemon token given alongside the box keywords is still sent.
-        assert isinstance(central._client.config.auth, BearerAuth)
+        assert box == BoxIngressConfig(token=_BOX_TOKEN, port=8443, path_prefix="/addons/other")
+        assert isinstance(central._client.config.auth, NoAuth)
 
     async def test_box_path_prefix_defaults(self) -> None:
-        central = await _make_config(box_username="admin", box_password="box-pw").create_central()
+        central = await _make_config(token=None, box_token=_BOX_TOKEN).create_central()
         box = central._client.config.box_ingress
         assert box is not None
         assert box.port is None
-        assert box.path_prefix == BoxIngressConfig(username="x", password="y").path_prefix
+        assert box.path_prefix == BoxIngressConfig(token="x").path_prefix
 
     async def test_without_box_params_connects_directly(self) -> None:
         central = await _make_config().create_central()
         assert central._client.config.box_ingress is None
 
-    async def test_box_mode_without_daemon_credential_uses_no_auth(self) -> None:
-        central = await _make_config(token=None, box_username="admin", box_password="box-pw").create_central()
-        assert isinstance(central._client.config.auth, NoAuth)
-        headers: dict[str, str] = {}
-        central._client.config.auth.apply_to_headers(headers=headers)
-        assert headers == {}
+    @pytest.mark.parametrize(
+        "credential",
+        [
+            {"token": "tok-123456"},
+            {"token": None, "username": "admin", "password": "secret"},
+            {"token": None, "auth": BearerAuth(token="tok-123456")},
+        ],
+    )
+    def test_a_daemon_credential_beside_the_box_token_is_refused(self, credential: dict[str, Any]) -> None:
+        # The box token occupies the Authorization header the gate reads; a
+        # daemon credential could not ride beside it, so it must not be
+        # silently dropped either.
+        with pytest.raises(ValueError, match="only credential"):
+            _make_config(box_token=_BOX_TOKEN, **credential)
 
-    async def test_box_mode_with_empty_token_uses_no_auth(self) -> None:
-        central = await _make_config(token="", box_username="admin", box_password="box-pw").create_central()
+    async def test_empty_daemon_token_beside_the_box_token_is_no_credential(self) -> None:
+        central = await _make_config(token="", box_token=_BOX_TOKEN).create_central()
         assert isinstance(central._client.config.auth, NoAuth)
-
-    async def test_box_mode_basic_credential_wins_over_no_auth(self) -> None:
-        central = await _make_config(
-            token=None, username="admin", password="secret", box_username="admin", box_password="box-pw"
-        ).create_central()
-        assert isinstance(central._client.config.auth, BasicAuth)
 
     def test_no_credentials_outside_box_mode_still_raises(self) -> None:
         with pytest.raises(ValueError, match="CentralConfig needs an auth method, a token, or username\\+password"):
-            CentralConfig(host="loom.test", token=None, box_password="pw")
+            CentralConfig(host="loom.test", token=None, box_port=8443)
 
-    def test_misspelled_box_kwarg_raises(self) -> None:
-        with pytest.raises(TypeError, match="box_usernmae"):
-            _make_config(box_usernmae="admin", box_password="box-pw")
+    @pytest.mark.parametrize("kwarg", ["box_tokne", "box_username", "box_password"])
+    def test_unknown_box_kwarg_raises(self, kwarg: str) -> None:
+        with pytest.raises(TypeError, match=kwarg):
+            _make_config(token=None, box_token=_BOX_TOKEN, **{kwarg: "x"})
 
     async def test_non_box_unknown_kwarg_is_still_ignored(self) -> None:
         central = await _make_config(callback_host="1.2.3.4").create_central()
@@ -841,7 +839,7 @@ class TestCentralConfigBoxIngress:
 
 
 class TestListCcusBoxIngress:
-    """list_ccus builds the same box config and switches to NoAuth only without a token."""
+    """list_ccus builds the same box config, with the box token as the only credential."""
 
     @staticmethod
     async def _built_config(**kwargs: Any) -> LoomConfig:
@@ -863,18 +861,13 @@ class TestListCcusBoxIngress:
         return config
 
     async def test_box_params_build_box_ingress_with_no_auth(self) -> None:
-        config = await self._built_config(
-            box_username="admin", box_password="box-pw", box_port=8443, box_path_prefix="/addons/other"
-        )
-        assert config.box_ingress == BoxIngressConfig(
-            username="admin", password="box-pw", port=8443, path_prefix="/addons/other"
-        )
+        config = await self._built_config(box_token=_BOX_TOKEN, box_port=8443, box_path_prefix="/addons/other")
+        assert config.box_ingress == BoxIngressConfig(token=_BOX_TOKEN, port=8443, path_prefix="/addons/other")
         assert isinstance(config.auth, NoAuth)
 
-    async def test_token_wins_over_no_auth_in_box_mode(self) -> None:
-        config = await self._built_config(token="tok-123456", box_username="admin", box_password="box-pw")
-        assert config.box_ingress is not None
-        assert isinstance(config.auth, BearerAuth)
+    async def test_a_daemon_token_beside_the_box_token_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="only credential"):
+            await self._built_config(token="tok-123456", box_token=_BOX_TOKEN)
 
     async def test_without_box_params_blank_token_stays_bearer(self) -> None:
         config = await self._built_config()

@@ -8,6 +8,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from openccu_loom_client.auth import NoAuth
+
 if TYPE_CHECKING:
     from openccu_loom_client.auth import AuthMethod
 
@@ -55,22 +57,28 @@ class BoxIngressConfig:
     Reach the daemon through an openccu-lite box's ingress instead of directly.
 
     The box serves the daemon at ``https://<box>/addons/loom/`` and fronts
-    that path with a session gate: a request without a valid box session
-    never reaches the daemon, the gate answers a redirect to the box's login
-    page instead. These credentials are the box account the client logs in
-    with to obtain that session; they open the gate and nothing more. The
-    daemon behind it still authenticates the request through
-    :attr:`LoomConfig.auth`.
+    that path with a gate: a request the gate does not accept never reaches
+    the daemon. ``token`` is a box API token holding the add-on's gate scope
+    ``addon:openccu-loom`` (or Full access) — what :func:`start_box_pairing`
+    obtains, or what the box's token page issues. It rides every request as
+    ``Authorization: Bearer`` (openccu-lite 1.0.0-dev.36 or newer); the gate
+    hands it on to the daemon, which verifies it with the box and signs the
+    request in with it (the daemon's ADR 0080): the add-on scope as operator,
+    Full access as admin. The token therefore is the only credential, and
+    :attr:`LoomConfig.auth` must be :class:`NoAuth` in this mode.
 
     ``port`` defaults to 443 with :attr:`LoomConfig.tls` and to 80 without.
     """
 
-    username: str
     # Kept out of the dataclass repr so a config dump or a traceback that
-    # captures locals never carries the box password.
-    password: str = field(repr=False)
+    # captures locals never carries the box token.
+    token: str = field(repr=False)
     port: int | None = None
     path_prefix: str = DEFAULT_BOX_INGRESS_PATH_PREFIX
+
+    def apply_to_headers(self, *, headers: dict[str, str]) -> None:
+        """Attach the box token the gate reads as ``Authorization: Bearer``."""
+        headers["Authorization"] = f"Bearer {self.token}"
 
 
 @dataclass(slots=True, kw_only=True)
@@ -133,13 +141,20 @@ class LoomConfig:
     box_ingress: BoxIngressConfig | None = None
 
     def __post_init__(self) -> None:
-        """Default the port from the TLS flag when not explicitly set."""
+        """Default the port from the TLS flag; refuse a daemon credential in box-ingress mode."""
         if self.port is None:
             object.__setattr__(
                 self,
                 "port",
                 DEFAULT_HTTPS_PORT if self.tls else DEFAULT_HTTP_PORT,
             )
+        if self.box_ingress is not None and not isinstance(self.auth, NoAuth):
+            # The box token occupies the one Authorization header the gate
+            # reads, and the daemon signs the request in with that token — a
+            # daemon credential could neither travel beside it nor would it be
+            # needed.
+            msg = "box_ingress carries the only credential: LoomConfig.auth must be NoAuth()"
+            raise ValueError(msg)
 
     @property
     def http_base_url(self) -> str:
@@ -157,20 +172,6 @@ class LoomConfig:
         """WebSocket URL for the /events endpoint (through the box in ingress mode)."""
         scheme = "wss" if self.tls else "ws"
         return f"{scheme}://{self._authority}{self._ingress_prefix}{self.base_path}/events"
-
-    @property
-    def box_api_base_url(self) -> str | None:
-        """
-        Return the box's own API base — scheme, host and box port, no prefix.
-
-        The box's login and logout live at the box root, not under the ingress
-        prefix, so the session manager builds its URLs from this. ``None``
-        unless :attr:`box_ingress` is set.
-        """
-        if self.box_ingress is None:
-            return None
-        scheme = "https" if self.tls else "http"
-        return f"{scheme}://{self._authority}"
 
     @property
     def _authority(self) -> str:
@@ -200,10 +201,11 @@ class LoomConfig:
         this deliberately omits ``base_path`` (unlike :attr:`http_base_url`).
 
         Box-ingress caveat: a consumer builds its OWN requests from this URL,
-        outside this client's transport, so they carry no ``?sid=`` — the
+        outside this client's transport, so they carry no box token — the
         box's gate turns them away. The URL still points at the ingress (the
         daemon's direct port may be firewalled), but such side-channel
-        fetches only work when the consumer brings a box session of its own.
+        fetches only work when the consumer attaches the box token itself
+        (:meth:`BoxIngressConfig.apply_to_headers`).
         """
         scheme = "https" if self.tls else "http"
         return f"{scheme}://{self._authority}{self._ingress_prefix}"

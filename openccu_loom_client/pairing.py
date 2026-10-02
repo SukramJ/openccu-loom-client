@@ -168,7 +168,7 @@ class PairingSession:
                 )
 
 
-def _seen_fingerprint(*, resp: aiohttp.ClientResponse) -> bytes:
+def seen_fingerprint(*, resp: aiohttp.ClientResponse) -> bytes:
     """SHA-256 of the peer certificate this response's connection saw, or b''."""
     conn = resp.connection
     if conn is None or conn.transport is None:
@@ -225,7 +225,7 @@ async def start_pairing(
         aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=verify_tls), timeout=timeout) as session,
         session.post(f"{base}/pairing", json=ask) as resp,
     ):
-        seen = _seen_fingerprint(resp=resp)
+        seen = seen_fingerprint(resp=resp)
         payload = await resp.json(content_type=None)
         if resp.status != 202:
             raise http_error_from_problem(

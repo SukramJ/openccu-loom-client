@@ -144,7 +144,7 @@ async def test_fingerprint_mismatch_aborts_and_withdraws(
         },
     )
     mock_daemon.delete("/api/v1/pairing/req3", status=204)
-    monkeypatch.setattr("openccu_loom_client.pairing._seen_fingerprint", lambda *, resp: b"\xee" * 32)
+    monkeypatch.setattr("openccu_loom_client.pairing.seen_fingerprint", lambda *, resp: b"\xee" * 32)
     with pytest.raises(PairingFingerprintMismatchError):
         await start_pairing(app="app", role="operator", **_knobs(mock_daemon))
     withdrawals = [r for r in mock_daemon.requests if r.method == "DELETE"]

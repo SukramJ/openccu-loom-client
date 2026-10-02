@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from openccu_loom_client._version import __version__
 from openccu_loom_client.auth import BasicAuth, BearerAuth, NoAuth, SessionAuth
+from openccu_loom_client.boxpairing import BoxPairingResult, BoxPairingSession, start_box_pairing
 from openccu_loom_client.capabilities import ALWAYS_ON, Capability
 from openccu_loom_client.client import LoomClient
 from openccu_loom_client.config import BoxIngressConfig, LoomConfig
@@ -27,7 +28,8 @@ from openccu_loom_client.exceptions import (
     LoomAuthError,
     LoomBadRequestError,
     LoomBoxGateError,
-    LoomBoxLoginError,
+    LoomBoxPairingError,
+    LoomBoxTokenError,
     LoomConflictError,
     LoomFeatureUnavailableError,
     LoomForbiddenError,
@@ -56,11 +58,14 @@ __all__ = [
     "BasicAuth",
     "BearerAuth",
     "BoxIngressConfig",
+    "BoxPairingResult",
+    "BoxPairingSession",
     "Capability",
     "LoomAuthError",
     "LoomBadRequestError",
     "LoomBoxGateError",
-    "LoomBoxLoginError",
+    "LoomBoxPairingError",
+    "LoomBoxTokenError",
     "LoomClient",
     "LoomConfig",
     "LoomConflictError",
@@ -86,5 +91,6 @@ __all__ = [
     "PairingSession",
     "SessionAuth",
     "__version__",
+    "start_box_pairing",
     "start_pairing",
 ]
