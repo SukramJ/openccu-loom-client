@@ -56,17 +56,15 @@ def _reject_unknown_box_kwargs(*, kwargs: dict[str, Any], owner: str) -> None:
 
 def _build_box_ingress(
     *,
-    box_username: str | None,
-    box_password: str | None,
+    box_token: str | None,
     box_port: int | None,
     box_path_prefix: str | None,
 ) -> BoxIngressConfig | None:
-    """Return the box-ingress config the ``box_*`` keywords describe, or ``None`` without a box username."""
-    if not box_username:
+    """Return the box-ingress config the ``box_*`` keywords describe, or ``None`` without a box token."""
+    if not box_token:
         return None
     return BoxIngressConfig(
-        username=box_username,
-        password=box_password or "",
+        token=box_token,
         port=box_port,
         path_prefix=box_path_prefix or DEFAULT_BOX_INGRESS_PATH_PREFIX,
     )
@@ -82,13 +80,12 @@ class CentralConfig:
     bearer ``token``, then ``username``/``password`` (HTTP Basic against
     the daemon's user store).
 
-    ``box_username`` / ``box_password`` / ``box_port`` / ``box_path_prefix``
-    route the connection through an openccu-lite box's ingress
-    (:class:`BoxIngressConfig`). In that mode the daemon credential is
-    optional: without one, the request carries only the box session, which
-    the daemon resolves to the box user itself (:class:`NoAuth`). A ``box_*``
-    keyword this class does not know raises ``TypeError`` rather than being
-    ignored. Everything CCU-/callback-specific
+    ``box_token`` / ``box_port`` / ``box_path_prefix`` route the connection
+    through an openccu-lite box's ingress (:class:`BoxIngressConfig`). In
+    that mode the box token is the only credential — the daemon signs the
+    request in with it (:class:`NoAuth`) — so a daemon credential passed
+    beside it raises ``ValueError``. A ``box_*`` keyword this class does not
+    know raises ``TypeError`` rather than being ignored. Everything CCU-/callback-specific
     (``callback_host``, ``callback_port_xml_rpc``, ``interface_configs``,
     ``storage_directory``, …) is accepted and ignored — the daemon owns it.
     """
@@ -108,8 +105,7 @@ class CentralConfig:
         serial: str | None = None,
         client_session: Any | None = None,
         locale: str = "en",
-        box_username: str | None = None,
-        box_password: str | None = None,
+        box_token: str | None = None,
         box_port: int | None = None,
         box_path_prefix: str | None = None,
         **_ignored: Any,
@@ -136,8 +132,7 @@ class CentralConfig:
         # resolved daemon-side (api ≥ 1.9.0); any markers the integration
         # still passes are absorbed by **_ignored and intentionally unused.
         self._box_ingress = _build_box_ingress(
-            box_username=box_username,
-            box_password=box_password,
+            box_token=box_token,
             box_port=box_port,
             box_path_prefix=box_path_prefix,
         )
@@ -158,16 +153,20 @@ class CentralConfig:
         password: str | None,
         box_mode: bool,
     ) -> AuthMethod:
+        if box_mode:
+            # Behind the box the token that opens the gate is the credential:
+            # it occupies the Authorization header, and the daemon signs the
+            # request in with it. A daemon credential could not ride beside it.
+            if auth is not None or token or username:
+                msg = "box_token is the only credential behind the box: drop auth, token and username"
+                raise ValueError(msg)
+            return NoAuth()
         if auth is not None:
             return auth
         if token:
             return BearerAuth(token=token)
         if username and password is not None:
             return BasicAuth(username=username, password=password)
-        if box_mode:
-            # Behind the box the session that opens the gate is enough: the
-            # daemon resolves it to the box user through its box-shell SSO.
-            return NoAuth()
         msg = "CentralConfig needs an auth method, a token, or username+password"
         raise ValueError(msg)
 
@@ -201,8 +200,7 @@ async def check_config(
     callback_port_xml_rpc: int | None = None,
     json_port: int | None = None,
     storage_directory: str | None = None,
-    box_username: str | None = None,
-    box_password: str | None = None,
+    box_token: str | None = None,
     box_port: int | None = None,
     box_path_prefix: str | None = None,
     **_kwargs: object,
@@ -220,6 +218,7 @@ async def check_config(
 
     The ``box_*`` keywords are checked for being half-configured only; an
     unknown ``box_*`` keyword raises ``TypeError`` instead of being ignored.
+    A box port or path prefix without a box token configures nothing.
     """
     _reject_unknown_box_kwargs(kwargs=_kwargs, owner="check_config")
     failures: list[str] = []
@@ -229,10 +228,8 @@ async def check_config(
         failures.append("host is required")
     if username is not None and not username:
         failures.append("username, if given, must not be empty")
-    if box_username and not box_password:
-        failures.append("box_password is required when box_username is given")
-    if box_password and not box_username:
-        failures.append("box_username is required when box_password is given")
+    if not box_token and (box_port is not None or box_path_prefix):
+        failures.append("box_token is required when box_port or box_path_prefix is given")
     return failures
 
 
@@ -245,8 +242,7 @@ async def list_ccus(
     verify_tls: bool = True,
     base_path: str | None = None,
     client_session: Any = None,
-    box_username: str | None = None,
-    box_password: str | None = None,
+    box_token: str | None = None,
     box_port: int | None = None,
     box_path_prefix: str | None = None,
 ) -> list[dict[str, Any]]:
@@ -265,20 +261,22 @@ async def list_ccus(
     so the token this step is given has to be an admin one.
 
     The ``box_*`` keywords route the call through an openccu-lite box's
-    ingress, as on :class:`CentralConfig`. There the token is optional:
-    without one the box session alone authenticates, and the daemon grants
-    the box user's role — a box admin reads the serial.
+    ingress, as on :class:`CentralConfig`. There the box token is the only
+    credential and ``token`` must be empty: the daemon signs the request in
+    with the box token — the add-on scope as operator, which reads the serial
+    (daemon api 13.3.0).
     """
     box_ingress = _build_box_ingress(
-        box_username=box_username,
-        box_password=box_password,
+        box_token=box_token,
         box_port=box_port,
         box_path_prefix=box_path_prefix,
     )
+    if box_ingress is not None and token:
+        msg = "box_token is the only credential behind the box: drop token"
+        raise ValueError(msg)
     # Outside box mode a blank token yields an empty bearer; the daemon then
     # rejects with LoomAuthError, which the config flow maps to invalid_auth.
-    # Behind the box a missing token means the box session authenticates.
-    auth: AuthMethod = BearerAuth(token=token or "") if token or box_ingress is None else NoAuth()
+    auth: AuthMethod = NoAuth() if box_ingress is not None else BearerAuth(token=token or "")
     config_kwargs: dict[str, Any] = {
         "host": host,
         "port": port,

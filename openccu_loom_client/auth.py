@@ -114,15 +114,15 @@ class BearerAuth(AuthMethod):
 @dataclass(frozen=True, slots=True, repr=False)
 class NoAuth(AuthMethod):
     """
-    No daemon credential — the box session is the credential.
+    No daemon credential — the box token is the credential.
 
-    Only meaningful together with :attr:`LoomConfig.box_ingress`. Behind an
-    openccu-lite box every request already carries the box session that
-    opened the ingress gate, and the daemon resolves that session itself
-    through its box-shell SSO: the request lands as the box user, with the
-    role the box grants that user. A separate daemon token or password is
-    then optional, and this method attaches nothing. Without box ingress
-    the daemon sees an anonymous request and rejects it.
+    The one method :attr:`LoomConfig.box_ingress` accepts. Behind an
+    openccu-lite box every request carries the box API token that opens the
+    ingress gate, and the daemon signs the request in with that token itself
+    once the box confirms it (the daemon's ADR 0080). A daemon token or
+    password could not travel beside it — the token occupies the
+    ``Authorization`` header — so this method attaches nothing. Without box
+    ingress the daemon sees an anonymous request and rejects it.
     """
 
     def apply_to_headers(self, *, headers: dict[str, str]) -> None:
@@ -130,8 +130,8 @@ class NoAuth(AuthMethod):
 
     @property
     def identity_hint(self) -> str:
-        """Return a log-safe identity hint naming the box session as credential."""
-        return "none (box session)"
+        """Return a log-safe identity hint naming the box token as credential."""
+        return "none (box token)"
 
 
 @dataclass(frozen=True, slots=True, repr=False)

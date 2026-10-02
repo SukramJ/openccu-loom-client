@@ -40,13 +40,13 @@ from pydantic import ValidationError
 from yarl import URL
 
 from openccu_loom_client.auth import BearerAuth
-from openccu_loom_client.exceptions import LoomBoxGateError, LoomBoxLoginError, LoomTransportError
+from openccu_loom_client.boxgate import gate_refusal
+from openccu_loom_client.exceptions import LoomBoxGateError, LoomTransportError
 from openccu_loom_client.wire.ws import WsEnvelope
 
 if TYPE_CHECKING:
     from types import TracebackType
 
-    from openccu_loom_client.boxgate import BoxGateSession
     from openccu_loom_client.config import LoomConfig
 
 _LOGGER: Final = logging.getLogger(__name__)
@@ -105,9 +105,6 @@ _ENVELOPE_QUEUE_MAX_BYTES: Final = 64 * 1024 * 1024
 # repr volume of a malformed frame, without threatening any legitimate payload.
 _MAX_WS_MSG_SIZE: Final = 1024 * 1024
 
-# Query parameter an openccu-lite box's gate reads its session from; see
-# :mod:`openccu_loom_client.boxgate`.
-_BOX_SID_PARAM: Final = "sid"
 
 # Upper bound on how much of a rejected frame is echoed into a WARNING log line.
 # A malformed frame is daemon-controlled and can be near ``_MAX_WS_MSG_SIZE``;
@@ -192,7 +189,6 @@ class WsTransport:
         on_heartbeat: HeartbeatHandler | None = None,
         session: aiohttp.ClientSession | None = None,
         classify: bool = False,
-        box_gate: BoxGateSession | None = None,
     ) -> None:
         """
         Configure the transport; the connection opens on :meth:`start`.
@@ -211,10 +207,8 @@ class WsTransport:
         consumers that read the wire payloads directly. An older daemon
         ignores the unknown field.
 
-        ``box_gate`` is the openccu-lite box session manager, required when
-        :attr:`LoomConfig.box_ingress` is set and normally the HTTP
-        transport's (:attr:`HttpTransport.box_gate`), so REST and WS share one
-        box login. Each (re)connect then carries a fresh ``?sid=``.
+        In box-ingress mode (:attr:`LoomConfig.box_ingress`) every upgrade
+        carries the box token the gate reads, as the REST requests do.
         """
         self._config: Final = config
         self._classify: Final = classify
@@ -232,7 +226,6 @@ class WsTransport:
         self._on_auth_failed: Final = on_auth_failed
         self._on_connection_state: Final = on_connection_state
         self._on_heartbeat: Final = on_heartbeat
-        self._box_gate: Final = box_gate
         # Latest client↔daemon round trip the daemon reported, or None until
         # the second heartbeat of a connection (the first has nothing to time).
         self._last_rtt_ms: float | None = None
@@ -420,15 +413,14 @@ class WsTransport:
                 await self._connect_and_read()
             except asyncio.CancelledError:
                 raise
-            except LoomBoxLoginError as exc:
-                # The box answered the login and refused the credential. That
-                # does not clear on its own, and a backoff retry would hammer
-                # the box's login (lockout and log noise) every cycle — treat
-                # it like the daemon's own 401/403 below. A box that is merely
-                # unreachable raises LoomTransportError instead and stays on
+            except LoomBoxGateError as exc:
+                # The box gate refused the box token. That does not clear on
+                # its own — a new token needs a new pairing — so treat it like
+                # the daemon's own 401/403 below. A box that is merely
+                # unreachable raises a transport error instead and stays on
                 # the retry path.
                 _LOGGER.error(
-                    "box login for %s refused — credential not accepted; stopping the reconnect loop: %s",
+                    "box gate at %s refused the box token; stopping the reconnect loop: %s",
                     self._config.host,
                     exc,
                 )
@@ -503,85 +495,29 @@ class WsTransport:
 
         headers: dict[str, str] = {"User-Agent": self._config.user_agent}
         self._config.auth.apply_to_headers(headers=headers)
-
-        if self._box_gate is None:
+        if self._config.box_ingress is None:
             await self._open_and_read(url=self._config.ws_url, headers=headers)
             return
-        await self._connect_through_gate(gate=self._box_gate, headers=headers)
-
-    async def _connect_through_gate(self, *, gate: BoxGateSession, headers: dict[str, str]) -> None:
-        """
-        Open the stream through an openccu-lite box's gate, relogging in once on a bounce.
-
-        The box session rides the upgrade request as ``?sid=``, fetched fresh
-        per connect so a session the REST plane has renewed is picked up. A
-        handshake the gate bounced triggers one relogin and one immediate
-        retry; a second bounce raises :class:`LoomBoxGateError` and the
-        reconnect loop's backoff takes over from there.
-        """
-        base = URL(self._config.ws_url)
-        sid = await gate.sid()
+        # Last, so the token the gate reads is what the upgrade carries.
+        self._config.box_ingress.apply_to_headers(headers=headers)
         try:
-            await self._open_and_read(url=base.update_query({_BOX_SID_PARAM: sid}), headers=headers)
+            await self._open_and_read(url=self._config.ws_url, headers=headers)
         except aiohttp.WSServerHandshakeError as exc:
-            if not self._is_gate_bounce(exc=exc):
-                raise self._without_sid(exc=exc) from None
-            _LOGGER.debug("box gate bounced the WS upgrade to %s — logging in again", self._config.host)
-        else:
-            return
-        sid = await gate.relogin(stale_sid=sid)
-        try:
-            await self._open_and_read(url=base.update_query({_BOX_SID_PARAM: sid}), headers=headers)
-        except aiohttp.WSServerHandshakeError as exc:
-            if not self._is_gate_bounce(exc=exc):
-                raise self._without_sid(exc=exc) from None
-            msg = f"box gate at {self._config.host} refused the WS upgrade even after a fresh box login"
-            raise LoomBoxGateError(msg) from None
+            raise self._gate_refusal_or(exc=exc) from None
 
-    @staticmethod
-    def _is_gate_bounce(*, exc: aiohttp.WSServerHandshakeError) -> bool:
+    def _gate_refusal_or(self, *, exc: aiohttp.WSServerHandshakeError) -> Exception:
         """
-        Tell whether the box gate turned the upgrade request away.
+        Return the gate's refusal for a failed upgrade, or ``exc`` when the daemon answered.
 
-        Two shapes, measured against a real box (daemon 0.83.0 round): a
-        non-browser caller — which a WS upgrade is — gets a plain 401
-        **text/html** error page, while an ``Accept: text/html`` caller gets
-        a 302 to the shell login. ``ws_connect`` follows redirects and
-        offers no switch to stop it, so the 302 shape usually arrives as
-        the final page's status with the redirect in ``history``. A genuine
-        daemon 401 is distinguishable by contract: the daemon answers every
-        error as ``application/problem+json``, so a 401 whose content type
-        is anything else cannot be its answer.
+        ``ws_connect`` follows redirects and offers no switch to stop it, so a
+        redirect usually arrives as the final page's status with the hop in
+        ``history``; it is the gate's answer all the same.
         """
-        if HTTPStatus.MULTIPLE_CHOICES <= exc.status < HTTPStatus.BAD_REQUEST:
-            return True
-        if exc.status == HTTPStatus.UNAUTHORIZED:
-            content_type = exc.headers.get("Content-Type", "") if exc.headers is not None else ""
-            return not content_type.startswith("application/problem+json")
-        return any(HTTPStatus.MULTIPLE_CHOICES <= hop.status < HTTPStatus.BAD_REQUEST for hop in exc.history)
-
-    @staticmethod
-    def _without_sid(*, exc: aiohttp.WSServerHandshakeError) -> aiohttp.WSServerHandshakeError:
-        """
-        Return ``exc`` with the box session id stripped from its URLs.
-
-        The exception's ``str`` renders the request URL, and the reconnect
-        loop logs it — a full session id in a log line is a replayable box
-        session. Status, message, headers and history are kept so the 401/403
-        handling in :meth:`_run_forever` still sees what it needs.
-        """
-        info = exc.request_info
-        clean = info._replace(
-            url=info.url.without_query_params(_BOX_SID_PARAM),
-            real_url=info.real_url.without_query_params(_BOX_SID_PARAM),
-        )
-        return aiohttp.WSServerHandshakeError(
-            clean,
-            exc.history,
-            status=exc.status,
-            message=exc.message,
-            headers=exc.headers,
-        )
+        content_type = exc.headers.get("Content-Type", "") if exc.headers is not None else ""
+        refusal = gate_refusal(status=exc.status, content_type=content_type, host=self._config.host)
+        if refusal is None and exc.history:
+            refusal = gate_refusal(status=exc.history[0].status, content_type="", host=self._config.host)
+        return refusal if refusal is not None else exc
 
     async def _open_and_read(self, *, url: str | URL, headers: dict[str, str]) -> None:
         """Open one WS connection to ``url`` and run the read loop until it ends."""

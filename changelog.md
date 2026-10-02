@@ -1,3 +1,28 @@
+# Unreleased
+
+- **Box ingress with a box API token instead of a box password**
+  (breaking). openccu-lite 1.0.0-dev.36 lets a program past the gate in
+  front of `/addons/loom/` with a box API token holding the add-on's scope
+  `addon:openccu-loom`, and the daemon signs the request in with that token
+  (daemon ADR 0080, api 13.3.0). `BoxIngressConfig` now takes `token`
+  instead of `username`/`password`; the token rides every REST request and
+  WebSocket connect as `Authorization: Bearer`, and `LoomConfig.auth` must
+  be `NoAuth()` beside it. The box login, the `?sid=` session and the
+  relogin-and-retry are gone: a gate refusal raises at once —
+  `LoomBoxTokenError` (replaces `LoomBoxLoginError`) for an unknown, expired
+  or revoked token, `LoomBoxGateError` for a token without the add-on's
+  scope or a box that redirects.
+- **`start_box_pairing()`** obtains such a token: it asks the box
+  (`POST /api/auth/v1/pairing/request` with `addons: ["openccu-loom"]`),
+  shows the six-digit code the box's administrator compares, and returns
+  the token once approved. Refusals raise `LoomBoxPairingError` with the
+  box's `code`.
+- **Compat layer:** `CentralConfig`, `list_ccus` and `check_config` take
+  `box_token` instead of `box_username`/`box_password` (which now raise
+  `TypeError` like any unknown `box_*` keyword); a daemon credential beside
+  `box_token` raises `ValueError`.
+- `pairing.seen_fingerprint` is public, shared by both pairings.
+
 # Version 2026.10.2 (2026-10-01)
 
 - **Box ingress in the aiohomematic compat layer.** `CentralConfig`,

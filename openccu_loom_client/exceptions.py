@@ -76,36 +76,52 @@ class LoomIncompatibleVersionError(LoomTransportError):
 
 class LoomBoxGateError(LoomTransportError):
     """
-    An openccu-lite box's session gate turned the request away.
+    An openccu-lite box's gate turned the request away.
 
     Only raised in box-ingress mode (``LoomConfig.box_ingress``). The gate in
-    front of ``/addons/`` answers a redirect to the box's login page whenever
-    the request carries no valid box session; the client then logs in afresh
-    and retries exactly once. This is what is left when that retry was
-    bounced too — the request never reached the daemon, so nothing the daemon
-    would have done has happened.
+    front of ``/addons/`` answered the request itself, so it never reached the
+    daemon and nothing the daemon would have done has happened. Raised as is
+    when the gate knows the box token but refuses it for this path — a token
+    without the add-on's scope ``addon:openccu-loom``, one sent from outside
+    the token's address ranges, or a wrong ingress path prefix.
 
     A subclass of :class:`LoomTransportError` because, from the daemon's
-    point of view, it is one: the daemon never saw the request. A gate that
-    keeps refusing a fresh session usually means the box account lacks
-    access to the add-on, or the ingress path prefix is wrong — neither
-    clears on its own, so surface it rather than loop.
+    point of view, it is one: the daemon never saw the request. None of these
+    clears on its own, so the client never retries it; surface it instead.
     """
 
 
-class LoomBoxLoginError(LoomBoxGateError):
+class LoomBoxTokenError(LoomBoxGateError):
     """
-    Logging in to the openccu-lite box failed.
+    The openccu-lite box does not accept the box token.
 
-    Only raised in box-ingress mode. The box answered the login and said no:
-    it rejected the configured ``BoxIngressConfig`` credentials, or its
-    answer carried no session. A box that cannot be reached at all raises
-    plain :class:`LoomTransportError` instead — that one clears on its own
-    and is worth retrying; this one does not, so tell the user rather than
-    retry (the WS reconnect loop stops on it for the same reason). A
-    subclass of :class:`LoomBoxGateError` so a handler for "the gate is
-    closed" also covers the reason it could not be opened.
+    Only raised in box-ingress mode: the gate answered 401 — the token is
+    unknown to the box, expired, or revoked. A box that cannot be reached at
+    all raises plain :class:`LoomTransportError` instead; that one clears on
+    its own and is worth retrying, this one does not, so tell the user — a new
+    token needs a new pairing (the WS reconnect loop stops on it for the same
+    reason). A subclass of :class:`LoomBoxGateError` so a handler for "the
+    gate is closed" covers it too.
     """
+
+
+class LoomBoxPairingError(BaseLoomException):
+    """
+    The openccu-lite box refused or failed a pairing request.
+
+    ``code`` is the box's short error code — ``pairing-off`` (the box does not
+    allow programs to ask), ``not-local`` (this address is outside the box's
+    local networks), ``limit`` (too many requests, or a ten-minute mute after
+    a rejection), ``invalid`` (an add-on that is not installed, among
+    others), ``forbidden`` — or ``""`` when the answer carried none.
+    ``status`` is the HTTP status.
+    """
+
+    def __init__(self, *, message: str, code: str = "", status: int | None = None) -> None:
+        """Record the box's code and status beside the message."""
+        super().__init__(message)
+        self.code = code
+        self.status = status
 
 
 class LoomUnsupportedOperationError(BaseLoomException):

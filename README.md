@@ -48,35 +48,46 @@ hand-written:
 ## Connecting through an openccu-lite box
 
 An openccu-lite box can serve the daemon through its own web server at
-`https://<box>/addons/loom/`, behind a session gate that lets nothing
-through without a box login. Set `LoomConfig.box_ingress` to go that way:
+`https://<box>/addons/loom/`, behind a gate that lets nothing through without
+a credential the box accepts. Since openccu-lite 1.0.0-dev.36 that can be a
+**box API token** holding the add-on's gate scope `addon:openccu-loom` — no
+box password needs to be stored. Get one by pairing with the box; the box's
+administrator compares a six-digit code on the box's status page and
+approves:
 
 ```python
-from openccu_loom_client import BearerAuth, BoxIngressConfig, LoomConfig
+from openccu_loom_client import BoxIngressConfig, LoomConfig, NoAuth, start_box_pairing
 
-config = LoomConfig(
-    host="openccu-lite.local",  # the box
-    auth=BearerAuth(token="<daemon API token>"),
-    box_ingress=BoxIngressConfig(username="admin", password="<box password>"),
-)
+session = await start_box_pairing(host="openccu-lite.local", app="my-app", instance="nas")
+show_to_user(session.code)          # the six digits
+result = await session.wait()       # approved / rejected / expired
+if result.state == "approved":
+    config = LoomConfig(
+        host="openccu-lite.local",  # the box
+        auth=NoAuth(),              # the box token is the only credential
+        box_ingress=BoxIngressConfig(token=result.token),
+    )
 ```
 
-The client logs in to the box (`POST /api/auth/v1/login`) on connect and
-carries the box session as `?sid=` on every REST request and every WebSocket
-(re)connect; when the gate turns a request away it logs in again and retries
-once, then raises `LoomBoxGateError` (`LoomBoxLoginError` when the login
-itself is refused). The box session only opens the gate — the daemon still
-authenticates the request through `auth`. In this mode `tls` describes the
-box's listener, `BoxIngressConfig.port` defaults to 443 (80 without TLS),
+The token rides every REST request and WebSocket (re)connect as
+`Authorization: Bearer`; the gate hands it on, and the daemon signs the
+request in with it after asking the box (daemon ADR 0080): the add-on scope as
+operator, a Full-access token as admin. A daemon credential cannot travel
+beside it, so `LoomConfig.auth` must be `NoAuth()`. When the gate refuses the
+token the client raises at once, without retrying: `LoomBoxTokenError` for an
+unknown, expired or revoked token (401 — pair again), `LoomBoxGateError` for
+a token without the add-on's scope (403) or a box that redirects. Pairing
+refusals raise `LoomBoxPairingError` with the box's `code` (`pairing-off`,
+`not-local`, `limit`, `invalid`). In this mode `tls` describes the box's
+listener, `BoxIngressConfig.port` defaults to 443 (80 without TLS),
 `path_prefix` to `/addons/loom`, and `LoomConfig.port` is unused.
 
 Home Assistant reaches this through the aiohomematic compat layer:
-`CentralConfig` and `list_ccus` take `box_username`, `box_password`,
-`box_port` and `box_path_prefix` (`check_config` validates them) and build the
-`BoxIngressConfig` from them. In box mode the daemon credential is optional —
-without a token or username/password the client sends only the box session
-(`NoAuth`), and the daemon resolves it to the box user and that user's role.
-An unknown `box_*` keyword raises `TypeError` instead of being ignored.
+`CentralConfig` and `list_ccus` take `box_token`, `box_port` and
+`box_path_prefix` (`check_config` validates them) and build the
+`BoxIngressConfig` from them; a daemon credential passed beside `box_token`
+raises `ValueError`. An unknown `box_*` keyword — `box_username` and
+`box_password` included — raises `TypeError` instead of being ignored.
 
 ## Status of the wire contract
 
