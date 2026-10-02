@@ -39,7 +39,7 @@ dependencies = [
     # What guards the coupling is still not metadata but the drift-guard test
     # (tests/compat/test_aiohomematic_protocol_parity.py) running against the
     # exact version in requirements.txt.
-    "aiohomematic>=2026.8.8",
+    "aiohomematic>=2026.10.2",
     # Floors match the CI-pinned versions in requirements.txt so a fresh
     # `pip install` resolves a tested-compatible set, not an ancient one.
     "aiohttp>=3.12.0",
