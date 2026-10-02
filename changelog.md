@@ -1,3 +1,11 @@
+# Version 2026.10.5 (2026-10-02)
+
+- **Wire layer regenerated for daemon 0.85.0 (api 13.4.0).**
+  `DAEMON_API_VERSION` and `SCHEMA_DIGEST` move with it. The only surface
+  change is the `Backend` enum: the simulator value `PyDevCCU` is now
+  `GoDevCCU`, following the daemon's move from pydevccu to godevccu. No
+  daemon payload carries that enum.
+
 # Version 2026.10.4 (2026-10-02)
 
 - **Pairing reports an unreachable daemon as `LoomTransportError`.**
