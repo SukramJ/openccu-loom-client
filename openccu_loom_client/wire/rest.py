@@ -1469,6 +1469,7 @@ class Scheme(_TolerantStrEnum):
     oidc = "oidc"
     ingress = "ingress"
     occulite = "occulite"
+    occulite_token = "occulite-token"
 
 
 class Identity(BaseModel):
@@ -1476,11 +1477,11 @@ class Identity(BaseModel):
     role: Role1
     scheme: Scheme | None = Field(
         None,
-        description="How the request authenticated. `ingress` is the Home Assistant Ingress passthrough the add-on deployment uses; `occulite` is the box-shell single sign-on over the openccu-lite ingress (ADR 0079) — the gate's session, live-verified against the box. The SPA reads it to skip its own login and hide the logout action.",
+        description="How the request authenticated. `ingress` is the Home Assistant Ingress passthrough the add-on deployment uses; `occulite` is the box-shell single sign-on over the openccu-lite ingress (ADR 0079) — the gate's session, live-verified against the box. The SPA reads it to skip its own login and hide the logout action. `occulite-token` is a box API token the gate accepted for this add-on as `Authorization: Bearer` (ADR 0080), live-verified against the box: the add-on's own gate scope `addon:<id>` grants operator, Full access admin. Its subject is `occulite-token:<token name>`.",
     )
     expires_at: AwareDatetime | None = Field(
         None,
-        description='The instant the credential behind this identity stops being accepted, in UTC. Absent means the credential has no server-side expiry — a `basic`, `ingress`, `occulite` (the box owns that session\'s lifetime) or unbounded `bearer` identity. It is the deadline a long-lived consumer needs: a WebSocket captures its identity at the upgrade and is closed when this instant passes, so a client that reads it can refill its credential through the in-band `{op:"reauth"}` frame instead of discovering the rotation through a 401.',
+        description="The instant the credential behind this identity stops being accepted, in UTC. Absent means the credential has no server-side expiry — a `basic`, `ingress`, `occulite` or `occulite-token` (the box owns the session's or token's lifetime) or unbounded `bearer` identity. It is the deadline a long-lived consumer needs: a WebSocket captures its identity at the upgrade and is closed when this instant passes, so a client that reads it can refill its credential through the in-band `{op:\"reauth\"}` frame instead of discovering the rotation through a 401.",
     )
 
 
@@ -4650,7 +4651,7 @@ class CentralRow(BaseModel):
     )
     host: str = Field(
         ...,
-        description="CCU hostname or IP address. Present but empty on the two read operations when the caller is below the admin role; the sibling connection fields are omitted outright there.",
+        description="CCU hostname or IP address. Present but empty on the two read operations when the caller is below the admin role; the sibling connection fields are omitted outright there (`serial` only below the operator role).",
     )
     serial: str | None = Field(
         None,
