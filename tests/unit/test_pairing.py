@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from openccu_loom_client import LoomPairingOffError, PairingFingerprintMismatchError, start_pairing
+from openccu_loom_client import LoomPairingOffError, LoomTransportError, PairingFingerprintMismatchError, start_pairing
 from openccu_loom_client.pairing import derive_pairing_code
 
 if TYPE_CHECKING:
@@ -149,3 +149,31 @@ async def test_fingerprint_mismatch_aborts_and_withdraws(
         await start_pairing(app="app", role="operator", **_knobs(mock_daemon))
     withdrawals = [r for r in mock_daemon.requests if r.method == "DELETE"]
     assert len(withdrawals) == 1, "the poisoned request must be withdrawn"
+
+
+async def test_an_unreachable_daemon_is_a_transport_error() -> None:
+    """
+    A connection failure raises LoomTransportError, the class callers map to cannot_connect.
+
+    The raw aiohttp error used to escape, and a caller catching the package's
+    exceptions — Home Assistant's config flow does — had no branch for it.
+    """
+    with pytest.raises(LoomTransportError):
+        await start_pairing(host="127.0.0.1", port=1, tls=False, app="app", role="operator")
+
+
+async def test_poll_and_withdraw_against_a_vanished_daemon_are_transport_errors(mock_daemon: MockDaemon) -> None:
+    """The running session's poll and withdrawal map a lost daemon the same way."""
+    mock_daemon.post(
+        "/api/v1/pairing",
+        status=202,
+        payload={"id": "req1", "poll": "p", "nonce": "aa" * 16, "expires_in": 300, "interval": 2, "fingerprint": ""},
+    )
+    session = await start_pairing(app="app", role="operator", **_knobs(mock_daemon))
+    # Point the running session at a port nothing listens on, as if the
+    # daemon went away between the ask and the poll.
+    session._base = "http://127.0.0.1:1/api/v1"
+    with pytest.raises(LoomTransportError):
+        await session.wait()
+    with pytest.raises(LoomTransportError):
+        await session.withdraw()

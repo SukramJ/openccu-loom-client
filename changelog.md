@@ -1,3 +1,12 @@
+# Unreleased
+
+- **Pairing reports an unreachable daemon as `LoomTransportError`.**
+  `start_pairing()` and its session's `wait()` / `withdraw()` let aiohttp's
+  own exceptions escape — a refused connection, or a TLS handshake against
+  a daemon that serves plain HTTP — so a caller handling this package's
+  exceptions (Home Assistant's config flow maps `LoomTransportError` to
+  "cannot connect") had no branch for them.
+
 # Version 2026.10.3 (2026-10-02)
 
 - **Wire layer regenerated for daemon 0.84.0 (api 13.3.0).**
