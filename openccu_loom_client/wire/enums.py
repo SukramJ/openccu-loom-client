@@ -104,8 +104,8 @@ class AlarmZoneState(_TolerantStrMixinEnum):
 
 class Backend(_TolerantStrMixinEnum):
     CCU = "CCU"
+    GoDevCCU = "GoDevCCU"
     Homegear = "Homegear"
-    PyDevCCU = "PyDevCCU"
 
 
 class CCUType(_TolerantStrMixinEnum):
