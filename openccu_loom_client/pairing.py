@@ -37,6 +37,8 @@ knobs directly instead of a :class:`~openccu_loom_client.config.LoomConfig`
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterator
+import contextlib
 from dataclasses import dataclass, field
 import hashlib
 import secrets
@@ -125,7 +127,14 @@ class PairingSession:
             params["client_nonce"] = self._client_nonce.hex()
         headers = {"Authorization": f"Pairing {self._answer.poll}"}
         timeout = aiohttp.ClientTimeout(total=_POLL_TIMEOUT_SECONDS)
-        async with aiohttp.ClientSession(connector=self._connector(), timeout=timeout) as session:
+        with _as_transport_error(what="pairing poll", base=self._base):
+            return await self._poll(params=params, headers=headers, client_timeout=timeout)
+
+    async def _poll(
+        self, *, params: dict[str, str], headers: dict[str, str], client_timeout: aiohttp.ClientTimeout
+    ) -> PairingResult:
+        """Run the poll loop of :meth:`wait`."""
+        async with aiohttp.ClientSession(connector=self._connector(), timeout=client_timeout) as session:
             while True:
                 async with session.get(
                     f"{self._base}/pairing/{self._answer.id}", params=params, headers=headers
@@ -153,19 +162,37 @@ class PairingSession:
         """Give the request up; the admin card drops it immediately."""
         headers = {"Authorization": f"Pairing {self._answer.poll}"}
         timeout = aiohttp.ClientTimeout(total=DEFAULT_REQUEST_TIMEOUT_SECONDS)
-        async with (
-            aiohttp.ClientSession(connector=self._connector(), timeout=timeout) as session,
-            session.delete(f"{self._base}/pairing/{self._answer.id}", headers=headers) as resp,
-        ):
-            if resp.status not in (204, 404):
-                payload = await resp.json(content_type=None)
-                raise http_error_from_problem(
-                    status=resp.status,
-                    problem=parse_problem(payload=payload),
-                    raw_body=None,
-                    method="DELETE",
-                    url=str(resp.url),
-                )
+        with _as_transport_error(what="pairing withdrawal", base=self._base):
+            async with (
+                aiohttp.ClientSession(connector=self._connector(), timeout=timeout) as session,
+                session.delete(f"{self._base}/pairing/{self._answer.id}", headers=headers) as resp,
+            ):
+                if resp.status not in (204, 404):
+                    payload = await resp.json(content_type=None)
+                    raise http_error_from_problem(
+                        status=resp.status,
+                        problem=parse_problem(payload=payload),
+                        raw_body=None,
+                        method="DELETE",
+                        url=str(resp.url),
+                    )
+
+
+@contextlib.contextmanager
+def _as_transport_error(*, what: str, base: str) -> Iterator[None]:
+    """
+    Turn a connection-level failure into :class:`LoomTransportError`.
+
+    aiohttp raises its own classes for a refused connection, a TLS handshake
+    against a plain-HTTP daemon, or a timeout. A caller that handles this
+    package's exceptions — Home Assistant's config flow maps
+    :class:`LoomTransportError` to "cannot connect" — had no branch for them.
+    """
+    try:
+        yield
+    except (aiohttp.ClientError, TimeoutError) as exc:
+        msg = f"{what} at {base} failed: {type(exc).__name__}: {exc}"
+        raise LoomTransportError(msg) from exc
 
 
 def seen_fingerprint(*, resp: aiohttp.ClientResponse) -> bytes:
@@ -221,20 +248,21 @@ async def start_pairing(
         "commit": commit,
     }
     timeout = aiohttp.ClientTimeout(total=DEFAULT_REQUEST_TIMEOUT_SECONDS)
-    async with (
-        aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=verify_tls), timeout=timeout) as session,
-        session.post(f"{base}/pairing", json=ask) as resp,
-    ):
-        seen = seen_fingerprint(resp=resp)
-        payload = await resp.json(content_type=None)
-        if resp.status != 202:
-            raise http_error_from_problem(
-                status=resp.status,
-                problem=parse_problem(payload=payload),
-                raw_body=None,
-                method="POST",
-                url=str(resp.url),
-            )
+    with _as_transport_error(what="pairing request", base=base):
+        async with (
+            aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=verify_tls), timeout=timeout) as session,
+            session.post(f"{base}/pairing", json=ask) as resp,
+        ):
+            seen = seen_fingerprint(resp=resp)
+            payload = await resp.json(content_type=None)
+            if resp.status != 202:
+                raise http_error_from_problem(
+                    status=resp.status,
+                    problem=parse_problem(payload=payload),
+                    raw_body=None,
+                    method="POST",
+                    url=str(resp.url),
+                )
     answer = PairingAnswer.model_validate(payload)
     reported = bytes.fromhex(answer.fingerprint) if answer.fingerprint else b""
     # The CODE always uses the fingerprint the daemon binds to (its own
