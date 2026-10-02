@@ -114,7 +114,7 @@ class _GenericEntitySurface(_GenericProtocolSurface):
         override = getattr(self, "_value_override", _UNSET)
         if override is not _UNSET:
             return override
-        return self._resolve_enum(raw=DataPoint.value.fget(self))  # type: ignore[attr-defined]
+        return self._resolve_enum(raw=DataPoint.value.fget(self))
 
     @value.setter
     def value(self, new_value: Any) -> None:

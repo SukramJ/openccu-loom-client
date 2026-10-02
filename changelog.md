@@ -1,5 +1,9 @@
-# Unreleased
+# Version 2026.10.3 (2026-10-02)
 
+- **Wire layer regenerated for daemon 0.84.0 (api 13.3.0).**
+  `DAEMON_API_VERSION` and `SCHEMA_DIGEST` move with it; the 13.3.0
+  surface adds the `occulite-token` identity scheme, and the CCU serial is
+  readable with operator rights.
 - **Box ingress with a box API token instead of a box password**
   (breaking). openccu-lite 1.0.0-dev.36 lets a program past the gate in
   front of `/addons/loom/` with a box API token holding the add-on's scope
@@ -22,6 +26,9 @@
   `TypeError` like any unknown `box_*` keyword); a daemon credential beside
   `box_token` raises `ValueError`.
 - `pairing.seen_fingerprint` is public, shared by both pairings.
+- **Dependencies:** `python-slugify` floor 9.1.2 (the suite runs on 9.x);
+  development pins move to coverage 7.16.2, mypy 2.4.0, prek 0.5.4,
+  pylint 4.1.1 and ruff 0.16.10.
 
 # Version 2026.10.2 (2026-10-01)
 
