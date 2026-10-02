@@ -1,4 +1,4 @@
-# Unreleased
+# Version 2026.10.4 (2026-10-02)
 
 - **Pairing reports an unreachable daemon as `LoomTransportError`.**
   `start_pairing()` and its session's `wait()` / `withdraw()` let aiohttp's
