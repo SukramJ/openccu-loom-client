@@ -1,3 +1,10 @@
+# Unreleased
+
+- **Dependencies:** the `aiohomematic` floor and CI pin move to 2026.10.2,
+  the version Homematic(IP) Local ships with. The drift guard
+  (`tests/compat/test_aiohomematic_protocol_parity.py`) passes against it
+  unchanged: no runtime-checkable protocol was added or removed.
+
 # Version 2026.10.5 (2026-10-02)
 
 - **Wire layer regenerated for daemon 0.85.0 (api 13.4.0).**
