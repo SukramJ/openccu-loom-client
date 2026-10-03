@@ -322,6 +322,230 @@ _CCU_ENTRY = {
     "readiness": {"phase": "ready", "ready": True, "interfaces_loaded": 1, "interfaces_total": 1},
 }
 
+# An openccu-lite central whose daemon credential lacks the backup scope.
+_LITE_ENTRY = {
+    **_CCU_ENTRY,
+    "system_type": "openccu-lite",
+    "model": "openccu-lite",
+    "features": {
+        "system.backup.create": {"available": False, "reason": "missing_scope", "scope": "backup"},
+        "hub.system_update.install": {"available": False, "reason": "not_supported_by_system"},
+        "system.reboot": {"available": True},
+    },
+}
+
+
+class TestSystemTypeAndFeatures:
+    """The central's system type and feature map decide ccu_type, backup and system update."""
+
+    async def test_lite_central_without_backup_scope(self, connected) -> None:
+        from aiohomematic.const import CCUType
+
+        central, mock = connected
+        mock.get(f"{_BASE}/system/ccu", payload=[_LITE_ENTRY])
+        mock.get(f"{_BASE}/interfaces", payload=[])
+        info = await central.validate_config_and_get_system_information()
+        assert info.ccu_type is CCUType.OPENCCU_LITE
+        assert info.has_backup is False
+        assert info.has_system_update is False
+
+    async def test_lite_central_with_backup_scope(self, connected) -> None:
+        from aiohomematic.const import CCUType
+
+        central, mock = connected
+        entry = {
+            **_LITE_ENTRY,
+            "features": {
+                "system.backup.create": {"available": True},
+                "hub.system_update.install": {"available": True},
+            },
+        }
+        mock.get(f"{_BASE}/system/ccu", payload=[entry])
+        mock.get(f"{_BASE}/interfaces", payload=[])
+        info = await central.validate_config_and_get_system_information()
+        assert info.ccu_type is CCUType.OPENCCU_LITE
+        assert info.has_backup is True
+        assert info.has_system_update is True
+
+    async def test_openccu_without_feature_map_falls_back_to_the_type(self, connected) -> None:
+        """An empty map is an older daemon, not a central that offers nothing."""
+        from aiohomematic.const import CCUType
+
+        central, mock = connected
+        mock.get(f"{_BASE}/system/ccu", payload=[{**_CCU_ENTRY, "system_type": "ccu", "model": "OpenCCU"}])
+        mock.get(f"{_BASE}/interfaces", payload=[])
+        info = await central.validate_config_and_get_system_information()
+        assert info.ccu_type is CCUType.OPENCCU
+        assert info.has_backup is True
+        assert info.has_system_update is True
+
+    async def test_unread_model_and_no_features_is_unknown(self, connected) -> None:
+        from aiohomematic.const import CCUType
+
+        central, mock = connected
+        mock.get(f"{_BASE}/system/ccu", payload=[{**_CCU_ENTRY, "model": ""}])
+        mock.get(f"{_BASE}/interfaces", payload=[])
+        info = await central.validate_config_and_get_system_information()
+        assert info.ccu_type is CCUType.UNKNOWN
+        assert info.has_backup is False
+        assert info.has_system_update is False
+
+    async def test_reads_this_centrals_entry_not_the_first(self, connected) -> None:
+        from aiohomematic.const import CCUType
+
+        central, mock = connected
+        other = {**_CCU_ENTRY, "name": "other", "system_type": "ccu", "model": "OpenCCU"}
+        mock.get(f"{_BASE}/system/ccu", payload=[other, _LITE_ENTRY])
+        mock.get(f"{_BASE}/interfaces", payload=[])
+        info = await central.validate_config_and_get_system_information()
+        assert info.ccu_type is CCUType.OPENCCU_LITE
+        assert info.has_backup is False
+
+    async def test_list_ccus_carries_system_type_and_features(self, mock_daemon: MockDaemon) -> None:
+        from openccu_loom_client.compat.aiohomematic.central import list_ccus
+
+        mock_daemon.get(f"{_BASE}/info", payload=_INFO)
+        mock_daemon.get(
+            f"{_BASE}/system/ccu",
+            payload=[_LITE_ENTRY, {**_CCU_ENTRY, "name": "older"}],
+        )
+        result = await list_ccus(host=mock_daemon.host, port=mock_daemon.port, token="tok-123456")
+        assert result[0]["system_type"] == "openccu-lite"
+        assert result[0]["features"] == {
+            "system.backup.create": {"available": False, "reason": "missing_scope", "scope": "backup"},
+            "hub.system_update.install": {"available": False, "reason": "not_supported_by_system", "scope": None},
+            "system.reboot": {"available": True, "reason": None, "scope": None},
+        }
+        # Plain values, not wire enums: the config flow stores them as-is.
+        assert type(result[0]["system_type"]) is str
+        assert type(result[0]["features"]["system.backup.create"]["reason"]) is str
+        # An older daemon reports neither.
+        assert result[1]["system_type"] is None
+        assert result[1]["features"] == {}
+
+
+def _features_event(*, central: str, backup: bool) -> Any:
+    """Build the daemon's ``central.features_changed`` broadcast."""
+    from openccu_loom_client.events import CentralFeaturesChangedEvent
+    from openccu_loom_client.wire.rest import CentralFeaturesChangedPayload
+
+    return CentralFeaturesChangedEvent(
+        seq=0,
+        kind=Kind.change,
+        ts=datetime.now(tz=UTC),
+        topic=None,
+        type=CentralFeaturesChangedEvent.type_id,
+        payload=CentralFeaturesChangedPayload.model_validate(
+            {
+                "central": central,
+                "system_type": "openccu-lite",
+                "features": {"system.backup.create": {"available": backup}},
+            }
+        ),
+    )
+
+
+async def _wait_for(predicate: Any) -> bool:
+    """Poll ``predicate`` for up to two seconds; the refresh runs as a background task."""
+    deadline = asyncio.get_running_loop().time() + 2.0
+    while asyncio.get_running_loop().time() < deadline:
+        if predicate():
+            return True
+        await asyncio.sleep(0.01)
+    return bool(predicate())
+
+
+class TestFeaturesChangedSubscriber:
+    """
+    A ``central.features_changed`` broadcast re-reads this central's system information.
+
+    Driven through ``start()`` so the subscription is the one production
+    installs, with only the network-heavy bring-up steps stubbed out.
+    """
+
+    @staticmethod
+    async def _started(*, mock_daemon: MockDaemon, monkeypatch: pytest.MonkeyPatch) -> tuple[Any, list[int]]:
+        mock_daemon.get(f"{_BASE}/info", payload=_INFO)
+        # The first read (start) finds backup unavailable; every later one
+        # (the broadcast-driven refresh) finds it granted.
+        mock_daemon.get(f"{_BASE}/system/ccu", payload=[_LITE_ENTRY])
+        granted = {**_LITE_ENTRY, "features": {"system.backup.create": {"available": True}}}
+        mock_daemon.get(f"{_BASE}/system/ccu", payload=[granted])
+        mock_daemon.get(f"{_BASE}/interfaces", payload=[])
+        central = await _make_config(mock_daemon=mock_daemon).create_central()
+
+        async def _noop(*_args: Any, **_kwargs: Any) -> None:
+            return None
+
+        for target, attr in (
+            (central.client_coordinator, "refresh"),
+            (central._client, "wait_until_ready"),
+            (central._client, "start_events"),
+            (central, "_bootstrap_model"),
+            (central.query_facade, "prefetch_un_ignore_candidates"),
+            (central, "_emit_data_points_created"),
+            (central, "_hub_reconcile_loop"),
+        ):
+            monkeypatch.setattr(target, attr, _noop)
+
+        refreshes: list[int] = []
+        real_refresh = central._refresh_system_information
+
+        async def _counting_refresh() -> None:
+            refreshes.append(1)
+            await real_refresh()
+
+        monkeypatch.setattr(central, "_refresh_system_information", _counting_refresh)
+        await central.start()
+        return central, refreshes
+
+    async def test_event_for_this_central_refreshes(self, mock_daemon: MockDaemon, monkeypatch) -> None:
+        central, refreshes = await self._started(mock_daemon=mock_daemon, monkeypatch=monkeypatch)
+        try:
+            assert central.system_information.has_backup is False
+            assert len(refreshes) == 1
+            await central._client.events.publish(event=_features_event(central="home", backup=True))
+            assert await _wait_for(lambda: central.system_information.has_backup is True), (
+                "a features_changed broadcast for this central must re-read its system information"
+            )
+            assert len(refreshes) == 2
+        finally:
+            await central.stop()
+
+    async def test_event_for_another_central_is_ignored(self, mock_daemon: MockDaemon, monkeypatch) -> None:
+        central, refreshes = await self._started(mock_daemon=mock_daemon, monkeypatch=monkeypatch)
+        try:
+            await central._client.events.publish(event=_features_event(central="other", backup=True))
+            await asyncio.sleep(0.1)
+            assert len(refreshes) == 1
+            assert central.system_information.has_backup is False
+        finally:
+            await central.stop()
+
+    async def test_no_refresh_after_stop(self, mock_daemon: MockDaemon, monkeypatch) -> None:
+        central, refreshes = await self._started(mock_daemon=mock_daemon, monkeypatch=monkeypatch)
+        events = central._client.events
+        await central.stop()
+        await events.publish(event=_features_event(central="home", backup=True))
+        await asyncio.sleep(0.1)
+        assert len(refreshes) == 1
+
+    async def test_refresh_failure_is_logged_not_raised(self, mock_daemon: MockDaemon, monkeypatch, caplog) -> None:
+        central, _ = await self._started(mock_daemon=mock_daemon, monkeypatch=monkeypatch)
+        try:
+
+            async def _boom() -> None:
+                raise RuntimeError("daemon went away")
+
+            monkeypatch.setattr(central, "_refresh_system_information", _boom)
+            await central._client.events.publish(event=_features_event(central="home", backup=True))
+            assert await _wait_for(lambda: "daemon went away" in caplog.text)
+            # Logged by the adapter, not caught by the bus as a raising handler.
+            assert "event handler raised" not in caplog.text
+            assert central.system_information.has_backup is False
+        finally:
+            await central.stop()
+
 
 class TestSerialInjection:
     """An injected serial (HA entry.unique_id) fills the key central-id slot."""

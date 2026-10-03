@@ -252,7 +252,14 @@ async def list_ccus(
     Connects to the daemon (raising ``LoomAuthError`` / ``LoomTransportError``
     on bad token / unreachable host), reads ``GET /system/ccu`` and returns a
     plain-dict projection (``name``, ``serial``, ``host``, ``model``,
-    ``available``) so the caller stays decoupled from the wire types.
+    ``available``, ``system_type``, ``features``) so the caller stays
+    decoupled from the wire types.
+
+    ``system_type`` is ``"ccu"`` or ``"openccu-lite"``, ``None`` until the
+    central's first bring-up or on an older daemon. ``features`` maps each
+    feature key to ``{"available", "reason", "scope"}`` as plain values
+    (``reason`` / ``scope`` ``None`` when absent); an empty map means the
+    daemon does not report features, not that the central offers nothing.
 
     ``serial`` and ``host`` are admin-only since daemon api 7.6.0 and read
     as empty strings for a viewer or operator token. The config flow needs
@@ -306,9 +313,25 @@ async def list_ccus(
             "host": ccu.host,
             "model": ccu.model,
             "available": ccu.available,
+            "system_type": _plain(value=ccu.system_type),
+            "features": {
+                key: {
+                    "available": state.available,
+                    "reason": _plain(value=state.reason),
+                    "scope": state.scope,
+                }
+                for key, state in (ccu.features or {}).items()
+            },
         }
         for ccu in ccus
     ]
+
+
+def _plain(*, value: Any) -> str | None:
+    """Return a wire enum as its string value, ``None`` as ``None``."""
+    if value is None:
+        return None
+    return str(getattr(value, "value", value))
 
 
 __all__: Final = [

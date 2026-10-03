@@ -14,6 +14,7 @@ the client-side defaults only matter for the HA-config-flow shape.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import re
 from typing import Any, Final
 
@@ -168,6 +169,71 @@ class TimeoutConfig:
         self.command_throttle_interval = command_throttle_interval
 
 
+@dataclass(frozen=True, kw_only=True, slots=True)
+class LoomSystemInformation(SystemInformation):
+    """
+    aiohomematic's ``SystemInformation``, with backup and system update from the daemon.
+
+    A subclass, not a stand-in: the integration checks ``isinstance`` against
+    the upstream type and reads the whole record (see
+    :func:`make_system_information`).
+
+    aiohomematic derives ``has_backup`` / ``has_system_update`` from
+    ``ccu_type`` alone, and documents that an openccu-lite consumer must not:
+    what such a system offers depends on the daemon's credential. The daemon
+    reports exactly that per central, as the ``system.backup.create`` and
+    ``hub.system_update.install`` entries of its feature map, carried here as
+    ``backup_available`` / ``system_update_available``.
+
+    ``None`` means the daemon reported no such key — an older daemon whose
+    feature map is empty — and falls back to the upstream type rule, so such
+    a daemon behaves as before for a central whose type is known.
+    """
+
+    backup_available: bool | None = None
+    system_update_available: bool | None = None
+
+    @property
+    def has_backup(self) -> bool:
+        """Return whether the central offers a backup: the daemon's feature, else the type rule."""
+        if self.backup_available is not None:
+            return self.backup_available
+        return super().has_backup
+
+    @property
+    def has_system_update(self) -> bool:
+        """
+        Return whether the central offers a system update through this integration.
+
+        An HA app never does — the Supervisor updates it — whatever the
+        feature says, matching the upstream rule.
+        """
+        if self.system_update_available is not None:
+            return self.system_update_available and not self.is_ha_app
+        return super().has_system_update
+
+
+def ccu_type_for_central(*, system_type: str | None, model: str | None) -> AiohomematicCCUType:
+    """
+    Map a central's ``system_type`` and ``model`` from ``GET /system/ccu`` onto ``CCUType``.
+
+    ``system_type`` ``openccu-lite`` is ``OPENCCU_LITE`` whatever the model.
+    Otherwise the model names the product family — ``OpenCCU`` or ``CCU``,
+    compared case-insensitively. Anything else, including a model the daemon
+    has not read yet, is ``UNKNOWN``: a client reports what it knows, and
+    guessing ``OPENCCU`` would claim backup and system update for a central
+    nobody has identified.
+    """
+    if (system_type or "").strip().lower() == "openccu-lite":
+        return AiohomematicCCUType.OPENCCU_LITE
+    family = (model or "").strip().lower()
+    if family == "openccu":
+        return AiohomematicCCUType.OPENCCU
+    if family == "ccu":
+        return AiohomematicCCUType.CCU
+    return AiohomematicCCUType.UNKNOWN
+
+
 def make_system_information(
     *,
     serial: str | None = None,
@@ -178,24 +244,26 @@ def make_system_information(
     auth_enabled: bool | None = None,
     https_redirect_enabled: bool | None = None,
     ccu_type: Any = None,
-) -> SystemInformation:
+    backup_available: bool | None = None,
+    system_update_available: bool | None = None,
+) -> LoomSystemInformation:
     """
-    Build aiohomematic's ``SystemInformation`` for the loom backend.
+    Build the loom backend's ``SystemInformation`` (a :class:`LoomSystemInformation`).
 
     Reused rather than re-implemented on purpose: the CCU dashboard's
     ``ws_get_system_information`` reads the *whole* bundle — including
     ``hostname`` / ``auth_enabled`` / ``https_redirect_enabled`` and the
-    ``has_backup`` / ``has_system_update`` **computed properties** (derived from
-    ``ccu_type``). A hand-rolled stand-in that carried only serial/version/
-    interfaces/ccu_type raised ``AttributeError: hostname`` — and since that
-    command is part of the dashboard's ``Promise.all``, it took the whole CCU tab
-    down with it.
+    ``has_backup`` / ``has_system_update`` **computed properties**. A
+    hand-rolled stand-in that carried only serial/version/interfaces/ccu_type
+    raised ``AttributeError: hostname`` — and since that command is part of
+    the dashboard's ``Promise.all``, it took the whole CCU tab down with it.
 
-    ``ccu_type`` defaults to ``OPENCCU``: the HA hub-update entity branches on it
-    for the release-notes URL, and the loom daemon always fronts an OpenCCU-class
-    central.
+    ``ccu_type`` defaults to ``UNKNOWN``: the caller maps it from the daemon
+    with :func:`ccu_type_for_central`, and until the daemon has identified the
+    central there is nothing to report. ``UNKNOWN`` offers neither backup nor
+    system update unless the daemon's feature map says otherwise.
     """
-    return SystemInformation(
+    return LoomSystemInformation(
         serial=serial,
         version=version or "",
         available_interfaces=available_interfaces,
@@ -203,7 +271,9 @@ def make_system_information(
         is_ha_app=is_ha_app,
         auth_enabled=auth_enabled,
         https_redirect_enabled=https_redirect_enabled,
-        ccu_type=ccu_type if ccu_type is not None else AiohomematicCCUType.OPENCCU,
+        ccu_type=ccu_type if ccu_type is not None else AiohomematicCCUType.UNKNOWN,
+        backup_available=backup_available,
+        system_update_available=system_update_available,
     )
 
 
@@ -281,6 +351,7 @@ __all__ = [
     "IntegrationIssueSeverity",
     "IntegrationIssueType",
     "Interface",
+    "LoomSystemInformation",
     "Manufacturer",
     "OptionalSettings",
     "Parameter",
@@ -294,5 +365,6 @@ __all__ = [
     "SystemInformation",
     "TimeoutConfig",
     "WeekdayStr",
+    "ccu_type_for_central",
     "get_interface_default_port",
 ]

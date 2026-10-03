@@ -254,7 +254,15 @@ class TestListCcus:
         client.close = AsyncMock()
         client.system.list_system_ccus = AsyncMock(
             return_value=[
-                SimpleNamespace(name="Home", serial="ABC123", host="ccu.local", model="CCU3", available=True),
+                SimpleNamespace(
+                    name="Home",
+                    serial="ABC123",
+                    host="ccu.local",
+                    model="CCU3",
+                    available=True,
+                    system_type=None,
+                    features={},
+                ),
             ]
         )
         with (
@@ -270,6 +278,8 @@ class TestListCcus:
                 "host": "ccu.local",
                 "model": "CCU3",
                 "available": True,
+                "system_type": None,
+                "features": {},
             }
         ]
         client.connect.assert_awaited_once()
