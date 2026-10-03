@@ -1,5 +1,18 @@
 # Unreleased
 
+- **Hear when a central's system information changes.** The adapter's
+  `event_bus` now publishes `SystemInformationChangedEvent` (import it from
+  `openccu_loom_client.compat.aiohomematic.central.events`), keyed by the
+  central's name like `CentralStateChangedEvent`, with the `previous` and
+  `current` `SystemInformation`. It fires when a re-read of
+  `system_information` — after the daemon's `central.features_changed`
+  broadcast — yields a different value, e.g. a central that was `UNKNOWN`
+  at setup now reports its type, or backup became available. It does not
+  fire on the first read during `start()` or
+  `validate_config_and_get_system_information()`, for an unchanged value,
+  or for a failed re-read, which keeps the previous value. The Home
+  Assistant integration can reload on it instead of keeping what it read
+  at setup.
 - **Wire types for daemon api 13.5.3, still connectable to older daemons.**
   The generated wire models now follow daemon api 13.5.3, whose `/info`
   requires `deployment`. A daemon older than 13.5.0 does not send it, and
