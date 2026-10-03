@@ -21,8 +21,32 @@
   `AUTH_BEARER`, `AUTH_PAIRING`, `AUTH_OCCULITE_TOKEN`, `AUTH_OCCULITE_SSO`
   and `AUTH_HA_INGRESS`; `login_paths()` turns any `auth.<name>.v1` token
   into its short name, including ones this package does not know yet.
-- **Dependencies:** the `aiohomematic` floor and CI pin move to 2026.10.2,
-  the version Homematic(IP) Local ships with. The drift guard
+- **What kind of system each central is, from the daemon.** The compat
+  layer's `system_information.ccu_type` now follows the central's
+  `system_type` and `model` on `GET /system/ccu`: `OPENCCU_LITE` for an
+  openccu-lite central, `OPENCCU` or `CCU` for a CCU by its product family,
+  `UNKNOWN` for anything else. `ccu_type_for_central()` is the mapping.
+- **Backup and system update follow the daemon's feature map.**
+  `system_information` is now a `LoomSystemInformation` — still an
+  aiohomematic `SystemInformation` — whose `has_backup` and
+  `has_system_update` read the central's `system.backup.create` and
+  `hub.system_update.install` features, so an openccu-lite box whose
+  daemon credential lacks the backup scope no longer offers a backup that
+  fails. Where the daemon reports no feature map (an older daemon), both
+  fall back to the type rule as before. A `central.features_changed`
+  broadcast for the central re-reads its system information, so a granted
+  scope or a finished first bring-up shows without a restart.
+- **The `ccu_type` default changes from `OPENCCU` to `UNKNOWN`.** A central
+  the daemon has not identified yet — before its first bring-up, or before
+  the daemon has read its model — reports `UNKNOWN`, which offers neither
+  backup nor system update unless the feature map says otherwise. It used
+  to claim both for every central.
+- **`list_ccus()` reports `system_type` and `features`** per central:
+  `system_type` as `"ccu"` / `"openccu-lite"` (`None` when not reported),
+  `features` as key → `{available, reason, scope}` in plain values. An
+  empty map means the daemon does not report features.
+- **Dependencies:** the `aiohomematic` floor and CI pin move to 2026.10.3,
+  which adds `CCUType.OPENCCU_LITE`. The drift guard
   (`tests/compat/test_aiohomematic_protocol_parity.py`) passes against it
   unchanged: no runtime-checkable protocol was added or removed.
 

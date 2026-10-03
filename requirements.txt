@@ -1,4 +1,4 @@
-aiohomematic==2026.10.2
+aiohomematic==2026.10.3
 aiohttp>=3.14.3
 pydantic>=2.13.5
 python-slugify>=9.1.2
