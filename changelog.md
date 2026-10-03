@@ -1,5 +1,26 @@
 # Unreleased
 
+- **Ask a daemon what it is before any login.** `probe_daemon()` sends one
+  `GET /info` without a credential and returns a `DaemonProbe`: where the
+  daemon runs (`deployment_kind` — `lite-addon`, `ccu-addon`, `ha-addon`,
+  `standalone`, unknown values kept — and `ingress_path`, from daemon api
+  13.5.0 on, `None` on an older daemon) and which login paths it accepts
+  (`login_paths`, e.g. `pairing`, `occulite_token`). When an openccu-lite
+  box's gate answers instead of the daemon, the probe returns
+  `ProbeOutcome.BOX_GATE` rather than raising, so the Home Assistant
+  integration knows to ask for a box credential. Unreachable daemons raise
+  `LoomTransportError` as pairing does.
+- **The daemon's mDNS record, parsed.** `parse_txt_record()` reads the TXT
+  record of `_openccu-loom._tcp` into a `DiscoveredDaemon` — the same
+  deployment and login paths in short form (`deploy`, `ingress`, `auth`,
+  `txtvers`, from daemon api 13.5.0 on) beside the older keys. It never
+  raises: an unreadable value is absent, an unknown key ignored, keys match
+  case-insensitively. The record is a hint; where `/info` is readable,
+  `probe_daemon()` is the authority.
+- **Login paths as capability names.** `Capability` gains `AUTH_BASIC`,
+  `AUTH_BEARER`, `AUTH_PAIRING`, `AUTH_OCCULITE_TOKEN`, `AUTH_OCCULITE_SSO`
+  and `AUTH_HA_INGRESS`; `login_paths()` turns any `auth.<name>.v1` token
+  into its short name, including ones this package does not know yet.
 - **Dependencies:** the `aiohomematic` floor and CI pin move to 2026.10.2,
   the version Homematic(IP) Local ships with. The drift guard
   (`tests/compat/test_aiohomematic_protocol_parity.py`) passes against it

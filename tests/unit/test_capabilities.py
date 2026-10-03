@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (C) 2026 OpenCCU-Loom authors.
+# Copyright (C) 2026 SukramJ.
 
 """
 Tests for the capability tokens and :meth:`LoomClient.has_capability`.
@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from openccu_loom_client import ALWAYS_ON, Capability, LoomClient
+from openccu_loom_client import ALWAYS_ON, Capability, LoomClient, login_paths
 from openccu_loom_client.wire import DAEMON_API_VERSION
 from tests.helpers.mock_daemon import MockDaemon
 
@@ -127,3 +127,30 @@ class TestRequiredCapabilitiesAcceptTokens:
         with pytest.raises(LoomTransportError, match="missing required capabilities"):
             await client.connect(required_capabilities=(Capability.ALARM,))
         await client.close()
+
+
+class TestLoginPaths:
+    def test_the_login_path_tokens_are_their_wire_strings(self) -> None:
+        assert Capability.AUTH_BASIC == "auth.basic.v1"
+        assert Capability.AUTH_BEARER == "auth.bearer.v1"
+        assert Capability.AUTH_PAIRING == "auth.pairing.v1"
+        assert Capability.AUTH_OCCULITE_TOKEN == "auth.occulite_token.v1"
+        assert Capability.AUTH_OCCULITE_SSO == "auth.occulite_sso.v1"
+        assert Capability.AUTH_HA_INGRESS == "auth.ha_ingress.v1"
+
+    def test_known_tokens_yield_their_short_names(self) -> None:
+        tokens = [Capability.AUTH_PAIRING, "auth.occulite_token.v1", Capability.AUTH_OIDC]
+        assert login_paths(capabilities=tokens) == {"pairing", "occulite_token", "oidc"}
+
+    def test_an_unknown_auth_token_is_kept(self) -> None:
+        """The daemon's rule applies to any ``auth.<name>.v1``, known to this package or not."""
+        assert login_paths(capabilities=["auth.future.v1"]) == {"future"}
+
+    def test_other_tokens_are_ignored(self) -> None:
+        assert login_paths(capabilities=["rest.v1", "alarm.v1", "addon_self_update", "auth.v1", "auth..v1"]) == set()
+
+    def test_another_version_is_not_a_login_path(self) -> None:
+        assert login_paths(capabilities=["auth.x.v2"]) == set()
+
+    def test_the_result_is_frozen(self) -> None:
+        assert isinstance(login_paths(capabilities=["auth.basic.v1"]), frozenset)
