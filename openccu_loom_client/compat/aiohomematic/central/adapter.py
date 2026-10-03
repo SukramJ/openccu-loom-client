@@ -70,6 +70,7 @@ from openccu_loom_client.compat.aiohomematic.central.configurable_devices import
     ConfigurableDevice,
     build_configurable_devices,
 )
+from openccu_loom_client.compat.aiohomematic.central.events import SystemInformationChangedEvent
 from openccu_loom_client.compat.aiohomematic.central.hub_coordinator import _HubCoordinator
 from openccu_loom_client.compat.aiohomematic.central.refresh import install_refresh_bridge
 from openccu_loom_client.compat.aiohomematic.central.state_paths import device_state_path, parse_device_state_path
@@ -1136,6 +1137,10 @@ class LoomCentralAdapter:
         # inside the grace window and by stop().
         self._degraded_task: asyncio.Task[None] | None = None
         self._system_information = make_system_information()
+        # Whether a system-information read has completed. Until it has, the
+        # value above is a placeholder, and replacing it is a population, not
+        # a change worth announcing.
+        self._system_information_read = False
         # Make the store build categorised Dp* / CustomDp* instances so
         # HA-side isinstance dispatch works on the live objects. Must be
         # set before bootstrap() runs.
@@ -2078,7 +2083,8 @@ class LoomCentralAdapter:
         # model, the two offers from the central's feature map (None when the
         # daemon reports no such key, which falls back to the type rule).
         features = (getattr(ccu_entry, "features", None) or {}) if ccu_entry is not None else {}
-        self._system_information = make_system_information(
+        previous = self._system_information
+        current = make_system_information(
             ccu_type=ccu_type_for_central(
                 system_type=getattr(ccu_entry, "system_type", None) if ccu_entry is not None else None,
                 model=getattr(ccu_entry, "model", None) if ccu_entry is not None else None,
@@ -2101,3 +2107,19 @@ class LoomCentralAdapter:
                 getattr(ccu_entry, "https_redirect_enabled", None) if ccu_entry is not None else None
             ),
         )
+        self._system_information = current
+        announce = self._system_information_read and current != previous
+        self._system_information_read = True
+        if announce:
+            # The integration reads system_information once, when it creates
+            # its entities; this is how it learns that the type or a
+            # capability moved since. aiohomematic's bus isolates handler
+            # errors, so a failing subscriber cannot fail this refresh.
+            await self._ha_bus.publish(
+                event=SystemInformationChangedEvent(
+                    timestamp=datetime.now(tz=UTC),
+                    central_name=self._name,
+                    previous=previous,
+                    current=current,
+                )
+            )

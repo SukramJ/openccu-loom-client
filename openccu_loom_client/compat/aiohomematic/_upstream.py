@@ -35,6 +35,7 @@ from aiohomematic.central.events import (
     DeviceLifecycleEventType,
     DeviceRemovedEvent,
     DeviceTriggerEvent,
+    Event,
     EventBus,
     OptimisticRollbackEvent,
 )
@@ -93,6 +94,7 @@ __all__ = [
     "DeviceRemovedEvent",
     "DeviceTriggerEvent",
     "DeviceTriggerEventType",
+    "Event",
     "EventBus",
     "InboxDeviceData",
     "Interface",

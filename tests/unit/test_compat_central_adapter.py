@@ -34,6 +34,7 @@ from openccu_loom_client.compat.aiohomematic.central.adapter import (
     _LinkCoordinator,
     _ui_schema_to_parameter_data,
 )
+from openccu_loom_client.compat.aiohomematic.central.events import SystemInformationChangedEvent
 from openccu_loom_client.events import ConnectionStateChangedEvent as LoomConnectionStateChangedEvent
 from openccu_loom_client.exceptions import LoomConflictError, LoomForbiddenError, LoomNotFoundError
 from openccu_loom_client.wire import DAEMON_API_VERSION
@@ -464,15 +465,30 @@ class TestFeaturesChangedSubscriber:
     """
 
     @staticmethod
-    async def _started(*, mock_daemon: MockDaemon, monkeypatch: pytest.MonkeyPatch) -> tuple[Any, list[int]]:
+    async def _started(
+        *,
+        mock_daemon: MockDaemon,
+        monkeypatch: pytest.MonkeyPatch,
+        later_ccu: dict[str, Any] | None = None,
+        received: dict[str, list[Any]] | None = None,
+    ) -> tuple[Any, list[int]]:
         mock_daemon.get(f"{_BASE}/info", payload=_INFO)
         # The first read (start) finds backup unavailable; every later one
-        # (the broadcast-driven refresh) finds it granted.
+        # (the broadcast-driven refresh) finds it granted unless the caller
+        # names another entry.
         mock_daemon.get(f"{_BASE}/system/ccu", payload=[_LITE_ENTRY])
         granted = {**_LITE_ENTRY, "features": {"system.backup.create": {"available": True}}}
-        mock_daemon.get(f"{_BASE}/system/ccu", payload=[granted])
+        mock_daemon.get(f"{_BASE}/system/ccu", payload=[later_ccu if later_ccu is not None else granted])
         mock_daemon.get(f"{_BASE}/interfaces", payload=[])
         central = await _make_config(mock_daemon=mock_daemon).create_central()
+        if received is not None:
+            # Subscribed before start(), so the initial population is observed too.
+            for key, sink in received.items():
+                central.event_bus.subscribe(
+                    event_type=SystemInformationChangedEvent,
+                    event_key=key,
+                    handler=lambda *, event, sink=sink: sink.append(event),
+                )
 
         async def _noop(*_args: Any, **_kwargs: Any) -> None:
             return None
@@ -545,6 +561,106 @@ class TestFeaturesChangedSubscriber:
             assert central.system_information.has_backup is False
         finally:
             await central.stop()
+
+
+class TestSystemInformationChangedEvent:
+    """
+    A re-read that changes this central's system information is announced on ``event_bus``.
+
+    Driven through ``start()`` and the ``central.features_changed`` subscriber,
+    the production path that re-reads it.
+    """
+
+    _started = staticmethod(TestFeaturesChangedSubscriber._started)
+
+    async def test_changed_value_publishes_one_event(self, mock_daemon: MockDaemon, monkeypatch) -> None:
+        received: dict[str, list[Any]] = {"home": []}
+        central, refreshes = await self._started(mock_daemon=mock_daemon, monkeypatch=monkeypatch, received=received)
+        try:
+            await central._client.events.publish(event=_features_event(central="home", backup=True))
+            assert await _wait_for(lambda: len(received["home"]) == 1), (
+                "a re-read that grants backup must announce the change"
+            )
+            await asyncio.sleep(0.1)
+            assert len(refreshes) == 2
+            assert len(received["home"]) == 1
+            event = received["home"][0]
+            assert event.key == "home"
+            assert event.central_name == "home"
+            assert event.previous.has_backup is False
+            assert event.current.has_backup is True
+            assert event.current is central.system_information
+        finally:
+            await central.stop()
+
+    async def test_identical_value_publishes_nothing(self, mock_daemon: MockDaemon, monkeypatch) -> None:
+        received: dict[str, list[Any]] = {"home": []}
+        central, refreshes = await self._started(
+            mock_daemon=mock_daemon, monkeypatch=monkeypatch, later_ccu=_LITE_ENTRY, received=received
+        )
+        try:
+            await central._client.events.publish(event=_features_event(central="home", backup=False))
+            assert await _wait_for(lambda: len(refreshes) == 2)
+            await asyncio.sleep(0.1)
+            assert received["home"] == []
+        finally:
+            await central.stop()
+
+    async def test_initial_population_publishes_nothing(self, mock_daemon: MockDaemon, monkeypatch) -> None:
+        received: dict[str, list[Any]] = {"home": []}
+        central, refreshes = await self._started(mock_daemon=mock_daemon, monkeypatch=monkeypatch, received=received)
+        try:
+            await asyncio.sleep(0.1)
+            assert len(refreshes) == 1
+            # The start read replaced the UNKNOWN placeholder with the lite
+            # entry, a different value — and still announced nothing.
+            assert received["home"] == []
+        finally:
+            await central.stop()
+
+    async def test_failed_refresh_publishes_nothing_and_keeps_value(
+        self, mock_daemon: MockDaemon, monkeypatch, caplog
+    ) -> None:
+        received: dict[str, list[Any]] = {"home": []}
+        central, refreshes = await self._started(mock_daemon=mock_daemon, monkeypatch=monkeypatch, received=received)
+        try:
+            before = central.system_information
+
+            async def _boom(*_args: Any, **_kwargs: Any) -> None:
+                raise RuntimeError("daemon went away")
+
+            monkeypatch.setattr(central._client.system, "get_info", _boom)
+            await central._client.events.publish(event=_features_event(central="home", backup=True))
+            assert await _wait_for(lambda: "daemon went away" in caplog.text)
+            await asyncio.sleep(0.1)
+            assert len(refreshes) == 2
+            assert received["home"] == []
+            assert central.system_information is before
+        finally:
+            await central.stop()
+
+    async def test_subscriber_for_another_central_is_not_called(self, mock_daemon: MockDaemon, monkeypatch) -> None:
+        received: dict[str, list[Any]] = {"home": [], "other": []}
+        central, _ = await self._started(mock_daemon=mock_daemon, monkeypatch=monkeypatch, received=received)
+        try:
+            await central._client.events.publish(event=_features_event(central="home", backup=True))
+            assert await _wait_for(lambda: len(received["home"]) == 1)
+            await asyncio.sleep(0.1)
+            assert received["other"] == []
+        finally:
+            await central.stop()
+
+    def test_is_an_aiohomematic_event(self) -> None:
+        from aiohomematic.central.events.types import Event as AioEvent
+
+        from openccu_loom_client.compat.aiohomematic.const import make_system_information
+
+        info = make_system_information()
+        event = SystemInformationChangedEvent(
+            timestamp=datetime.now(tz=UTC), central_name="home", previous=info, current=info
+        )
+        assert isinstance(event, AioEvent)
+        assert event.key == "home"
 
 
 class TestSerialInjection:

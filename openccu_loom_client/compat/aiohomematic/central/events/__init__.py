@@ -17,9 +17,11 @@ keep working.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import StrEnum
 from typing import Any, ClassVar, Final
 
+from openccu_loom_client.compat.aiohomematic._upstream import Event as AioEvent, SystemInformation
 from openccu_loom_client.events import (
     CentralStateChangedEvent,
     DataPointsCreatedEvent,
@@ -118,6 +120,33 @@ class DeviceTriggerEvent(LoomEvent):
             self.event_key = self.central
 
 
+@dataclass(frozen=True, slots=True)
+class SystemInformationChangedEvent(AioEvent):
+    """
+    A central's system information changed after it was first read.
+
+    Key is central_name.
+
+    Published on the adapter's ``event_bus`` — aiohomematic's own bus, where
+    ``CentralStateChangedEvent`` is published too, and modelled on it — when a
+    re-read of ``system_information`` (after a ``central.features_changed``
+    broadcast) yields a value different from the one held before. The first
+    population at start-up never publishes: a consumer that reloads on this
+    event would otherwise reload during its own setup. aiohomematic has no
+    such event; its central reads the system information once.
+    """
+
+    timestamp: datetime
+    central_name: str
+    previous: SystemInformation
+    current: SystemInformation
+
+    @property
+    def key(self) -> str:
+        """Key identifier for this event."""
+        return self.central_name
+
+
 __all__: Final = [
     # General
     "CentralStateChangedEvent",
@@ -133,6 +162,7 @@ __all__: Final = [
     "LoomEvent",
     "OptimisticRollbackEvent",
     "SubscriptionGroup",
+    "SystemInformationChangedEvent",
     "SystemStatusChangedEvent",
     "UnsubscribeCallback",
 ]
