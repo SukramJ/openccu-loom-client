@@ -8,7 +8,7 @@ dynamic = ["version"]
 description = "Async Python REST + WebSocket client for the openccu-loom daemon"
 readme = "README.md"
 license = { text = "MIT" }
-authors = [{ name = "OpenCCU-Loom authors" }]
+authors = [{ name = "SukramJ" }]
 requires-python = ">=3.14"
 dependencies = [
     # A floor, not a pin and not a cap. This package is a library and
