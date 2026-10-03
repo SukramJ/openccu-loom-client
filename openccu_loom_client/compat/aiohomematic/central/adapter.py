@@ -73,7 +73,11 @@ from openccu_loom_client.compat.aiohomematic.central.configurable_devices import
 from openccu_loom_client.compat.aiohomematic.central.hub_coordinator import _HubCoordinator
 from openccu_loom_client.compat.aiohomematic.central.refresh import install_refresh_bridge
 from openccu_loom_client.compat.aiohomematic.central.state_paths import device_state_path, parse_device_state_path
-from openccu_loom_client.compat.aiohomematic.const import SystemInformation, make_system_information
+from openccu_loom_client.compat.aiohomematic.const import (
+    SystemInformation,
+    ccu_type_for_central,
+    make_system_information,
+)
 from openccu_loom_client.compat.aiohomematic.model.alarm_panel import make_alarm_panel_data_point
 from openccu_loom_client.compat.aiohomematic.model.calculated import make_calculated_data_point
 from openccu_loom_client.compat.aiohomematic.model.combined import CombinedDurationDp, channel_has_duration_pair
@@ -96,6 +100,7 @@ from openccu_loom_client.events import (
     AlarmReadinessChangedEvent as LoomAlarmReadinessChangedEvent,
     AlarmTriggeredEvent as LoomAlarmTriggeredEvent,
     AuthFailedEvent as LoomAuthFailedEvent,
+    CentralFeaturesChangedEvent as LoomCentralFeaturesChangedEvent,
     ConnectionStateChangedEvent as LoomConnectionStateChangedEvent,
 )
 from openccu_loom_client.exceptions import BaseLoomException, LoomForbiddenError, LoomHttpError, LoomNotFoundError
@@ -168,6 +173,24 @@ _WEEK_PROFILE_CHANNEL_SUFFIX: Final = "WEEK_PROFILE"
 # DURATION_VALUE/DURATION_UNIT pair with a combined number instead, so
 # the calculated flavour is suppressed to avoid a surplus entity.
 _SUPPRESSED_CALCULATED_NAMES: Final = frozenset({"DURATION"})
+
+# Feature keys of a central's ``features`` map on ``GET /system/ccu`` that
+# decide SystemInformation.has_backup / has_system_update.
+_FEATURE_BACKUP_CREATE: Final = "system.backup.create"
+_FEATURE_SYSTEM_UPDATE_INSTALL: Final = "hub.system_update.install"
+
+
+def _feature_available(*, features: Mapping[str, Any], key: str) -> bool | None:
+    """
+    Return the ``available`` flag of one feature, or ``None`` when the daemon reports no such key.
+
+    An empty map is an older daemon that does not report features, never a
+    central that offers nothing — so absence stays ``None`` rather than False.
+    """
+    state = features.get(key)
+    if state is None:
+        return None
+    return bool(getattr(state, "available", False))
 
 
 _CATEGORY_BY_VALUE: Final[dict[str, DataPointCategory]] = {member.value: member for member in DataPointCategory}
@@ -1146,6 +1169,12 @@ class LoomCentralAdapter:
         # every later subscriber. One coalesced background task instead: a
         # burst of alarm events produces a single re-read.
         self._triggered_motion_task: asyncio.Task[None] | None = None
+        # In-flight system-information re-read after a features_changed
+        # broadcast, plus a flag recording that another broadcast arrived
+        # while it ran — that one may describe a state the running read
+        # already missed, so the task reads once more instead of dropping it.
+        self._features_refresh_task: asyncio.Task[None] | None = None
+        self._features_refresh_again = False
         # HA entities subscribe on aiohomematic's *own* event bus and match
         # events by ``type(event)``/``.key``. The adapter therefore exposes a
         # real aiohomematic EventBus (not the loom wire bus) as ``event_bus``
@@ -1353,6 +1382,15 @@ class LoomCentralAdapter:
                 event_type=LoomConnectionStateChangedEvent, handler=self._on_connection_state_changed
             )
             self._refresh_group.subscribe(event_type=LoomAuthFailedEvent, handler=self._on_auth_failed)
+            # What this central offers (backup, system update) changes when its
+            # first bring-up resolves the system or the daemon's credential
+            # gains or loses a scope. Keyed by central name, so another
+            # central's broadcast never reaches the handler.
+            self._refresh_group.subscribe(
+                event_type=LoomCentralFeaturesChangedEvent,
+                handler=self._on_central_features_changed,
+                event_key=self._name,
+            )
             # Announce every data point (generic + custom) in one batch *after*
             # the custom DPs are attached, so HA's platforms spawn entities for
             # them too. Published on the real aiohomematic bus as the real
@@ -1531,6 +1569,39 @@ class LoomCentralAdapter:
         self._triggered_motion_task = asyncio.create_task(
             self._refresh_triggered_motion(), name="loom-triggered-motion"
         )
+
+    async def _on_central_features_changed(self, event: LoomCentralFeaturesChangedEvent, /) -> None:
+        """
+        Schedule a re-read of this central's system information.
+
+        Returns immediately for the same reason as the latch handler: the wire
+        bus fans out sequentially, and the re-read is several REST calls. The
+        event_key filter already drops other centrals' broadcasts; the name
+        check keeps that true for a caller subscribing without the filter.
+        """
+        if event.payload.central != self._name:
+            return
+        if self._features_refresh_task is not None and not self._features_refresh_task.done():
+            self._features_refresh_again = True
+            return
+        self._features_refresh_task = asyncio.create_task(
+            self._refresh_system_information_after_features_change(), name="loom-features-refresh"
+        )
+
+    async def _refresh_system_information_after_features_change(self) -> None:
+        """Re-read the system information; a failure is logged, never raised."""
+        while True:
+            self._features_refresh_again = False
+            try:
+                await self._refresh_system_information()
+            except Exception as err:  # noqa: BLE001 — a background refresh must not die silently or raise
+                _LOGGER.warning(
+                    "central %s: re-reading system information after a feature change failed: %s",
+                    self._name,
+                    err,
+                )
+            if not self._features_refresh_again:
+                return
 
     async def _refresh_triggered_motion(self) -> None:
         """
@@ -1829,6 +1900,11 @@ class LoomCentralAdapter:
             with contextlib.suppress(asyncio.CancelledError):
                 await self._triggered_motion_task
             self._triggered_motion_task = None
+        if self._features_refresh_task is not None:
+            self._features_refresh_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._features_refresh_task
+            self._features_refresh_task = None
         if self._refresh_group is not None:
             self._refresh_group.cancel()
             self._refresh_group = None
@@ -1997,7 +2073,18 @@ class LoomCentralAdapter:
         # field is only populated once the daemon has reached the CCU, so
         # fall back to the daemon version rather than leaving it empty.
         ccu_version = getattr(ccu_entry, "version", None) if ccu_entry is not None else None
+        # What kind of system this central is, and whether it offers backup and
+        # system update, come from the daemon: the type from system_type +
+        # model, the two offers from the central's feature map (None when the
+        # daemon reports no such key, which falls back to the type rule).
+        features = (getattr(ccu_entry, "features", None) or {}) if ccu_entry is not None else {}
         self._system_information = make_system_information(
+            ccu_type=ccu_type_for_central(
+                system_type=getattr(ccu_entry, "system_type", None) if ccu_entry is not None else None,
+                model=getattr(ccu_entry, "model", None) if ccu_entry is not None else None,
+            ),
+            backup_available=_feature_available(features=features, key=_FEATURE_BACKUP_CREATE),
+            system_update_available=_feature_available(features=features, key=_FEATURE_SYSTEM_UPDATE_INSTALL),
             serial=serial,
             version=ccu_version or info.version,
             available_interfaces=interfaces,

@@ -19,6 +19,7 @@ from typing import Any
 
 from aiohomematic.async_support import Looper
 from aiohomematic.central.events import DataPointStateChangedEvent, EventBus as AioEventBus
+import pytest
 
 from openccu_loom_client.compat.aiohomematic.central import CentralConfig
 from openccu_loom_client.compat.aiohomematic.central.adapter import LoomCentralAdapter
@@ -1049,13 +1050,22 @@ class TestLocalePlumbing:
 class TestSystemInformationCcuType:
     """The HA hub-update entity reads system_information.ccu_type."""
 
-    def test_defaults_to_openccu(self) -> None:
+    def test_defaults_to_unknown(self) -> None:
+        """
+        A client reports what it knows: no system type read yet is UNKNOWN.
+
+        The default used to be OPENCCU, which claimed backup and system update
+        for a central whose type nobody had read — including an openccu-lite
+        box that offers neither to a token without the scope.
+        """
         from aiohomematic.const import CCUType
 
         from openccu_loom_client.compat.aiohomematic.const import make_system_information
 
         info = make_system_information(serial="ABC", version="3.87")
-        assert info.ccu_type == CCUType.OPENCCU
+        assert info.ccu_type == CCUType.UNKNOWN
+        assert info.has_backup is False
+        assert info.has_system_update is False
 
     def test_carries_the_whole_bundle_the_ccu_dashboard_reads(self) -> None:
         """
@@ -1066,6 +1076,8 @@ class TestSystemInformationCcuType:
         whole tab down. ``has_backup`` / ``has_system_update`` are computed from
         ``ccu_type``, which is why the real upstream record is reused.
         """
+        from aiohomematic.const import CCUType
+
         from openccu_loom_client.compat.aiohomematic.const import make_system_information
 
         info = make_system_information(
@@ -1074,6 +1086,7 @@ class TestSystemInformationCcuType:
             available_interfaces=("home:HmIP-RF",),
             hostname="ccu.local",
             auth_enabled=True,
+            ccu_type=CCUType.OPENCCU,
         )
         assert info.hostname == "ccu.local"
         assert info.auth_enabled is True
@@ -1082,6 +1095,126 @@ class TestSystemInformationCcuType:
         # Computed from ccu_type == OPENCCU.
         assert info.has_backup is True
         assert info.has_system_update is True
+
+
+class TestCcuTypeForCentral:
+    """The daemon's system type and product family map onto aiohomematic's CCUType."""
+
+    @pytest.mark.parametrize(
+        ("system_type", "model", "expected"),
+        [
+            # openccu-lite wins over whatever the model says.
+            ("openccu-lite", None, "OPENCCU_LITE"),
+            ("openccu-lite", "", "OPENCCU_LITE"),
+            ("openccu-lite", "OpenCCU", "OPENCCU_LITE"),
+            ("openccu-lite", "CCU", "OPENCCU_LITE"),
+            ("OpenCCU-Lite", "openccu-lite", "OPENCCU_LITE"),
+            # A ccu central names its product family.
+            ("ccu", "OpenCCU", "OPENCCU"),
+            ("ccu", "openccu", "OPENCCU"),
+            ("ccu", "OPENCCU", "OPENCCU"),
+            ("ccu", "CCU", "CCU"),
+            ("ccu", "ccu", "CCU"),
+            # The model alone decides while the system type is not reported yet.
+            (None, "OpenCCU", "OPENCCU"),
+            (None, "CCU", "CCU"),
+            # Nothing read, or something unknown, is UNKNOWN — never OPENCCU.
+            ("ccu", "", "UNKNOWN"),
+            ("ccu", None, "UNKNOWN"),
+            (None, None, "UNKNOWN"),
+            ("", "", "UNKNOWN"),
+            ("ccu", "CCU3", "UNKNOWN"),
+            ("ccu", "RaspberryMatic", "UNKNOWN"),
+        ],
+    )
+    def test_maps(self, system_type: str | None, model: str | None, expected: str) -> None:
+        from aiohomematic.const import CCUType
+
+        from openccu_loom_client.compat.aiohomematic.const import ccu_type_for_central
+
+        assert ccu_type_for_central(system_type=system_type, model=model) is CCUType[expected]
+
+    def test_accepts_the_wire_enum(self) -> None:
+        from aiohomematic.const import CCUType
+
+        from openccu_loom_client.compat.aiohomematic.const import ccu_type_for_central
+        from openccu_loom_client.wire.rest import SystemType
+
+        assert ccu_type_for_central(system_type=SystemType.openccu_lite, model="") is CCUType.OPENCCU_LITE
+        assert ccu_type_for_central(system_type=SystemType.ccu, model="OpenCCU") is CCUType.OPENCCU
+
+
+class TestLoomSystemInformation:
+    """Backup and system update follow the daemon's feature map, else the type rule."""
+
+    def test_is_aiohomematics_system_information(self) -> None:
+        from aiohomematic.const import SystemInformation as AioSystemInformation
+
+        from openccu_loom_client.compat.aiohomematic.const import LoomSystemInformation, make_system_information
+
+        info = make_system_information()
+        assert isinstance(info, LoomSystemInformation)
+        assert isinstance(info, AioSystemInformation)
+
+    @pytest.mark.parametrize(
+        ("ccu_type", "feature", "expected"),
+        [
+            ("OPENCCU", True, True),
+            ("OPENCCU", False, False),
+            ("OPENCCU", None, True),
+            ("OPENCCU_LITE", True, True),
+            ("OPENCCU_LITE", False, False),
+            ("OPENCCU_LITE", None, False),
+        ],
+    )
+    def test_has_backup(self, ccu_type: str, feature: bool | None, expected: bool) -> None:
+        from aiohomematic.const import CCUType
+
+        from openccu_loom_client.compat.aiohomematic.const import make_system_information
+
+        info = make_system_information(ccu_type=CCUType[ccu_type], backup_available=feature)
+        assert info.has_backup is expected
+
+    @pytest.mark.parametrize(
+        ("ccu_type", "feature", "expected"),
+        [
+            ("OPENCCU", True, True),
+            ("OPENCCU", False, False),
+            ("OPENCCU", None, True),
+            ("OPENCCU_LITE", True, True),
+            ("OPENCCU_LITE", False, False),
+            ("OPENCCU_LITE", None, False),
+        ],
+    )
+    def test_has_system_update(self, ccu_type: str, feature: bool | None, expected: bool) -> None:
+        from aiohomematic.const import CCUType
+
+        from openccu_loom_client.compat.aiohomematic.const import make_system_information
+
+        info = make_system_information(ccu_type=CCUType[ccu_type], system_update_available=feature)
+        assert info.has_system_update is expected
+
+    @pytest.mark.parametrize("feature", [True, False, None])
+    def test_ha_app_never_offers_system_update(self, feature: bool | None) -> None:
+        """The Supervisor updates an HA app; an available feature does not change that."""
+        from aiohomematic.const import CCUType
+
+        from openccu_loom_client.compat.aiohomematic.const import make_system_information
+
+        for ccu_type in (CCUType.OPENCCU, CCUType.OPENCCU_LITE):
+            info = make_system_information(ccu_type=ccu_type, is_ha_app=True, system_update_available=feature)
+            assert info.has_system_update is False
+
+    def test_feature_values_are_independent(self) -> None:
+        from aiohomematic.const import CCUType
+
+        from openccu_loom_client.compat.aiohomematic.const import make_system_information
+
+        info = make_system_information(
+            ccu_type=CCUType.OPENCCU_LITE, backup_available=True, system_update_available=False
+        )
+        assert info.has_backup is True
+        assert info.has_system_update is False
 
 
 class TestCalculatedTranslatedName:
