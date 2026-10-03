@@ -560,33 +560,22 @@ class WarningList(BaseModel):
     items: list[Warning]
 
 
-class Info(BaseModel):
-    version: str = Field(..., description="Daemon build version (semver).")
-    commit: str
-    build_date: str
-    addon_build: bool = Field(
+class Kind(_TolerantStrEnum):
+    lite_addon = "lite-addon"
+    ccu_addon = "ccu-addon"
+    ha_addon = "ha-addon"
+    standalone = "standalone"
+
+
+class Deployment(BaseModel):
+    kind: Kind = Field(
         ...,
-        description="True when this binary was built as the CCU/OpenCCU\nadd-on (it then runs on the CCU itself). False for the\nstandalone binary, Docker image, and HA add-on builds.\n",
+        description="`lite-addon`: the add-on on an openccu-lite box, fronted by\nthe box's web server and its gate. `ccu-addon`: the add-on on\na classic CCU / OpenCCU. `ha-addon`: the Home Assistant\nadd-on. `standalone`: everything else (a container, a\nservice, a plain process).\n",
     )
-    uptime: str
-    started_at: AwareDatetime
-    config_ui_url: str = Field(
-        ...,
-        description="Externally-reachable address of this daemon's Config UI,\nderived from `north.rest.public_url` with the SPA mount\nappended. Empty when no public URL is configured.\n\nIt answers a question a client cannot answer for itself: the\naddress a client uses to TALK to the daemon (a container\nnetwork, a LAN address behind a reverse proxy) is not\nnecessarily one a browser can follow. Only the operator knows\nthat, and `public_url` is where they record it. A client that\nwants to link a person at the Config UI reads this and falls\nback to guessing from its own connection address when empty.\n\nThe mount path is appended by the daemon on purpose — a\nclient that had to know where the SPA is mounted would break\non the next mount change.\n",
-        examples=["https://loom.example.de/app/"],
-    )
-    api_version: str = Field(
-        ...,
-        description="North-bound contract version (semver). Bumps independently\nof `version`. Minor bumps add backwards-compatible\ncapabilities; major bumps remove or rename existing\npayload fields, scopes, or capabilities.\n",
-    )
-    schema_digest: str = Field(
-        ...,
-        description="Canonical digest of the contract assets (openapi.yaml,\nwsapi.json, schemas/enums.json, schemas/types.json) this\nbinary was built from, e.g. `sha256:ab12…`. Generated\nclient type packages carry the same value; a client\ncompares the two at connect time to verify its types\nmatch the daemon build exactly. Equality means exact\ncontract identity; inequality means the types were\ngenerated from a different build (not necessarily an\nincompatible one — use `api_version` for compatibility\nreasoning).\n",
-        examples=["sha256:0c63c1e3a9f0b14d2e5b7a86c14d9b21f0aa3340be71f5c6d8e92041ab57cd10"],
-    )
-    capabilities: list[str] = Field(
-        ...,
-        description='Runtime feature set. Always-on entries:\n`rest.v1`, `ws.broadcasts.v1`, `errors.problem_details.v1`,\n`central.features.v1` (each central reports what it offers in\n`features` on `GET /system/ccu`, and an operation a central\ndoes not offer answers the `feature_unavailable` problem),\n`south.openccu_lite.v1` (a central can be an openccu-lite\nsystem: `system_type: openccu-lite`).\nConditional entries surface only when configured:\n`mqtt.discovery.v1`, `mqtt.raw.v1`, `matter.bridge.v1`,\n`auth.oidc.v1`, `auth.ccu.v1`, `webhook.inbound.v1`,\n`diagrams.v1`, `admin.persistence.v1`, `history.v1`,\n`mcp.v1`, `mcp.write.v1`, `system.restart.supervised.v1`,\n`addon_self_update`, `alarm.v1` (the `/alarm` surface is\nmounted — absent, the alarm subsystem is off and every\n`/alarm` route answers 404).\n\n`mcp.write.v1` implies `mcp.v1`; `addon_self_update` predates\nthe `<area>.<feature>.v<n>` convention and keeps its spelling\nbecause renaming a token a client already matches on is a\nbreaking change.\n\nA token means the daemon is CONFIGURED for that capability,\nnot that the subsystem is working at this instant. It answers\n"may I use this path at all", which is what a client needs to\nbuild its feature set; a broker that is briefly unreachable is\nnot a missing capability, and a token that came and went with\nconnectivity would force every client to re-derive its\nsurface on each poll. For what is running right now, read\n`/health`, whose components report liveness.\n\nOpen-ended on purpose: the daemon may advertise additional\ncapabilities (e.g. `system.restart.supervised.v1`, `mcp.v1`)\nas features are added. Clients MUST treat this as a forward-\ncompatible string set and ignore values they do not recognise\n— never reject an `Info` payload because of an unknown entry.\n',
+    ingress_path: str | None = Field(
+        None,
+        description="Path under which the hosting system's own web server serves\nthis daemon, with a trailing slash. Present only when there\nis one (`lite-addon`). A client reaches the API at\n`https://<host><ingress_path>api/v1` and must present a\ncredential the hosting system's gate accepts.\n",
+        examples=["/addons/loom/"],
     )
 
 
@@ -867,7 +856,7 @@ class MQTTReloadResponse(BaseModel):
     took_ms: int = Field(..., description="Wall-clock duration of the swap in milliseconds.")
 
 
-class Kind(_TolerantStrEnum):
+class Kind1(_TolerantStrEnum):
     global_ = "global"
     central = "central"
     interface = "interface"
@@ -875,7 +864,7 @@ class Kind(_TolerantStrEnum):
 
 
 class CacheClearRequest(BaseModel):
-    kind: Kind = Field(
+    kind: Kind1 = Field(
         ...,
         description="Breadth of the clear. `central`/`interface`/`device` require\nthe matching identifier fields at or below their level.\n",
     )
@@ -1530,7 +1519,7 @@ class CreateTokenResponse(BaseModel):
     role: Role1
 
 
-class Kind1(_TolerantStrEnum):
+class Kind2(_TolerantStrEnum):
     pairing = "pairing"
     session = "session"
     discovery = "discovery"
@@ -1544,7 +1533,7 @@ class Severity1(_TolerantStrEnum):
 
 class MatterDiagnosticEvent(BaseModel):
     at: AwareDatetime
-    kind: Kind1
+    kind: Kind2
     severity: Severity1
     message: str = Field(..., description="One sentence an operator can act on.")
     detail: dict[str, str] | None = Field(None, description="Identifiers that make the message specific.")
@@ -1843,7 +1832,7 @@ class UnIgnoreCandidateChannel(BaseModel):
     pattern: str = Field(..., description="Pattern re-enabling the parameter on exactly this model and channel.")
 
 
-class Kind2(_TolerantStrEnum):
+class Kind3(_TolerantStrEnum):
     initial = "initial"
     change = "change"
     refresh = "refresh"
@@ -1855,7 +1844,7 @@ class WsEnvelope(BaseModel):
         description='Monotonic, daemon-assigned sequence number. Strictly\nincreasing across the daemon\'s lifetime (resets to 0\non restart). Clients store the last received `seq` and\nreconnect with `{op:"subscribe", topics:[...], since:N}`\nto resume the stream.\n',
         ge=1,
     )
-    kind: Kind2 = Field(
+    kind: Kind3 = Field(
         ...,
         description="Event-family discriminator. `change` is the default\nand dominant case; `initial` is set on the first\nobservation of a data point (e.g. during cold-start\nreplay); `refresh` is reserved for periodic re-emits.\n",
     )
@@ -2090,14 +2079,14 @@ class AlarmStateChangedPayload(BaseModel):
     incident_id: int | None = Field(None, description="References the active incident; omitted when none.")
 
 
-class Kind3(_TolerantStrEnum):
+class Kind4(_TolerantStrEnum):
     exit_delay = "exit_delay"
     entry_delay = "entry_delay"
 
 
 class AlarmCountdownPayload(BaseModel):
     zone_id: str
-    kind: Kind3
+    kind: Kind4
     remaining_s: int
     total_s: int
     remaining_ms: int = Field(..., description="Remaining time in milliseconds (source fidelity).")
@@ -2831,7 +2820,7 @@ class CentralBehavior(BaseModel):
     )
 
 
-class Kind4(_TolerantStrEnum):
+class Kind5(_TolerantStrEnum):
     week_profile = "week_profile"
     climate = "climate"
 
@@ -2907,14 +2896,14 @@ class ScheduleTimeCorrection(BaseModel):
     applied: str = Field(..., description="The value actually stored")
 
 
-class Kind5(_TolerantStrEnum):
+class Kind6(_TolerantStrEnum):
     climate = "climate"
     simple = "simple"
 
 
 class Schedule(BaseModel):
     channel: ScheduleChannelRef
-    kind: Kind5
+    kind: Kind6
     domain: str | None = None
     active_profile: str | None = None
     active_profile_index: int | None = None
@@ -3391,13 +3380,13 @@ class Incident1(BaseModel):
     silenced: bool | None = None
 
 
-class Kind6(_TolerantStrEnum):
+class Kind7(_TolerantStrEnum):
     exit_delay = "exit_delay"
     entry_delay = "entry_delay"
 
 
 class Countdown(BaseModel):
-    kind: Kind6 | None = None
+    kind: Kind7 | None = None
     remaining_s: int | None = None
     total_s: int | None = None
 
@@ -3454,7 +3443,7 @@ class AlarmCodePerms(BaseModel):
     silence: bool
 
 
-class Kind7(_TolerantStrEnum):
+class Kind8(_TolerantStrEnum):
     pin = "pin"
     keypad_slot = "keypad_slot"
     remote_key = "remote_key"
@@ -3463,7 +3452,7 @@ class Kind7(_TolerantStrEnum):
 class AlarmCode(BaseModel):
     id: str
     name: str
-    kind: Kind7 = Field(..., description="Code class.")
+    kind: Kind8 = Field(..., description="Code class.")
     duress: bool | None = Field(
         None,
         description="A PIN that disarms normally but fires a silent duress alarm. Only meaningful for the pin kind.\n",
@@ -3483,7 +3472,7 @@ class AlarmCode(BaseModel):
 
 class AlarmCodeRequest(BaseModel):
     name: str
-    kind: Kind7
+    kind: Kind8
     pin: str | None = Field(
         None, description="Cleartext code, write-only, for the pin kind. Omitted on update to keep the existing hash.\n"
     )
@@ -4341,6 +4330,37 @@ class UISchemaSubsetGroup(BaseModel):
     options: list[UISchemaSubsetOpt]
 
 
+class Info(BaseModel):
+    version: str = Field(..., description="Daemon build version (semver).")
+    commit: str
+    build_date: str
+    addon_build: bool = Field(
+        ...,
+        description="True when this binary was built as the CCU/OpenCCU\nadd-on (it then runs on the CCU itself). False for the\nstandalone binary, Docker image, and HA add-on builds.\nIt does not tell a classic CCU from an openccu-lite box;\nread `deployment.kind` for that.\n",
+    )
+    deployment: Deployment
+    uptime: str
+    started_at: AwareDatetime
+    config_ui_url: str = Field(
+        ...,
+        description="Externally-reachable address of this daemon's Config UI,\nderived from `north.rest.public_url` with the SPA mount\nappended. Empty when no public URL is configured.\n\nIt answers a question a client cannot answer for itself: the\naddress a client uses to TALK to the daemon (a container\nnetwork, a LAN address behind a reverse proxy) is not\nnecessarily one a browser can follow. Only the operator knows\nthat, and `public_url` is where they record it. A client that\nwants to link a person at the Config UI reads this and falls\nback to guessing from its own connection address when empty.\n\nThe mount path is appended by the daemon on purpose — a\nclient that had to know where the SPA is mounted would break\non the next mount change.\n",
+        examples=["https://loom.example.de/app/"],
+    )
+    api_version: str = Field(
+        ...,
+        description="North-bound contract version (semver). Bumps independently\nof `version`. Minor bumps add backwards-compatible\ncapabilities; major bumps remove or rename existing\npayload fields, scopes, or capabilities.\n",
+    )
+    schema_digest: str = Field(
+        ...,
+        description="Canonical digest of the contract assets (openapi.yaml,\nwsapi.json, schemas/enums.json, schemas/types.json) this\nbinary was built from, e.g. `sha256:ab12…`. Generated\nclient type packages carry the same value; a client\ncompares the two at connect time to verify its types\nmatch the daemon build exactly. Equality means exact\ncontract identity; inequality means the types were\ngenerated from a different build (not necessarily an\nincompatible one — use `api_version` for compatibility\nreasoning).\n",
+        examples=["sha256:0c63c1e3a9f0b14d2e5b7a86c14d9b21f0aa3340be71f5c6d8e92041ab57cd10"],
+    )
+    capabilities: list[str] = Field(
+        ...,
+        description='Runtime feature set. Always-on entries:\n`rest.v1`, `ws.broadcasts.v1`, `errors.problem_details.v1`,\n`central.features.v1` (each central reports what it offers in\n`features` on `GET /system/ccu`, and an operation a central\ndoes not offer answers the `feature_unavailable` problem),\n`south.openccu_lite.v1` (a central can be an openccu-lite\nsystem: `system_type: openccu-lite`).\nConditional entries surface only when configured:\n`mqtt.discovery.v1`, `mqtt.raw.v1`, `matter.bridge.v1`,\n`auth.oidc.v1`, `auth.ccu.v1`, `auth.basic.v1`,\n`auth.bearer.v1`, `auth.pairing.v1`, `auth.occulite_token.v1`,\n`auth.occulite_sso.v1`, `auth.ha_ingress.v1`,\n`webhook.inbound.v1`,\n`diagrams.v1`, `admin.persistence.v1`, `history.v1`,\n`mcp.v1`, `mcp.write.v1`, `system.restart.supervised.v1`,\n`addon_self_update`, `alarm.v1` (the `/alarm` surface is\nmounted — absent, the alarm subsystem is off and every\n`/alarm` route answers 404).\n\nThe `auth.*` tokens are the login paths this daemon accepts:\n`auth.basic.v1` (HTTP Basic with a daemon user),\n`auth.bearer.v1` (a daemon API token as `Authorization:\nBearer`), `auth.pairing.v1` (`POST /pairing` mints such a\ntoken after an administrator confirms), `auth.oidc.v1`,\n`auth.ccu.v1` (a CCU account, delegated),\n`auth.occulite_token.v1` (an openccu-lite box API token that\nthe box\'s gate accepted in front of `deployment.ingress_path`),\n`auth.occulite_sso.v1` (a box-shell session through the same\ngate) and `auth.ha_ingress.v1` (Home Assistant Ingress\nrequests from the Supervisor). A client offers a person only\nthe paths listed here.\n\n`mcp.write.v1` implies `mcp.v1`; `addon_self_update` predates\nthe `<area>.<feature>.v<n>` convention and keeps its spelling\nbecause renaming a token a client already matches on is a\nbreaking change.\n\nA token means the daemon is CONFIGURED for that capability,\nnot that the subsystem is working at this instant. It answers\n"may I use this path at all", which is what a client needs to\nbuild its feature set; a broker that is briefly unreachable is\nnot a missing capability, and a token that came and went with\nconnectivity would force every client to re-derive its\nsurface on each poll. For what is running right now, read\n`/health`, whose components report liveness.\n\nOpen-ended on purpose: the daemon may advertise additional\ncapabilities (e.g. `system.restart.supervised.v1`, `mcp.v1`)\nas features are added. Clients MUST treat this as a forward-\ncompatible string set and ignore values they do not recognise\n— never reject an `Info` payload because of an unknown entry.\n',
+    )
+
+
 class GroupEntry(BaseModel):
     id: int = Field(..., description="Numeric CCU group id.")
     name: str = Field(..., description="Operator-facing group name.")
@@ -4722,7 +4742,7 @@ class ScheduleDeviceSummary(BaseModel):
     name: str = Field(..., description="Display name.")
     model: str | None = Field(None, description='Device type, e.g. "HmIP-eTRV-2".')
     channel: ScheduleChannelRef
-    kind: Kind4 = Field(
+    kind: Kind5 = Field(
         ...,
         description="`week_profile` when a dedicated channel carries the profile,\n`climate` when a thermostat carries it in MASTER.\n",
     )
