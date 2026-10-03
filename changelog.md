@@ -1,5 +1,7 @@
 # Unreleased
 
+# Version 2026.10.6 (2026-10-03)
+
 - **Hear when a central's system information changes.** The adapter's
   `event_bus` now publishes `SystemInformationChangedEvent` (import it from
   `openccu_loom_client.compat.aiohomematic.central.events`), keyed by the
