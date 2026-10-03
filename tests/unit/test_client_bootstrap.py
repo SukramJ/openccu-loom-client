@@ -35,7 +35,7 @@ from openccu_loom_client.events import (
 )
 from openccu_loom_client.exceptions import LoomIncompatibleVersionError, LoomTransportError
 from openccu_loom_client.wire import DAEMON_API_VERSION
-from openccu_loom_client.wire.rest import Kind2 as Kind
+from openccu_loom_client.wire.rest import DeploymentKind, Kind2 as Kind
 from openccu_loom_client.wire.ws import (
     DataPointValueChangedPayload,
     DeviceAvailabilityChangedPayload,
@@ -152,6 +152,24 @@ class TestConnectAndBootstrap:
         async with LoomClient(config=mock_daemon.config) as client:
             # connect() ran via __aenter__; store is still empty.
             assert list(client.store.devices) == []
+
+    async def test_a_daemon_without_deployment_connects_with_it_unknown(self, mock_daemon: MockDaemon) -> None:
+        # ``_INFO`` is a daemon older than api 13.5.0: no ``deployment``.
+        mock_daemon.get("/api/v1/info", payload=_INFO)
+        async with LoomClient(config=mock_daemon.config) as client:
+            assert client.info is not None
+            assert client.info.deployment is None
+
+    async def test_a_daemon_with_deployment_exposes_it_on_info(self, mock_daemon: MockDaemon) -> None:
+        mock_daemon.get(
+            "/api/v1/info",
+            payload={**_INFO, "deployment": {"kind": "lite-addon", "ingress_path": "/addons/loom/"}},
+        )
+        async with LoomClient(config=mock_daemon.config) as client:
+            assert client.info is not None
+            assert client.info.deployment is not None
+            assert client.info.deployment.kind is DeploymentKind.lite_addon
+            assert client.info.deployment.ingress_path == "/addons/loom/"
 
     async def test_bootstrap_populates_full_store(self, mock_daemon: MockDaemon) -> None:
         _wire_endpoints(mock_daemon)

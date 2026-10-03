@@ -300,6 +300,94 @@ class TestCapabilityGate:
         await transport.close()
 
 
+_LITE_DEPLOYMENT = {"kind": "lite-addon", "ingress_path": "/addons/loom/"}
+
+
+class TestDeploymentFromAnOlderDaemon:
+    """
+    A daemon older than api 13.5.0 sends no ``deployment`` and must stay connectable.
+
+    ``_INFO_RESPONSE`` carries no ``deployment`` on purpose — it is the older
+    daemon, and most tests in this package connect through a payload like it.
+    """
+
+    async def test_connect_without_deployment_succeeds_and_leaves_it_unknown(
+        self, mock_daemon: MockDaemon, transport: HttpTransport
+    ) -> None:
+        mock_daemon.get("/api/v1/info", payload=_INFO_RESPONSE)
+        info = await transport.connect()
+        assert info.deployment is None
+        assert transport.info is not None
+        assert transport.info.deployment is None
+        # Still the generated model, so code typed against it keeps working.
+        assert isinstance(info, wire.rest.Info)
+        await transport.close()
+
+    async def test_connect_with_deployment_reads_kind_and_ingress(
+        self, mock_daemon: MockDaemon, transport: HttpTransport
+    ) -> None:
+        mock_daemon.get("/api/v1/info", payload={**_INFO_RESPONSE, "deployment": _LITE_DEPLOYMENT})
+        info = await transport.connect()
+        assert info.deployment is not None
+        assert info.deployment.kind is wire.rest.DeploymentKind.lite_addon
+        assert info.deployment.ingress_path == "/addons/loom/"
+        await transport.close()
+
+    async def test_unknown_deployment_kind_is_kept_not_refused(
+        self, mock_daemon: MockDaemon, transport: HttpTransport
+    ) -> None:
+        mock_daemon.get("/api/v1/info", payload={**_INFO_RESPONSE, "deployment": {"kind": "future-kind"}})
+        info = await transport.connect()
+        assert info.deployment is not None
+        kind = info.deployment.kind
+        # The tolerant wire enum mints a pseudo-member carrying the raw string;
+        # it is not one of the declared members.
+        assert isinstance(kind, wire.rest.DeploymentKind)
+        assert kind.value == "future-kind"
+        assert kind not in list(wire.rest.DeploymentKind)
+        assert info.deployment.ingress_path is None
+        await transport.close()
+
+    async def test_another_missing_required_field_still_fails(
+        self, mock_daemon: MockDaemon, transport: HttpTransport
+    ) -> None:
+        # The tolerance is for ``deployment`` alone: an /info without
+        # ``capabilities`` is still not an Info.
+        without_capabilities = {k: v for k, v in _INFO_RESPONSE.items() if k != "capabilities"}
+        mock_daemon.get("/api/v1/info", payload=without_capabilities)
+        with pytest.raises(ValidationError, match="capabilities"):
+            await transport.connect()
+
+    @pytest.mark.parametrize(
+        ("recheck_payload", "expected_kind"),
+        [
+            (_INFO_RESPONSE, None),
+            ({**_INFO_RESPONSE, "deployment": _LITE_DEPLOYMENT}, wire.rest.DeploymentKind.lite_addon),
+        ],
+        ids=["without-deployment", "with-deployment"],
+    )
+    async def test_recheck_contract_tolerates_a_missing_deployment(
+        self,
+        mock_daemon: MockDaemon,
+        transport: HttpTransport,
+        recheck_payload: dict[str, object],
+        expected_kind: wire.rest.DeploymentKind | None,
+    ) -> None:
+        # Connect against a daemon that names its deployment, then re-check
+        # against the payload under test: the re-handshake validates on its own.
+        mock_daemon.get("/api/v1/info", payload={**_INFO_RESPONSE, "deployment": _LITE_DEPLOYMENT})
+        mock_daemon.get("/api/v1/info", payload=recheck_payload)
+        await transport.connect()
+        assert await transport.recheck_contract() is True
+        assert transport.info is not None
+        if expected_kind is None:
+            assert transport.info.deployment is None
+        else:
+            assert transport.info.deployment is not None
+            assert transport.info.deployment.kind is expected_kind
+        await transport.close()
+
+
 class TestCompatLayerDeclaresItsCapabilities:
     """
     The compat layer's ``connect()`` calls declare what they cannot work without.

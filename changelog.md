@@ -1,5 +1,18 @@
 # Unreleased
 
+- **Wire types for daemon api 13.5.3, still connectable to older daemons.**
+  The generated wire models now follow daemon api 13.5.3, whose `/info`
+  requires `deployment`. A daemon older than 13.5.0 does not send it, and
+  validating its answer against the generated model refused the connection.
+  The handshake, the re-handshake after a reconnect and
+  `system.get_info()` now validate against
+  `openccu_loom_client.daemon_info.Info`, a subclass of the generated `Info`
+  in which `deployment` alone is optional; every other field is required as
+  before. `info.deployment is None` means the daemon is older than api
+  13.5.0 and did not say where it runs — not `standalone`, and not "no
+  deployment". `probe_daemon()` reports the same case as
+  `deployment_kind is None`. An unknown `deployment.kind` is kept as the raw
+  string rather than refused.
 - **Ask a daemon what it is before any login.** `probe_daemon()` sends one
   `GET /info` without a credential and returns a `DaemonProbe`: where the
   daemon runs (`deployment_kind` — `lite-addon`, `ccu-addon`, `ha-addon`,

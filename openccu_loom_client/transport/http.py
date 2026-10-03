@@ -43,6 +43,7 @@ import aiohttp
 
 from openccu_loom_client import wire
 from openccu_loom_client.boxgate import gate_refusal
+from openccu_loom_client.daemon_info import Info
 from openccu_loom_client.exceptions import (
     BaseLoomException,
     LoomBoxGateError,
@@ -53,7 +54,6 @@ from openccu_loom_client.exceptions import (
     http_error_from_problem,
     parse_problem,
 )
-from openccu_loom_client.wire.rest import Info
 
 if TYPE_CHECKING:
     from collections.abc import Iterable

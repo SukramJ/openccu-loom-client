@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
+from pydantic import ValidationError
 import pytest
 
 from openccu_loom_client.exceptions import LoomNotFoundError
@@ -19,7 +20,7 @@ from openccu_loom_client.operations import (
     SystemOperations,
 )
 from openccu_loom_client.transport import HttpTransport
-from openccu_loom_client.wire import DAEMON_API_VERSION
+from openccu_loom_client.wire import DAEMON_API_VERSION, rest as wire_rest
 from tests.helpers import MockDaemon
 
 _INFO = {
@@ -43,6 +44,24 @@ async def http(mock_daemon: MockDaemon) -> AsyncIterator[HttpTransport]:
     await t.connect()
     yield t
     await t.close()
+
+
+async def _get_info_answering(mock_daemon: MockDaemon, *, payload: dict[str, object]) -> wire_rest.Info:
+    """
+    Connect, then read ``GET /info`` once more, answered by ``payload``.
+
+    Both answers are queued before connect(): the stub repeats its last entry,
+    so a payload registered after the ``http`` fixture's handshake would sit
+    behind the handshake answer and never be served to get_info().
+    """
+    t = HttpTransport(config=mock_daemon.config, backoff_sequence=(0.0,))
+    mock_daemon.get("/api/v1/info", payload=_INFO)
+    mock_daemon.get("/api/v1/info", payload=payload)
+    await t.connect()
+    try:
+        return await SystemOperations(transport=t).get_info()
+    finally:
+        await t.close()
 
 
 class TestDevicesOperations:
@@ -146,6 +165,25 @@ class TestHubOperations:
 
 
 class TestSystemOperations:
+    async def test_get_info_without_deployment_leaves_it_unknown(self, mock_daemon: MockDaemon) -> None:
+        # A daemon older than api 13.5.0 sends no ``deployment``.
+        info = await _get_info_answering(mock_daemon, payload=_INFO)
+        assert info.deployment is None
+        assert isinstance(info, wire_rest.Info)
+
+    async def test_get_info_with_deployment(self, mock_daemon: MockDaemon) -> None:
+        info = await _get_info_answering(
+            mock_daemon,
+            payload={**_INFO, "deployment": {"kind": "lite-addon", "ingress_path": "/addons/loom/"}},
+        )
+        assert info.deployment is not None
+        assert info.deployment.kind is wire_rest.DeploymentKind.lite_addon
+        assert info.deployment.ingress_path == "/addons/loom/"
+
+    async def test_get_info_still_requires_capabilities(self, mock_daemon: MockDaemon) -> None:
+        with pytest.raises(ValidationError, match="capabilities"):
+            await _get_info_answering(mock_daemon, payload={k: v for k, v in _INFO.items() if k != "capabilities"})
+
     async def test_get_snapshot(self, mock_daemon: MockDaemon, http: HttpTransport) -> None:
         mock_daemon.get(
             "/api/v1/snapshot",
