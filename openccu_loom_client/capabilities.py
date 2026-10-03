@@ -27,6 +27,7 @@ the tokens we act on, not an allowlist to validate against.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from enum import StrEnum
 from typing import Final
 
@@ -62,8 +63,6 @@ class Capability(StrEnum):
     #: mounted and every write is refused, which a caller cannot tell
     #: apart from a permission problem.
     ADMIN_PERSISTENCE = "admin.persistence.v1"
-    AUTH_OIDC = "auth.oidc.v1"
-    AUTH_CCU = "auth.ccu.v1"
     MCP = "mcp.v1"
     #: Implies :attr:`MCP`.
     MCP_WRITE = "mcp.write.v1"
@@ -72,6 +71,26 @@ class Capability(StrEnum):
     #: spelling: renaming a token a client already matches on is a
     #: breaking change.
     ADDON_SELF_UPDATE = "addon_self_update"
+
+    # Login paths (the daemon's ADR 0081): one ``auth.<name>.v1`` token per
+    # way of signing in the daemon has wired, so a client offers a person
+    # only the paths listed. :func:`login_paths` turns them into the short
+    # names the daemon's mDNS record carries.
+    AUTH_BASIC = "auth.basic.v1"
+    AUTH_BEARER = "auth.bearer.v1"
+    #: The unauthenticated client-pairing routes are open
+    #: (:func:`~openccu_loom_client.pairing.start_pairing`).
+    AUTH_PAIRING = "auth.pairing.v1"
+    AUTH_OIDC = "auth.oidc.v1"
+    AUTH_CCU = "auth.ccu.v1"
+    #: An openccu-lite box API token the box's gate accepted is a daemon
+    #: identity.
+    AUTH_OCCULITE_TOKEN = "auth.occulite_token.v1"  # noqa: S105 # nosec B105 — capability token, not a secret
+    #: The same for a session of the openccu-lite box's shell.
+    AUTH_OCCULITE_SSO = "auth.occulite_sso.v1"
+    #: Home Assistant Ingress requests from the Supervisor count as
+    #: authenticated.
+    AUTH_HA_INGRESS = "auth.ha_ingress.v1"
 
 
 #: The tokens every daemon emits, whatever it is configured for.
@@ -82,3 +101,28 @@ ALWAYS_ON: Final = frozenset(
         Capability.PROBLEM_DETAILS,
     }
 )
+
+_LOGIN_PATH_PREFIX: Final = "auth."
+_LOGIN_PATH_SUFFIX: Final = ".v1"
+
+
+def login_paths(*, capabilities: Iterable[str]) -> frozenset[str]:
+    """
+    Return the short name of every login path among ``capabilities``.
+
+    The daemon's own rule (``LoginPaths`` in its ``/info`` handler): a token
+    ``auth.<name>.v1`` names the login path ``<name>`` —
+    ``auth.occulite_token.v1`` is ``occulite_token``. It applies to every such
+    token, known to :class:`Capability` or not, so a login path a newer daemon
+    adds is reported rather than dropped. A token of another version
+    (``auth.x.v2``) is a different contract and is not a login path here; an
+    empty name (``auth..v1``) names nothing.
+    """
+    names: set[str] = set()
+    for token in capabilities:
+        if not token.startswith(_LOGIN_PATH_PREFIX):
+            continue
+        rest = token.removeprefix(_LOGIN_PATH_PREFIX)
+        if rest.endswith(_LOGIN_PATH_SUFFIX) and (name := rest.removesuffix(_LOGIN_PATH_SUFFIX)):
+            names.add(name)
+    return frozenset(names)

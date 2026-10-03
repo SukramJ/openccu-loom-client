@@ -20,9 +20,10 @@ from __future__ import annotations
 from openccu_loom_client._version import __version__
 from openccu_loom_client.auth import BasicAuth, BearerAuth, NoAuth, SessionAuth
 from openccu_loom_client.boxpairing import BoxPairingResult, BoxPairingSession, start_box_pairing
-from openccu_loom_client.capabilities import ALWAYS_ON, Capability
+from openccu_loom_client.capabilities import ALWAYS_ON, Capability, login_paths
 from openccu_loom_client.client import LoomClient
 from openccu_loom_client.config import BoxIngressConfig, LoomConfig
+from openccu_loom_client.discovery import DiscoveredDaemon, parse_txt_record
 from openccu_loom_client.exceptions import (
     BaseLoomException,
     LoomAuthError,
@@ -49,6 +50,7 @@ from openccu_loom_client.exceptions import (
     LoomValidationError,
 )
 from openccu_loom_client.pairing import PairingFingerprintMismatchError, PairingSession, start_pairing
+from openccu_loom_client.probe import DaemonProbe, ProbeOutcome, probe_daemon
 from openccu_loom_client.store import LoomStore
 
 __all__ = [
@@ -61,6 +63,8 @@ __all__ = [
     "BoxPairingResult",
     "BoxPairingSession",
     "Capability",
+    "DaemonProbe",
+    "DiscoveredDaemon",
     "LoomAuthError",
     "LoomBadRequestError",
     "LoomBoxGateError",
@@ -89,8 +93,12 @@ __all__ = [
     "NoAuth",
     "PairingFingerprintMismatchError",
     "PairingSession",
+    "ProbeOutcome",
     "SessionAuth",
     "__version__",
+    "login_paths",
+    "parse_txt_record",
+    "probe_daemon",
     "start_box_pairing",
     "start_pairing",
 ]
