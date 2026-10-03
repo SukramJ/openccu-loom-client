@@ -16,7 +16,7 @@ from pathlib import Path
 import sys
 
 HEADER = '''# SPDX-License-Identifier: MIT
-# Copyright (C) 2026 OpenCCU-Loom authors.
+# Copyright (C) 2026 SukramJ.
 
 """Generated str-enums mirroring pkg/hmenum from the openccu-loom daemon.
 

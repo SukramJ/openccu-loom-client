@@ -25,7 +25,7 @@ import re
 import sys
 
 HEADER = '''# SPDX-License-Identifier: MIT
-# Copyright (C) 2026 OpenCCU-Loom authors.
+# Copyright (C) 2026 SukramJ.
 
 """Re-export of WebSocket envelope + push-payload Pydantic models.
 
