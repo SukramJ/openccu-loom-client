@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (C) 2026 OpenCCU-Loom authors.
+# Copyright (C) 2026 SukramJ.
 
 """
 Box-ingress mode: the client reaching the daemon through an openccu-lite box.

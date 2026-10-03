@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (C) 2026 OpenCCU-Loom authors.
+# Copyright (C) 2026 SukramJ.
 
 """Alarm-panel domain model — wraps AlarmPanelEntity (+ live zone detail)."""
 

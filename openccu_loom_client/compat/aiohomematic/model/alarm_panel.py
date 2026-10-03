@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (C) 2026 OpenCCU-Loom authors.
+# Copyright (C) 2026 SukramJ.
 
 """
 Categorised alarm-control-panel data point (loom-native, no aio twin).

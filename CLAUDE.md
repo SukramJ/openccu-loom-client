@@ -81,7 +81,7 @@ A namespace shim that presents `aiohomematic`'s public surface so existing `home
 - All public functions use keyword-only arguments (`*,`). Follow this when adding to the surface.
 - Domain wrappers expose private `_replace_summary` / `_replace_state` / `_update_summary` methods the store calls to mutate live objects in place — never rebuild a wrapper on update.
 - Retries: only mark a call `allow_retry=True` when it is genuinely idempotent. `set_value`/`set_sysvar` (PUT, daemon-serialized) are retried; `execute_program` and `invoke_custom_data_point` (POST, side effects like cover-open) are not.
-- Every source file carries the SPDX MIT header. `mypy --strict` and the full ruff ruleset (incl. `PL`, `B`, `SIM`, `ASYNC`, `UP`) must pass.
+- Every source file carries the SPDX MIT header and names the copyright holder: `# SPDX-License-Identifier: MIT` then `# Copyright (C) 2026 SukramJ.`. The generators under `script/gen/` stamp the same two lines into `openccu_loom_client/wire/`. `mypy --strict` and the full ruff ruleset (incl. `PL`, `B`, `SIM`, `ASYNC`, `UP`) must pass.
 
 ## Daemon broadcasts now live (formerly deferred)
 

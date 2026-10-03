@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (C) 2026 OpenCCU-Loom authors.
+# Copyright (C) 2026 SukramJ.
 
 """
 Tier A e2e — read-only system / admin surface against a CCU-less daemon.

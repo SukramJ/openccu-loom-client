@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (C) 2026 OpenCCU-Loom authors.
+# Copyright (C) 2026 SukramJ.
 
 """
 HA-parity regression tests — round 5 (2026-06-12 ccu-twin comparison).

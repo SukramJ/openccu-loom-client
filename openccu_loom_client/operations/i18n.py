@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (C) 2026 OpenCCU-Loom authors.
+# Copyright (C) 2026 SukramJ.
 
 """
 Entity-name catalogue operations (daemon ≥ 0.54.0, api 5.2.0).
