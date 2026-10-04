@@ -1,5 +1,43 @@
 # Unreleased
 
+- **Devices the daemon holds back reach Home Assistant as delayed devices.**
+  From daemon api 13.7.0 a newly paired device is held unbuilt and appears
+  only on `GET /inbox` with `pending_creation: true`. The compat layer now
+  reads the inbox after `start()`, on every `hub.inbox_changed` push and
+  after a re-bootstrap, and publishes one aiohomematic `DeviceLifecycleEvent`
+  of type `DELAYED` per interface for held addresses it has not announced
+  yet, with `device_addresses` and `interface_id` (`<central>-<interface>`,
+  the id the device stream uses). An unchanged inbox announces nothing; an
+  address is announced again only after it left the held state. Entries of
+  another central, entries `awaiting_release`, plain CCU inbox entries and
+  entries from a daemon that does not send the flag announce nothing.
+  `DeviceLifecycleEventType` in `compat.aiohomematic.central.events` gains
+  `DELAYED`.
+- **`device_coordinator.add_new_devices_manually` accepts and releases held
+  devices, but only under a name.** For an address the daemon holds and a
+  non-empty name, it sends `POST /devices/{addr}/accept` with the name in
+  the body and then `POST /devices/{addr}/release`. If the release fails it
+  raises a `BaseLoomException` saying the device was accepted and stays
+  awaiting release on the daemon. A held address with an empty or blank
+  name is neither accepted nor released and nothing is raised: it stays
+  held, and one delayed inbox re-sync (120 s,
+  `held_devices.HELD_RESYNC_DELAY_SECONDS`) announces it as `DELAYED`
+  again. This covers the Home Assistant integration's nameless auto-confirm
+  during its first ten minutes after setup: once that window has closed,
+  the device arrives as a repair issue that asks for a name. Several
+  declined addresses share one timer, and `stop()` cancels it. Other
+  addresses keep the previous behaviour: a non-empty name is applied with
+  `PATCH /devices/{addr}`, an empty one sends nothing.
+- **Native accept carries the first-time configuration.**
+  `devices.accept_device()` takes keyword-only `name`, `include_channels`,
+  `rooms` and `functions` and sends them as the `AcceptInboxDeviceRequest`
+  body; with none of them set it sends no body, as before.
+  `hub.list_inbox_devices()` returns the inbox as typed `InboxDevice`
+  entries, including `pending_creation` and `awaiting_release`.
+  `json_rpc_client.accept_device_in_inbox()` takes an optional
+  `device_name`, and `get_inbox_devices()` records carry
+  `pending_creation`.
+
 # Version 2026.10.6 (2026-10-03)
 
 - **Hear when a central's system information changes.** The adapter's

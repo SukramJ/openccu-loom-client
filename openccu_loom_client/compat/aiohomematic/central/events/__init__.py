@@ -60,6 +60,10 @@ class DeviceLifecycleEventType(StrEnum):
     """Subset of lifecycle transitions HA needs from the umbrella event."""
 
     CREATED = "created"
+    # A device the daemon holds back before building it (``pending_creation``
+    # on the inbox). The value is upstream's, so a consumer comparing against
+    # either enum sees the same member.
+    DELAYED = "delayed"
     REMOVED = "removed"
     AVAILABILITY_CHANGED = "availability_changed"
 

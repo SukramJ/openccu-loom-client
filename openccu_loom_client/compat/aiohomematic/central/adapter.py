@@ -71,6 +71,7 @@ from openccu_loom_client.compat.aiohomematic.central.configurable_devices import
     build_configurable_devices,
 )
 from openccu_loom_client.compat.aiohomematic.central.events import SystemInformationChangedEvent
+from openccu_loom_client.compat.aiohomematic.central.held_devices import HeldDeviceAnnouncer
 from openccu_loom_client.compat.aiohomematic.central.hub_coordinator import _HubCoordinator
 from openccu_loom_client.compat.aiohomematic.central.refresh import install_refresh_bridge
 from openccu_loom_client.compat.aiohomematic.central.state_paths import device_state_path, parse_device_state_path
@@ -103,6 +104,9 @@ from openccu_loom_client.events import (
     AuthFailedEvent as LoomAuthFailedEvent,
     CentralFeaturesChangedEvent as LoomCentralFeaturesChangedEvent,
     ConnectionStateChangedEvent as LoomConnectionStateChangedEvent,
+    DeviceCreatedEvent as LoomDeviceCreatedEvent,
+    DeviceRemovedEvent as LoomDeviceRemovedEvent,
+    HubInboxChangedEvent as LoomHubInboxChangedEvent,
 )
 from openccu_loom_client.exceptions import BaseLoomException, LoomForbiddenError, LoomHttpError, LoomNotFoundError
 from openccu_loom_client.wire.enums import CentralState, DataPointCategory
@@ -235,8 +239,9 @@ def _is_creatable(*, dp: Any) -> bool:
 class _DeviceCoordinator:
     """``central.device_coordinator`` surface."""
 
-    def __init__(self, *, client: LoomClient) -> None:
+    def __init__(self, *, client: LoomClient, held_devices: HeldDeviceAnnouncer) -> None:
         self._client = client
+        self._held_devices = held_devices
 
     def get_device(self, *, address: str) -> Device | None:
         return self._client.store.get_device(address=address)
@@ -281,16 +286,51 @@ class _DeviceCoordinator:
         **_kwargs: Any,
     ) -> None:
         """
-        Confirm devices HA discovered — a no-op for loom plus any rename.
+        Confirm devices the consumer was told about, naming them on the way.
 
-        Device creation is daemon-driven: the addresses HA passes are
-        already in the store (broadcast as ``device.created``), so there
-        is nothing to add. Any non-empty name supplied alongside is
-        applied via ``PATCH /devices/{addr}``.
+        Two kinds of address arrive here. A device the daemon holds back
+        unbuilt (``pending_creation`` on the inbox, announced as ``DELAYED``)
+        is accepted — with the name in the accept body, so it is built under
+        that name — and then released, which publishes it to the ecosystems and
+        makes the daemon broadcast ``device.released``. Without a name it is
+        neither accepted nor released: it stays held and is announced again
+        after a delay (see :class:`HeldDeviceAnnouncer`). Any other address is
+        already built and in the store; for it a non-empty name is applied via
+        ``PATCH /devices/{addr}`` and nothing else happens.
+
+        A failed release after a successful accept raises: the device is then
+        built but still withheld on the daemon, and a consumer that reported
+        success would leave it there with nothing pointing at it.
+        ``interface_id`` is accepted for call-shape parity; the daemon routes
+        by address alone.
         """
-        for address, name in (address_names or {}).items():
-            if name:
-                await self._client.devices.patch_device(address=address, name=name)
+        del interface_id
+        names = address_names or {}
+        if not names:
+            return
+        held = await self._held_devices.held_addresses()
+        for address, name in names.items():
+            if address not in held:
+                if name:
+                    await self._client.devices.patch_device(address=address, name=name)
+                continue
+            if not name or not name.strip():
+                # A held device is never accepted without a name — the hold
+                # exists so the device is named before anything adopts it.
+                # The consumer's nameless auto-confirm is declined; the
+                # announcer offers the device again after a delay.
+                _LOGGER.debug("held device %s confirmed without a name; left held, announced again later", address)
+                self._held_devices.decline(address=address)
+                continue
+            await self._client.devices.accept_device(address=address, name=name)
+            try:
+                await self._client.devices.release_device(address=address)
+            except BaseLoomException as err:
+                msg = (
+                    f"device {address} was accepted but releasing it failed; it stays awaiting release "
+                    f"on the daemon until it is released there: {err}"
+                )
+                raise BaseLoomException(msg) from err
 
 
 class _QueryFacade:
@@ -692,6 +732,20 @@ def _to_alarm_message(*, message: Any) -> AlarmMessageData:
     )
 
 
+@dataclass(frozen=True, kw_only=True, slots=True)
+class LoomInboxDeviceData(InboxDeviceData):
+    """
+    aiohomematic's inbox record plus the daemon's ``pending_creation`` flag.
+
+    Upstream's record has no field for a device held back *before* it is
+    built — a CCU reached directly has no such state. A subclass keeps every
+    ``isinstance`` check and every existing field intact and adds the one
+    flag, which ``dataclasses.asdict`` then carries to the consumer.
+    """
+
+    pending_creation: bool = False
+
+
 def _to_inbox_device(*, entry: Any) -> InboxDeviceData:
     """
     Convert a daemon inbox entry into aiohomematic's ``InboxDeviceData``.
@@ -701,12 +755,15 @@ def _to_inbox_device(*, entry: Any) -> InboxDeviceData:
     while the rest are waiting for an *accept*. Dropping the flag left a
     consumer with one action for both, and for half of them it was the wrong
     one. Absent on a daemon older than 0.66.0, where the state does not exist
-    and ``False`` is the truth rather than a placeholder.
+    and ``False`` is the truth rather than a placeholder. ``pending_creation``
+    — the device is announced but not built yet — is carried the same way and
+    is absent on a daemon older than API 13.7.0.
     """
     data = _as_dict(entry=entry)
     address = data.get("address") or ""
-    return InboxDeviceData(
+    return LoomInboxDeviceData(
         awaiting_release=bool(data.get("awaiting_release")),
+        pending_creation=bool(data.get("pending_creation")),
         # The daemon's inbox DTO carries no ise_id; the serial is the stable
         # identity it does ship (the address is the fallback).
         device_id=data.get("serial") or address,
@@ -746,9 +803,16 @@ class _JsonRpcClient:
         entries = await self._client.hub.list_inbox()
         return tuple(_to_inbox_device(entry=entry) for entry in entries)
 
-    async def accept_device_in_inbox(self, *, device_address: str) -> bool:
-        """Accept a device out of the inbox. The transport raises on refusal, so reaching the return means success."""
-        await self._client.devices.accept_device(address=device_address)
+    async def accept_device_in_inbox(self, *, device_address: str, device_name: str | None = None) -> bool:
+        """
+        Accept a device out of the inbox, optionally naming it in the same step.
+
+        A non-empty ``device_name`` travels in the accept body, so the daemon
+        builds the device under that name; without one the request is the
+        bodiless accept it always was. The transport raises on refusal, so
+        reaching the return means success.
+        """
+        await self._client.devices.accept_device(address=device_address, name=device_name or None)
         return True
 
     async def release_device_in_inbox(self, *, device_address: str) -> bool:
@@ -1194,7 +1258,11 @@ class LoomCentralAdapter:
         # (device_address, channel_no) — consumed by the combined-DP
         # bootstrap to name the replacement number like the reference.
         self._suppressed_calc_labels: Final[dict[tuple[str, int], str]] = {}
-        self.device_coordinator: Final = _DeviceCoordinator(client=client)
+        # Announces the devices the daemon holds back unbuilt as DELAYED
+        # lifecycle events; the device coordinator reads the same held set to
+        # accept and release them.
+        self._held_devices: Final = HeldDeviceAnnouncer(client=client, ha_bus=self._ha_bus)
+        self.device_coordinator: Final = _DeviceCoordinator(client=client, held_devices=self._held_devices)
         self.hub_coordinator: Final = _HubCoordinator(
             client=client,
             ha_bus=self._ha_bus,
@@ -1401,6 +1469,14 @@ class LoomCentralAdapter:
             # them too. Published on the real aiohomematic bus as the real
             # DataPointsCreatedEvent HA subscribes to.
             await self._emit_data_points_created()
+            # Devices the daemon holds back unbuilt: announce them now, and
+            # again whenever the inbox changes. The device events only drop an
+            # address from the announced set — a created or removed device is
+            # no longer the held device that was announced.
+            self._refresh_group.subscribe(event_type=LoomHubInboxChangedEvent, handler=self._on_inbox_changed)
+            self._refresh_group.subscribe(event_type=LoomDeviceCreatedEvent, handler=self._on_device_arrived_or_left)
+            self._refresh_group.subscribe(event_type=LoomDeviceRemovedEvent, handler=self._on_device_arrived_or_left)
+            await self._held_devices.sync()
             # Slow reconcile backstop: re-seed the singletons from the aggregate so
             # a missed push can't drift. Every singleton (system_update included) is
             # push-driven now; this loop is pure resilience.
@@ -1457,8 +1533,20 @@ class LoomCentralAdapter:
             await self._bootstrap_schedules()
             await self._bootstrap_combined_data_points()
             await self._emit_data_points_created()
+            # A re-bootstrap follows a lost replay, so an inbox push may have
+            # been lost with it.
+            await self._held_devices.sync()
         except Exception:
             _LOGGER.exception("central %s: rebuilding the compat model after a re-bootstrap failed", self._name)
+
+    async def _on_inbox_changed(self, event: LoomHubInboxChangedEvent, /) -> None:
+        """Re-read the inbox and announce newly held devices (the push carries only a count)."""
+        if self._held_devices.matches_central(central=event.payload.central):
+            await self._held_devices.sync()
+
+    async def _on_device_arrived_or_left(self, event: LoomDeviceCreatedEvent | LoomDeviceRemovedEvent, /) -> None:
+        """Drop a created or removed device from the announced held set."""
+        self._held_devices.forget(address=event.payload.device_address)
 
     async def _on_connection_state_changed(self, event: LoomConnectionStateChangedEvent, /) -> None:
         """
@@ -1918,6 +2006,7 @@ class LoomCentralAdapter:
             pending.cancel()
         self._degraded_task = None
         self._client.set_rebootstrap_hook(None)
+        await self._held_devices.aclose()
         await self._client.close()
         self._state = CentralState.Stopped
 

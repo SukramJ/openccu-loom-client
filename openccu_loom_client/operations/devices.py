@@ -17,6 +17,7 @@ from typing import Any
 from openccu_loom_client.exceptions import LoomHttpError
 from openccu_loom_client.operations._base import _OperationsBase
 from openccu_loom_client.wire.rest import (
+    AcceptInboxDeviceRequest,
     CalculatedDPDetail,
     CalculatedDPSummary,
     ChannelSummary,
@@ -267,11 +268,23 @@ class DevicesOperations(_OperationsBase):
         """
         await self._transport.request(method="POST", path="/devices/firmware/refresh", allow_retry=False)
 
-    async def accept_device(self, *, address: str) -> None:
+    async def accept_device(
+        self,
+        *,
+        address: str,
+        name: str | None = None,
+        include_channels: bool | None = None,
+        rooms: list[str] | None = None,
+        functions: list[str] | None = None,
+    ) -> None:
         """
         Promote a pending pairing candidate into the registry.
 
-        Wire: ``POST /devices/{addr}/accept``.
+        Wire: ``POST /devices/{addr}/accept`` with an optional
+        :class:`AcceptInboxDeviceRequest` — the device's first-time
+        configuration (name, channel names, rooms, functions), applied as part
+        of the accept. With every argument left unset no body is sent, which is
+        the request older daemons expect.
 
         Accepting materialises the device — it gains its ise_id, channels and
         data points, so it can be named and placed — but does not publish it to
@@ -279,7 +292,11 @@ class DevicesOperations(_OperationsBase):
         the point: a consumer that adopts a device keeps the identity it first
         saw, so the naming has to be settled first.
         """
-        await self._transport.request(method="POST", path=f"/devices/{address}/accept", allow_retry=False)
+        body = AcceptInboxDeviceRequest(name=name, include_channels=include_channels, rooms=rooms, functions=functions)
+        json_body = self._to_json_body(body) or None
+        await self._transport.request(
+            method="POST", path=f"/devices/{address}/accept", json_body=json_body, allow_retry=False
+        )
 
     async def release_device(self, *, address: str) -> None:
         """
