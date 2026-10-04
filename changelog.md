@@ -25,7 +25,9 @@
   again. This covers the Home Assistant integration's nameless auto-confirm
   during its first ten minutes after setup: once that window has closed,
   the device arrives as a repair issue that asks for a name. Several
-  declined addresses share one timer, and `stop()` cancels it. Other
+  declined addresses share one timer, and `stop()` cancels it. A nameless
+  confirmation the consumer issues from inside its `DELAYED` handler, while
+  the device is still being announced, is honoured the same way. Other
   addresses keep the previous behaviour: a non-empty name is applied with
   `PATCH /devices/{addr}`, an empty one sends nothing.
 - **Native accept carries the first-time configuration.**

@@ -197,6 +197,14 @@ class HeldDeviceAnnouncer:
                 new_by_interface.setdefault(interface_id, []).append(address)
                 self._declined.discard(address)
             for interface_id, addresses in new_by_interface.items():
+                # Marked announced before the publish, not after it: the
+                # consumer answers the event from inside its handler, so a
+                # nameless confirmation reaches decline() while publish() is
+                # still running. Updating afterwards would put the declined
+                # address back into the announced set, and the re-sync would
+                # then skip it for good. decline() is synchronous and does not
+                # take the lock this sync holds.
+                self._announced.update(addresses)
                 await self._ha_bus.publish(
                     event=DeviceLifecycleEvent(
                         timestamp=datetime.now(tz=UTC),
@@ -205,6 +213,7 @@ class HeldDeviceAnnouncer:
                         interface_id=interface_id,
                     )
                 )
-                self._announced.update(addresses)
+            # Read after the publishes, so a decline issued during one keeps
+            # the re-sync it scheduled.
             if not self._declined:
                 self._cancel_resync()
