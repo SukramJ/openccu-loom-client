@@ -16,6 +16,7 @@ is the one production installs; only the network-heavy bring-up is stubbed.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import pytest
@@ -53,9 +54,18 @@ def _inbox_push(*, central: str = "home", count: int = 1) -> HubInboxChangedEven
 
 
 async def _started(
-    *, mock_daemon: MockDaemon, monkeypatch: pytest.MonkeyPatch, inboxes: list[list[dict[str, Any]]]
+    *,
+    mock_daemon: MockDaemon,
+    monkeypatch: pytest.MonkeyPatch,
+    inboxes: list[list[dict[str, Any]]],
+    on_delayed: Callable[[Any, DeviceLifecycleEvent], Awaitable[None]] | None = None,
 ) -> tuple[Any, list[DeviceLifecycleEvent]]:
-    """Start an adapter whose successive ``GET /inbox`` reads answer ``inboxes`` in order (the last repeats)."""
+    """
+    Start an adapter whose successive ``GET /inbox`` reads answer ``inboxes`` in order (the last repeats).
+
+    ``on_delayed`` is awaited from inside the bus handler for every DELAYED
+    event, with the central — the way the integration answers it in place.
+    """
     mock_daemon.get(f"{_BASE}/info", payload=_INFO)
     mock_daemon.get(f"{_BASE}/system/ccu", payload=[_LITE_ENTRY])
     mock_daemon.get(f"{_BASE}/interfaces", payload=[])
@@ -63,10 +73,14 @@ async def _started(
         mock_daemon.get(f"{_BASE}/inbox", payload=inbox)
     central = await _make_config(mock_daemon=mock_daemon).create_central()
     seen: list[DeviceLifecycleEvent] = []
+
+    async def _record(*, event: DeviceLifecycleEvent) -> None:
+        seen.append(event)
+        if on_delayed is not None and event.event_type == DeviceLifecycleEventType.DELAYED:
+            await on_delayed(central, event)
+
     # Subscribed before start(), the way the integration does it.
-    central.event_bus.subscribe(
-        event_type=DeviceLifecycleEvent, event_key=None, handler=lambda *, event: seen.append(event)
-    )
+    central.event_bus.subscribe(event_type=DeviceLifecycleEvent, event_key=None, handler=_record)
 
     async def _noop(*_args: Any, **_kwargs: Any) -> None:
         return None
@@ -351,6 +365,89 @@ class TestNamelessConfirmation:
         assert task.cancelled(), "stop() must cancel the pending re-sync"
         assert central._held_devices.resync_pending is False
         assert len(_delayed(seen)) == 1
+
+
+def _confirm_with(names: list[str]) -> Callable[[Any, DeviceLifecycleEvent], Awaitable[None]]:
+    """
+    Answer each DELAYED event in place with the next name (the last repeats).
+
+    ``homematicip_local`` confirms from inside its bus handler, so the
+    confirmation runs while the announcing ``publish`` is still on the stack.
+    """
+    answers = iter(names)
+    last = names[-1]
+
+    async def _answer(central: Any, event: DeviceLifecycleEvent) -> None:
+        name = next(answers, last)
+        await central.device_coordinator.add_new_devices_manually(
+            interface_id=event.interface_id, address_names=dict.fromkeys(event.device_addresses, name)
+        )
+
+    return _answer
+
+
+class TestConfirmationDuringAnnouncement:
+    """A confirmation the consumer issues while the DELAYED event is still being published."""
+
+    async def test_nameless_confirmation_in_handler_is_reannounced(self, mock_daemon: MockDaemon, monkeypatch) -> None:
+        monkeypatch.setattr(held_devices_module, "HELD_RESYNC_DELAY_SECONDS", 0.05)
+        central, seen = await _started(
+            mock_daemon=mock_daemon,
+            monkeypatch=monkeypatch,
+            inboxes=[[_held("NEW1")]],
+            on_delayed=_confirm_with([""]),
+        )
+        try:
+            assert _delayed(seen) == [("home-HmIP-RF", ("NEW1",))]
+            assert await _wait_for(lambda: len(_delayed(seen)) >= 2), (
+                "a decline issued inside the announcement must still lead to a second announcement"
+            )
+            assert _delayed(seen)[:2] == [("home-HmIP-RF", ("NEW1",)), ("home-HmIP-RF", ("NEW1",))]
+            assert _writes(mock_daemon) == [], "a held device confirmed without a name must not be accepted"
+            assert central._held_devices.resync_pending is True, "a consumer that keeps declining keeps a re-sync"
+        finally:
+            await central.stop()
+
+    async def test_named_confirmation_after_in_handler_decline_accepts(
+        self, mock_daemon: MockDaemon, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(held_devices_module, "HELD_RESYNC_DELAY_SECONDS", 0.05)
+        central, seen = await _started(
+            mock_daemon=mock_daemon,
+            monkeypatch=monkeypatch,
+            inboxes=[[_held("NEW1")]],
+            on_delayed=_confirm_with(["", "Stehlampe"]),
+        )
+        mock_daemon.post(f"{_BASE}/devices/NEW1/accept", status=202)
+        mock_daemon.post(f"{_BASE}/devices/NEW1/release", status=204)
+        try:
+            assert await _wait_for(lambda: len(_delayed(seen)) == 2), "the declined device must be announced again"
+            await central._looper.block_till_done()
+            assert _writes(mock_daemon) == [
+                ("POST", f"{_BASE}/devices/NEW1/accept", {"name": "Stehlampe"}),
+                ("POST", f"{_BASE}/devices/NEW1/release", None),
+            ]
+            assert central._held_devices.resync_pending is False, "nothing waits once it was accepted"
+            assert _delayed(seen) == [("home-HmIP-RF", ("NEW1",)), ("home-HmIP-RF", ("NEW1",))]
+        finally:
+            await central.stop()
+
+    async def test_silent_consumer_is_announced_once(self, mock_daemon: MockDaemon, monkeypatch) -> None:
+        """Negative control: without a confirmation the address stays announced and nothing is scheduled."""
+        monkeypatch.setattr(held_devices_module, "HELD_RESYNC_DELAY_SECONDS", 0.05)
+
+        async def _ignore(_central: Any, _event: DeviceLifecycleEvent) -> None:
+            return None
+
+        central, seen = await _started(
+            mock_daemon=mock_daemon, monkeypatch=monkeypatch, inboxes=[[_held("NEW1")]], on_delayed=_ignore
+        )
+        try:
+            assert _delayed(seen) == [("home-HmIP-RF", ("NEW1",))]
+            assert central._held_devices.announced == frozenset({"NEW1"})
+            assert central._held_devices.resync_pending is False
+        finally:
+            await central.stop()
 
 
 class TestAcceptDeviceBody:
