@@ -1597,6 +1597,9 @@ class TestJsonRpcClientRecords:
             "device_type": "HmIP-PS",
             "interface": "",
             "awaiting_release": False,
+            # The entry carries no `pending_creation` key, as on a daemon
+            # older than api 13.7.0: absent reads as "not held".
+            "pending_creation": False,
         }
 
     async def test_awaiting_release_survives_the_conversion(self) -> None:

@@ -14,6 +14,7 @@ from openccu_loom_client.wire.rest import (
     Area,
     AreaRoomRef,
     Function,
+    InboxDevice,
     InstallModeInterfaceEntry,
     InstallModeInterfaceRequest,
     ProgramSummary,
@@ -322,6 +323,19 @@ class HubOperations(_OperationsBase):
         """
         payload = await self._transport.request(method="GET", path="/inbox")
         return [dict(e) for e in (payload or [])]
+
+    async def list_inbox_devices(self) -> list[InboxDevice]:
+        """
+        List the inbox as typed entries.
+
+        Wire: ``GET /inbox``, the same listing as :meth:`list_inbox`, validated
+        into :class:`InboxDevice`. The entry carries the two daemon-side hold
+        states: ``pending_creation`` (announced but not built — accept it) and
+        ``awaiting_release`` (built, withheld from the ecosystems — release
+        it). Both are ``None`` on a daemon that predates them, which reads as
+        "not held".
+        """
+        return await self._request_list(method="GET", path="/inbox", model=InboxDevice)
 
     # ---- install mode ----
 
