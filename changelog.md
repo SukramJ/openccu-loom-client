@@ -1,4 +1,4 @@
-# Unreleased
+# Version 2026.10.7 (2026-10-04)
 
 - **Devices the daemon holds back reach Home Assistant as delayed devices.**
   From daemon api 13.7.0 a newly paired device is held unbuilt and appears
@@ -39,6 +39,15 @@
   `json_rpc_client.accept_device_in_inbox()` takes an optional
   `device_name`, and `get_inbox_devices()` records carry
   `pending_creation`.
+- **Wire layer regenerated for daemon 0.88.0 (api 13.7.1).**
+  `DAEMON_API_VERSION` and `SCHEMA_DIGEST` move with it; it also carries the
+  0.87.0 regeneration (api 13.5.4). No type or field changes: descriptions
+  only. What changed on the daemon behind them: `delay_new_device_creation`
+  now defaults on (a newly paired device is held until it is accepted and
+  released), the navigation surface of the new-devices view no longer
+  carries the `feature:hub.inbox` gate, and the device-admin routes answer
+  404 (`LoomNotFoundError`) instead of 502 for an address the daemon does
+  not hold.
 
 # Version 2026.10.6 (2026-10-03)
 
