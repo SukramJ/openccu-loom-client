@@ -2529,7 +2529,7 @@ class SurfaceInfo(BaseModel):
     )
     gate: Gate | None = Field(
         None,
-        description="Runtime capability the surface additionally needs. A\n`feature:<key>` gate is open while at least one central\noffers that feature (see `features` on `GET /system/ccu`).\n",
+        description="Runtime capability the surface additionally needs. A\n`feature:<key>` gate is open while at least one central\noffers that feature (see `features` on `GET /system/ccu`).\n`feature:hub.inbox` is no longer emitted: the new-devices\nview (`nav.inbox`) lists the daemon's own onboarding hold,\nwhich exists on every system, and carries no gate. The value\nstays in the vocabulary for clients of older daemons.\n",
     )
     warn: Warn | None = Field(
         None,
@@ -2816,7 +2816,8 @@ class CentralBehavior(BaseModel):
         description="Surface per-device firmware-update entities (default true — a deliberate divergence from the reference stack's false default).",
     )
     delay_new_device_creation: bool | None = Field(
-        None, description="Defer ingest of a newly-paired device to the inbox/manual-accept flow (default false)."
+        None,
+        description="Hold a newly-paired device until an operator accepts it from the inbox (it is then built) and releases it (it then reaches MQTT, Matter and webhooks). Devices already known are never held. false builds and publishes a new device immediately (default true).",
     )
 
 
