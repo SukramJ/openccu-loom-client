@@ -2348,7 +2348,7 @@ class Status3(_TolerantStrEnum):
 class DaemonStatusPayload(BaseModel):
     status: Status3 = Field(
         ...,
-        description="The same two words the MQTT bridge retains on `<base>/bridge/status`, so a client bridging both planes needs no translation.",
+        description="The same two words the MQTT plane's \"Daemon connection\" entity reports for the instance's `<base>/connected` level (`offline` at 0, `online` from 1; the topic itself carries the mqtt-smarthome level 0/1/2), so a client bridging both planes needs no translation.",
     )
     reason: str | None = Field(
         None, description="Short machine-readable cause of an offline announcement (`shutdown`); absent otherwise."
