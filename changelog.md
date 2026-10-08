@@ -1,3 +1,22 @@
+# Version 2026.10.8 (2026-10-08)
+
+- **Wire layer regenerated for daemon 0.89.0 (api 13.7.2).**
+  `DAEMON_API_VERSION` and `SCHEMA_DIGEST` move with it. No type or field
+  changes: the only difference is the description of
+  `DaemonStatusPayload.status`, which now names the MQTT `<base>/connected`
+  level instead of the retired `<base>/bridge/status`; the `online`/`offline`
+  values are unchanged. Behind it, daemon 0.89.0 moves its MQTT plane to the
+  mqtt-smarthome 2.0 topic layout. This client speaks REST and WebSocket only
+  and is not affected.
+- **Dependencies:** `aiohomematic` CI pin 2026.10.3 → 2026.10.4 (the
+  `>=2026.10.3` floor in `pyproject.toml` is unchanged), `aiohttp>=3.14.4`,
+  `python-slugify>=9.1.3`; test tooling `prek` 0.5.5, `pylint` 4.1.2.
+- **Two held-device tests no longer race the bus handler.** They checked the
+  outcome of the consumer's confirmation as soon as the `DELAYED` event was
+  recorded, while the handler was still reading the inbox before it accepted
+  or declined; they now wait for the accept/release writes and the scheduled
+  re-sync. Test-only; the announcer is unchanged.
+
 # Version 2026.10.7 (2026-10-04)
 
 - **Devices the daemon holds back reach Home Assistant as delayed devices.**
