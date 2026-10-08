@@ -403,8 +403,12 @@ class TestConfirmationDuringAnnouncement:
                 "a decline issued inside the announcement must still lead to a second announcement"
             )
             assert _delayed(seen)[:2] == [("home-HmIP-RF", ("NEW1",)), ("home-HmIP-RF", ("NEW1",))]
+            # The decline runs inside the bus handler after the event is recorded (the handler
+            # reads the inbox first), so the re-sync it schedules is awaited, not read at once.
+            assert await _wait_for(lambda: central._held_devices.resync_pending), (
+                "a consumer that keeps declining keeps a re-sync"
+            )
             assert _writes(mock_daemon) == [], "a held device confirmed without a name must not be accepted"
-            assert central._held_devices.resync_pending is True, "a consumer that keeps declining keeps a re-sync"
         finally:
             await central.stop()
 
@@ -422,7 +426,9 @@ class TestConfirmationDuringAnnouncement:
         mock_daemon.post(f"{_BASE}/devices/NEW1/release", status=204)
         try:
             assert await _wait_for(lambda: len(_delayed(seen)) == 2), "the declined device must be announced again"
-            await central._looper.block_till_done()
+            # The accept and release run inside the bus handler after the event is recorded,
+            # and the looper does not track that handler — wait for both writes.
+            assert await _wait_for(lambda: len(_writes(mock_daemon)) >= 2), "the named confirmation must be sent"
             assert _writes(mock_daemon) == [
                 ("POST", f"{_BASE}/devices/NEW1/accept", {"name": "Stehlampe"}),
                 ("POST", f"{_BASE}/devices/NEW1/release", None),
