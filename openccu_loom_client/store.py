@@ -83,6 +83,7 @@ if TYPE_CHECKING:
         DataPointValueChangedPayload,
         DeviceAvailabilityChangedPayload,
         DeviceCreatedPayload,
+        DeviceRefreshedPayload,
         DeviceRemovedPayload,
         ProgramChangedPayload,
         ProgramExecutedPayload,
@@ -1153,6 +1154,39 @@ class LoomStore:
         if device.summary.available == payload.available:
             return
         device._update_summary(summary=device.summary.model_copy(update={"available": payload.available}))
+
+    def apply_device_refreshed(self, *, payload: DeviceRefreshedPayload) -> None:
+        """
+        Advance a device's ``LastRefreshed`` from a ``device.refreshed`` push.
+
+        The daemon throttles the broadcast to one frame per device per
+        two-second window, so ``refreshed_at`` may trail the exact value the
+        REST summary carries. The timestamp therefore only moves forward: a
+        push older than what a snapshot or detail read already attached is
+        dropped rather than allowed to rewind it.
+
+        Ignored for an unknown device (the bootstrap owns catalogue parity,
+        as in :meth:`apply_value_changed`) and for a device with no
+        availability record yet — a ``device.created`` stub before its
+        reconcile, which then attaches the exact value. No record is
+        invented to hold the timestamp.
+        """
+        device = self._devices.get(payload.device_address)
+        if device is None:
+            _LOGGER.debug(
+                "device.refreshed for unknown device %s — ignoring (catalogue out of sync)",
+                payload.device_address,
+            )
+            return
+        availability = device.availability_detail
+        if availability is None:
+            return
+        current = availability.LastRefreshed
+        if current is not None and current >= payload.refreshed_at:
+            return
+        device._replace_availability(
+            availability=availability.model_copy(update={"LastRefreshed": payload.refreshed_at})
+        )
 
     def apply_device_removed(self, *, payload: DeviceRemovedPayload) -> None:
         """Drop a device and everything that hung off it."""

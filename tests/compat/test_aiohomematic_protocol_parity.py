@@ -44,13 +44,13 @@ from openccu_loom_client.compat.aiohomematic.model.week_profile import ClimateWe
 
 aiohomematic = pytest.importorskip("aiohomematic")
 
-from aiohomematic.interfaces.custom import (  # noqa: E402 — after importorskip
+from aiohomematic.interfaces.custom import (
     CoverDataPointProtocol,
     GarageDataPointProtocol,
     SoundPlayerDataPointProtocol,
     TiltCoverDataPointProtocol,
 )
-from aiohomematic.interfaces.model import (  # noqa: E402
+from aiohomematic.interfaces.model import (
     CallbackDataPointProtocol,
     ClimateWeekProfileDataPointProtocol,
     CustomDataPointProtocol,
@@ -59,20 +59,10 @@ from aiohomematic.interfaces.model import (  # noqa: E402
     GenericSysvarDataPointProtocol,
 )
 
-from openccu_loom_client.compat.aiohomematic.model import (  # noqa: E402
-    custom as _custom,
-    generic as _generic,
-    hub as _hub,
-)
-from openccu_loom_client.store import LoomStore  # noqa: E402
-from openccu_loom_client.wire.enums import DataPointCategory  # noqa: E402
-from openccu_loom_client.wire.rest import (  # noqa: E402
-    CustomDPSummary,
-    DataPointSummary,
-    Operations,
-    ProgramSummary,
-    SysvarSummary,
-)
+from openccu_loom_client.compat.aiohomematic.model import custom as _custom, generic as _generic, hub as _hub
+from openccu_loom_client.store import LoomStore
+from openccu_loom_client.wire.enums import DataPointCategory
+from openccu_loom_client.wire.rest import CustomDPSummary, DataPointSummary, Operations, ProgramSummary, SysvarSummary
 
 _DEVICE = "VCU0000001"
 _OPS = Operations(read=True, write=True, event=True)

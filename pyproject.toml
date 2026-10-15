@@ -591,6 +591,12 @@ fixture-parentheses = false # Don't require parentheses for fixtures without par
 "openccu_loom_client/store.py" = ["SLF001"]
 "openccu_loom_client/compat/aiohomematic/central/adapter.py" = ["SLF001"]
 "openccu_loom_client/compat/aiohomematic/central/hub_coordinator.py" = ["SLF001"]
+# This module imports aiohomematic only after `pytest.importorskip`, so every
+# import below that call is E402 by design. Exempted here rather than per
+# statement: with `split-on-trailing-comma = false`, ruff 0.17 joins the
+# parenthesised imports onto one line, and a trailing `noqa: E402` then pushes
+# them past the 120-column line length.
+"tests/compat/test_aiohomematic_protocol_parity.py" = ["E402"]
 "tests/**" = [
     "D100", "D101", "D102", "D103", "D107", # docstring requirements
     "TRY002", # too-broad exception guidance

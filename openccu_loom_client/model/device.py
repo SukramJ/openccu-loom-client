@@ -6,16 +6,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Final
 
 from openccu_loom_client.model.device_client import DeviceClient
 from openccu_loom_client.operations.devices import DevicesOperations
 from openccu_loom_client.wire.rest import DeviceAvailability, DeviceFirmware, DeviceSummary, TaxonomyAssignment
 
+# The daemon's "never observed" marker for the availability timestamps
+# (``DeviceAvailability.LastUpdated`` / ``LastRefreshed``): Go's zero time,
+# ``0001-01-01T00:00:00Z`` per the field descriptions in ``openapi.yaml``.
+_ZERO_TIME: Final = datetime(1, 1, 1, tzinfo=UTC)
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
-    from datetime import datetime
 
     from openccu_loom_client.model.channel import Channel
     from openccu_loom_client.model.data_point import DataPoint
@@ -237,6 +242,29 @@ class Device:
     def availability_detail(self) -> DeviceAvailability | None:
         """Return the raw wire availability record, or ``None`` until detail is attached."""
         return self._availability
+
+    @property
+    def last_refreshed(self) -> datetime | None:
+        """
+        Return when the daemon last observed any of the device's VALUES data.
+
+        An observation is a pushed event or an active read (boot seed,
+        periodic sweep, operator refresh), whether or not a value changed —
+        unlike ``availability.last_updated``, which moves only on a change.
+        Seeded from ``availability.LastRefreshed`` and advanced by
+        ``device.refreshed`` pushes (daemon api ≥ 13.9.0).
+
+        ``None`` covers three cases this property cannot tell apart: no
+        availability record is attached yet, the daemon is older than api
+        13.9.0 and does not send the field, or the daemon reports zero time
+        because it has observed nothing for this device.
+        """
+        if self._availability is None:
+            return None
+        refreshed = self._availability.LastRefreshed
+        if refreshed is None or refreshed == _ZERO_TIME:
+            return None
+        return refreshed
 
     # ---- aiohomematic-compat surface (read by homematicip_local entities) ----
 
@@ -474,6 +502,11 @@ class Device:
     def _update_summary(self, *, summary: DeviceSummary) -> None:
         """Replace the wire summary in place when the daemon's view advances."""
         self._summary = summary
+
+    def _replace_availability(self, *, availability: DeviceAvailability) -> None:
+        """Replace the availability record on both the detail slot and the summary."""
+        self._availability = availability
+        self._summary = self._summary.model_copy(update={"availability": availability})
 
     def _attach_detail(
         self,

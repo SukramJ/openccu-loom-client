@@ -1,3 +1,32 @@
+# Version 2026.10.9 (2026-10-15)
+
+- **Wire layer regenerated for daemon 0.91.0 (api 13.9.0).**
+  `DAEMON_API_VERSION` and `SCHEMA_DIGEST` move with it. Additions only:
+  `DeviceAvailability.LastRefreshed`, the `DeviceRefreshedPayload` of the new
+  `device.refreshed` broadcast, and `Parameter.RampStop`. `LastUpdated` keeps
+  its type and gains a description: it moves only when a value _changes_.
+  Nothing outside `wire/` maps over `Parameter`, so the new member reaches no
+  exhaustive match.
+- **`device.refreshed` is bound and keeps `Device.last_refreshed` current.**
+  The daemon broadcasts it on `device.{address}.lifecycle` whenever it
+  _observes_ a device's VALUES data — a pushed event or an active read —
+  whether or not a value changed. It now arrives as `DeviceRefreshedEvent`
+  instead of `UnknownLoomEvent`, and the store bridge applies it to the
+  device's availability record (`LoomStore.apply_device_refreshed`). The
+  timestamp only moves forward: the daemon throttles the broadcast to one
+  frame per device per two seconds, so a push can trail the exact value a
+  snapshot already attached. A push for an unknown device, or for a
+  `device.created` stub that has no availability record yet, is ignored
+  rather than given an invented record. The new `Device.last_refreshed`
+  reads the value; it is `None` before a record is attached, from a daemon
+  older than api 13.9.0, and for the daemon's zero time ("nothing
+  observed"). Home Assistant's `AvailabilityInfo` twin is unchanged —
+  aiohomematic has no such member.
+- **Dependencies:** `aiohttp>=3.14.5`, `pydantic>=2.14.1`; test tooling
+  `pylint` 4.1.3, `ruff` 0.17.0. Under ruff 0.17 the protocol-parity test's
+  post-`importorskip` imports take their E402 exemption from
+  `per-file-ignores` instead of a `noqa` per statement. Test-only.
+
 # Version 2026.10.8 (2026-10-08)
 
 - **Wire layer regenerated for daemon 0.89.0 (api 13.7.2).**

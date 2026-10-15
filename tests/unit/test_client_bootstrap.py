@@ -31,6 +31,7 @@ from openccu_loom_client.events import (
     DataPointValueChangedEvent,
     DeviceAvailabilityChangedEvent,
     DeviceCreatedEvent,
+    DeviceRefreshedEvent,
     DeviceReleasedEvent,
 )
 from openccu_loom_client.exceptions import LoomIncompatibleVersionError, LoomTransportError
@@ -40,6 +41,7 @@ from openccu_loom_client.wire.ws import (
     DataPointValueChangedPayload,
     DeviceAvailabilityChangedPayload,
     DeviceCreatedPayload,
+    DeviceRefreshedPayload,
     DeviceReleasedPayload,
 )
 from tests.helpers import MockDaemon
@@ -463,6 +465,34 @@ class TestWsBridge:
                 )
             )
             assert client.store.get_device(address="VCU0001").available is False
+            group.cancel()
+
+    async def test_refreshed_event_updates_store(self, mock_daemon: MockDaemon) -> None:
+        """The bridge forwards ``device.refreshed`` to the store."""
+        _wire_endpoints(mock_daemon)
+        async with LoomClient(config=mock_daemon.config) as client:
+            await client.bootstrap()
+            group = client.events.create_subscription_group(name="test-bridge")
+            bind_ws_events_to_store(bus=client.events, store=client.store, group=group)
+
+            assert client.store.get_device(address="VCU0001").last_refreshed is None
+            refreshed_at = datetime(2026, 10, 15, 8, 0, 0, tzinfo=UTC)
+            await client.events.publish(
+                event=DeviceRefreshedEvent(
+                    seq=2,
+                    kind=Kind.change,
+                    ts=refreshed_at,
+                    topic="device.VCU0001.lifecycle",
+                    type="device.refreshed",
+                    payload=DeviceRefreshedPayload(
+                        central="home",
+                        interface_id="home:HmIP-RF",
+                        device_address="VCU0001",
+                        refreshed_at=refreshed_at,
+                    ),
+                )
+            )
+            assert client.store.get_device(address="VCU0001").last_refreshed == refreshed_at
             group.cancel()
 
 
