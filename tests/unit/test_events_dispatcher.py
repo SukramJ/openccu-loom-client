@@ -37,6 +37,7 @@ from openccu_loom_client.events import (
     DataPointValueChangedEvent,
     DeviceCreatedEvent,
     DeviceMetadataChangedEvent,
+    DeviceRefreshedEvent,
     DeviceRemovedEvent,
     HubAlarmMessageCountChangedEvent,
     HubConnectivityChangedEvent,
@@ -208,6 +209,23 @@ class TestDispatch:
         assert isinstance(ev, DeviceMetadataChangedEvent)
         # Shares the lifecycle topic with device.created: routed by `type`.
         assert ev.payload.device_address == "00010001"
+        assert ev.event_key == "home"
+
+    def test_device_refreshed_payload_lands_typed(self) -> None:
+        env = self._envelope(
+            type_="device.refreshed",
+            payload={
+                "central": "home",
+                "interface_id": "home:HmIP-RF",
+                "device_address": "00010001",
+                "refreshed_at": "2026-10-15T03:52:54Z",
+            },
+        )
+        ev = event_from_envelope(envelope=env)
+        assert isinstance(ev, DeviceRefreshedEvent)
+        # Shares the lifecycle topic with device.created: routed by `type`.
+        assert ev.payload.device_address == "00010001"
+        assert ev.payload.refreshed_at.tzinfo is not None
         assert ev.event_key == "home"
 
     def test_schedule_changed_payload_lands_typed(self) -> None:

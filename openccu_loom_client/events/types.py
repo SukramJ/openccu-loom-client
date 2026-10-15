@@ -48,6 +48,7 @@ from openccu_loom_client.wire.ws import (
     DeviceAvailabilityChangedPayload,
     DeviceCreatedPayload,
     DeviceMetadataChangedPayload,
+    DeviceRefreshedPayload,
     DeviceReleasedPayload,
     DeviceRemovedPayload,
     DeviceTriggerPayload,
@@ -518,6 +519,29 @@ class DeviceAvailabilityChangedEvent(LoomEvent):
 
 
 @dataclass(slots=True, kw_only=True)
+class DeviceRefreshedEvent(LoomEvent):
+    """
+    A device's VALUES data was observed from the CCU (daemon api ≥ 13.9.0).
+
+    Fires for a pushed event and for an active read (boot seed, periodic
+    sweep, operator refresh), whether or not any value changed. Rides
+    the same ``device.{address}.lifecycle`` topic as ``device.created`` —
+    subscribers route by the envelope ``type``. The daemon throttles it
+    to one frame per device per two-second window, so ``refreshed_at``
+    may trail the latest observation by up to that window; the exact
+    value is ``availability.LastRefreshed`` on the REST device summary.
+    """
+
+    payload: DeviceRefreshedPayload
+    type_id: ClassVar[str] = "device.refreshed"
+
+    def __post_init__(self) -> None:
+        """Default the routing key to the payload's central name."""
+        if self.event_key is None:
+            self.event_key = self.payload.central
+
+
+@dataclass(slots=True, kw_only=True)
 class DeviceMetadataChangedEvent(LoomEvent):
     """
     A device was renamed or re-assigned (daemon api ≥ 7.6.0).
@@ -954,6 +978,7 @@ _EVENT_REGISTRY: Final[dict[str, tuple[Callable[..., LoomEvent], type[BaseModel]
         DeviceAvailabilityChangedPayload,
     ),
     DeviceMetadataChangedEvent.type_id: (DeviceMetadataChangedEvent, DeviceMetadataChangedPayload),
+    DeviceRefreshedEvent.type_id: (DeviceRefreshedEvent, DeviceRefreshedPayload),
     ScheduleChangedEvent.type_id: (ScheduleChangedEvent, ScheduleChangedPayload),
     DeviceTriggerEvent.type_id: (DeviceTriggerEvent, DeviceTriggerPayload),
     DataPointOptimisticRolledBackEvent.type_id: (
