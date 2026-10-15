@@ -22,6 +22,10 @@
   older than api 13.9.0, and for the daemon's zero time ("nothing
   observed"). Home Assistant's `AvailabilityInfo` twin is unchanged —
   aiohomematic has no such member.
+- **Dependencies:** `aiohttp>=3.14.5`, `pydantic>=2.14.1`; test tooling
+  `pylint` 4.1.3, `ruff` 0.17.0. Under ruff 0.17 the protocol-parity test's
+  post-`importorskip` imports take their E402 exemption from
+  `per-file-ignores` instead of a `noqa` per statement. Test-only.
 
 # Version 2026.10.8 (2026-10-08)
 
