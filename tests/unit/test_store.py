@@ -12,6 +12,7 @@ transport stand-in.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -33,6 +34,7 @@ from openccu_loom_client.wire.ws import (
     DataPointValueChangedPayload,
     DeviceAvailabilityChangedPayload,
     DeviceCreatedPayload,
+    DeviceRefreshedPayload,
     DeviceRemovedPayload,
 )
 
@@ -471,6 +473,83 @@ class TestLiveUpdates:
         # No crash, no auto-creation — bootstrap owns catalogue parity.
         populated.apply_device_availability_changed(payload=payload)
         assert populated.get_device(address="VCU9999") is None
+
+    @staticmethod
+    def _refreshed(*, address: str = "VCU0001", at: str) -> DeviceRefreshedPayload:
+        return DeviceRefreshedPayload.model_validate(
+            {
+                "central": "home",
+                "interface_id": "home:HmIP-RF",
+                "device_address": address,
+                "refreshed_at": at,
+            }
+        )
+
+    @staticmethod
+    def _attach_refreshed(*, store: LoomStore, last_refreshed: str) -> None:
+        store.attach_device_detail(
+            detail=DeviceDetail.model_validate(
+                {
+                    **_device_summary().model_dump(),
+                    "firmware": {},
+                    "availability": {"LastRefreshed": last_refreshed},
+                    "channels": [_channel_summary(address="VCU0001", number=1).model_dump()],
+                }
+            )
+        )
+
+    def test_apply_device_refreshed_sets_last_refreshed(self, populated: LoomStore) -> None:
+        device = populated.get_device(address="VCU0001")
+        assert device.last_refreshed is None  # the record carries no LastRefreshed yet
+        populated.apply_device_refreshed(payload=self._refreshed(at="2026-10-15T08:00:02Z"))
+        expected = datetime(2026, 10, 15, 8, 0, 2, tzinfo=UTC)
+        assert device.last_refreshed == expected
+        # The summary and the detail slot hold the same record — neither goes stale.
+        assert device.summary.availability.LastRefreshed == expected
+        assert device.availability_detail is not None
+        assert device.availability_detail.LastRefreshed == expected
+
+    def test_apply_device_refreshed_advances_a_later_push(self, populated: LoomStore) -> None:
+        self._attach_refreshed(store=populated, last_refreshed="2026-10-15T08:00:00Z")
+        populated.apply_device_refreshed(payload=self._refreshed(at="2026-10-15T08:00:05Z"))
+        assert populated.get_device(address="VCU0001").last_refreshed == datetime(2026, 10, 15, 8, 0, 5, tzinfo=UTC)
+
+    def test_apply_device_refreshed_never_rewinds(self, populated: LoomStore) -> None:
+        # The throttled push may trail the exact REST value by up to two seconds.
+        self._attach_refreshed(store=populated, last_refreshed="2026-10-15T08:00:01.500Z")
+        populated.apply_device_refreshed(payload=self._refreshed(at="2026-10-15T08:00:00Z"))
+        assert populated.get_device(address="VCU0001").last_refreshed == datetime(
+            2026, 10, 15, 8, 0, 1, 500000, tzinfo=UTC
+        )
+
+    def test_apply_device_refreshed_ignores_unknown_device(self, populated: LoomStore) -> None:
+        populated.apply_device_refreshed(payload=self._refreshed(address="VCU9999", at="2026-10-15T08:00:00Z"))
+        assert populated.get_device(address="VCU9999") is None
+
+    def test_apply_device_refreshed_invents_no_record_for_a_created_stub(self) -> None:
+        store = LoomStore()
+        store.apply_device_created(
+            payload=DeviceCreatedPayload.model_validate(
+                {
+                    "central": "home",
+                    "interface_id": "home:HmIP-RF",
+                    "device_address": "VCU0002",
+                    "model": "HmIP-PSM",
+                }
+            )
+        )
+        store.apply_device_refreshed(payload=self._refreshed(address="VCU0002", at="2026-10-15T08:00:00Z"))
+        device = store.get_device(address="VCU0002")
+        assert device.availability_detail is None
+        assert device.summary.availability.LastRefreshed is None
+        assert device.last_refreshed is None
+
+    def test_last_refreshed_reads_zero_time_as_none(self, populated: LoomStore) -> None:
+        self._attach_refreshed(store=populated, last_refreshed="0001-01-01T00:00:00Z")
+        device = populated.get_device(address="VCU0001")
+        assert device.availability_detail is not None
+        assert device.availability_detail.LastRefreshed == datetime(1, 1, 1, tzinfo=UTC)
+        assert device.last_refreshed is None
 
     def test_apply_device_removed_clears_device_and_children(self, populated: LoomStore) -> None:
         payload = DeviceRemovedPayload.model_validate(
