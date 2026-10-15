@@ -715,6 +715,7 @@ class Parameter(_TolerantStrMixinEnum):
     RSSIDevice = "RSSI_DEVICE"
     RSSIPeer = "RSSI_PEER"
     Raining = "RAINING"
+    RampStop = "RAMP_STOP"
     RampTime = "RAMP_TIME"
     RampTimeToOffUnit = "RAMP_TIME_TO_OFF_UNIT"
     RampTimeToOffValue = "RAMP_TIME_TO_OFF_VALUE"

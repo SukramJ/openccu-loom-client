@@ -818,7 +818,14 @@ class DeviceFirmware(BaseModel):
 
 class DeviceAvailability(BaseModel):
     IsReachable: bool | None = None
-    LastUpdated: AwareDatetime | None = None
+    LastUpdated: AwareDatetime | None = Field(
+        None,
+        description="When any VALUES data point of the device last *changed* value.\nZero time (`0001-01-01T00:00:00Z`) when nothing has been observed.\n",
+    )
+    LastRefreshed: AwareDatetime | None = Field(
+        None,
+        description='When any VALUES data point of the device was last *observed*\nfrom the CCU — a pushed event or an active read (boot seed,\nperiodic sweep, operator refresh), whether or not the value\nchanged. The SPA shows it as the device\'s "last refreshed"\ntime; the `device.refreshed` WebSocket broadcast announces\nthat it moved. Zero time when nothing has been observed.\n',
+    )
     BatteryLevel: int | None = None
     LowBattery: bool | None = None
     SignalStrength: int | None = None
@@ -2388,6 +2395,15 @@ class DeviceAvailabilityChangedPayload(BaseModel):
     interface_id: str
     device_address: str
     available: bool
+
+
+class DeviceRefreshedPayload(BaseModel):
+    central: str
+    interface_id: str
+    device_address: str
+    refreshed_at: AwareDatetime = Field(
+        ..., description="Observation time that opened the throttle window, RFC 3339 UTC."
+    )
 
 
 class DeviceMetadataChangedPayload(BaseModel):
