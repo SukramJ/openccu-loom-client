@@ -18,5 +18,5 @@ VERSION: Final = "0.5.10"
 # types match the daemon build exactly; inequality means they were
 # generated from a different build — fall back to DAEMON_API_VERSION
 # vs `api_version` for compatibility reasoning.
-SCHEMA_DIGEST: Final = "sha256:60b83833c001e528d3c45f0e993824caf6c9cf72d9169ef09af0ebf70eaec304"
-DAEMON_API_VERSION: Final = "13.9.1"
+SCHEMA_DIGEST: Final = "sha256:7a6cf94af8a85e6b332bc9aa9d129663532eab0114a2059549fe36fb2f61d338"
+DAEMON_API_VERSION: Final = "14.1.0"

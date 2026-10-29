@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from enum import Enum, IntEnum, StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import AnyUrl, AwareDatetime, BaseModel, ConfigDict, Field, SecretStr
 
@@ -348,7 +348,7 @@ class CustomDPSummary(BaseModel):
     )
     capabilities: dict[str, bool] | None = Field(
         None,
-        description="Flat string→bool map of optional features the device\nsupports — e.g. `dimmable`, `color`, `color_temp`,\n`effects`, `tilt`, `boost`, `away`. Mirrors the\nper-category Capability struct from\n`internal/model/custom/mixins.go`.\n\nA Custom-DP carries only the flags of its own category, so\na missing key means the feature is not applicable — never\nthat it is switched off. The full key list is published as\nthe open `CustomDPCapability` vocabulary in\n`assets/schemas/enums.json`.\n",
+        description="Flat string→bool map of optional features the device\nsupports — e.g. `dimmable`, `color`, `color_temp`,\n`effects`, `tilt`, `boost`, `away`, `button` (a lock that is\na device's operating lock, not a door). Mirrors the\nper-category Capability struct from\n`internal/model/custom/mixins.go`.\n\nA Custom-DP carries only the flags of its own category, so\na missing key means the feature is not applicable — never\nthat it is switched off. The full key list is published as\nthe open `CustomDPCapability` vocabulary in\n`assets/schemas/enums.json`.\n",
     )
     config: dict[str, Any] | None = Field(
         None,
@@ -1526,266 +1526,6 @@ class CreateTokenResponse(BaseModel):
     role: Role1
 
 
-class Kind1(_TolerantStrEnum):
-    pairing = "pairing"
-    session = "session"
-    discovery = "discovery"
-
-
-class Severity1(_TolerantStrEnum):
-    info = "info"
-    warning = "warning"
-    error = "error"
-
-
-class MatterDiagnosticEvent(BaseModel):
-    at: AwareDatetime
-    kind: Kind1
-    severity: Severity1
-    message: str = Field(..., description="One sentence an operator can act on.")
-    detail: dict[str, str] | None = Field(None, description="Identifiers that make the message specific.")
-
-
-class MatterDiagnosticEventList(BaseModel):
-    events: list[MatterDiagnosticEvent]
-
-
-class MatterFabric(BaseModel):
-    fabric_index: int = Field(
-        ..., description="Stack-assigned fabric index per Matter Core Spec §11.18.5", ge=1, le=254
-    )
-    fabric_id: int
-    fabric_id_hex: str = Field(
-        ...,
-        description="The exact 64-bit fabric id as 16 uppercase hex digits. A JSON number carries only 53 bits of integer precision, so a client that renders `fabric_id` shows rounded low digits for any id above 2^53. Render this field.",
-    )
-    node_id: int
-    node_id_hex: str = Field(
-        ...,
-        description="The exact 64-bit operational node id as 16 uppercase hex digits, in the form controllers and chip-tool print it. Render this field rather than `node_id`, which loses precision in transport.",
-    )
-    vendor_id: int = Field(..., ge=0, le=65535)
-    vendor_name: str | None = Field(
-        None,
-        description='Human-readable name of the controller vendor behind vendor_id (e.g. "Apple", "Google"). A vendor the daemon has no name for renders as its id in `0xNNNN` form rather than an empty string, so the row still identifies the controller.',
-    )
-    label: str | None = None
-    compressed_id: str = Field(..., description="8-byte compressed fabric identifier, hex-encoded")
-    root_public_key: str = Field(
-        ..., description="Issuing root CA public key (uncompressed P-256, 65 bytes), hex-encoded"
-    )
-
-
-class MatterFabricList(BaseModel):
-    fabrics: list[MatterFabric]
-
-
-class Ecosystem(_TolerantStrEnum):
-    apple = "apple"
-    google = "google"
-    amazon = "amazon"
-    smartthings = "smartthings"
-    aqara = "aqara"
-    home_assistant = "home_assistant"
-    unknown = "unknown"
-
-
-class MatterEcosystem(BaseModel):
-    ecosystem: Ecosystem
-    vendor_id: int
-    fabric_index: int
-    label: str | None = None
-
-
-class MatterCompatFinding(BaseModel):
-    ecosystem: str
-    code: str
-    message: str
-    device_type: int | None = Field(
-        None, description="The device type concerned; absent when the finding applies to the bridge as a whole"
-    )
-
-
-class MatterCompatibility(BaseModel):
-    ecosystems: list[MatterEcosystem]
-    endpoint_count: int
-    findings: list[MatterCompatFinding]
-
-
-class MatterEndpointCluster(BaseModel):
-    id: int = Field(..., description="Cluster id")
-    name: str = Field(..., description="Empty when the cluster is not in the generated schema")
-    revision: int = Field(..., description="0 when unknown to the schema")
-
-
-class MatterEndpointInfo(BaseModel):
-    endpoint_id: int
-    parent_endpoint_id: int
-    device_type: int
-    device_type_name: str
-    device_type_revision: int | None = None
-    reachable: bool
-    friendly_name: str
-    device_address: str | None = Field(None, description="Source device, absent for the root and aggregator endpoints")
-    channel_address: str | None = Field(
-        None, description="Source channel, absent when the endpoint is not channel-scoped"
-    )
-    clusters: list[MatterEndpointCluster]
-
-
-class MatterEndpointList(BaseModel):
-    endpoints: list[MatterEndpointInfo]
-
-
-class MatterMdnsService(BaseModel):
-    service_type: str = Field(..., examples=["_matterc._udp"])
-    instance_name: str
-    host_name: str
-    port: int
-    addresses: list[str]
-    subtypes: list[str] = Field(
-        ..., description="Service subtypes (`_L<discriminator>`, `_S<short>`, `_CM`) Apple and Google browse through"
-    )
-    txt: dict[str, str]
-
-
-class Severity2(_TolerantStrEnum):
-    error = "error"
-    warning = "warning"
-
-
-class MatterMdnsFinding(BaseModel):
-    severity: Severity2
-    code: str = Field(..., description="Stable identifier; the message is prose and may be reworded")
-    message: str
-    service: str | None = Field(
-        None, description="The advertised record this applies to; absent when it concerns the advertisement as a whole"
-    )
-
-
-class MatterMdnsDiagnostics(BaseModel):
-    advertising: bool = Field(
-        ..., description="False when advertising is switched off (`north.matter.mdns_advertise: noop`)"
-    )
-    services: list[MatterMdnsService]
-    findings: list[MatterMdnsFinding]
-
-
-class MatterSession(BaseModel):
-    session_id: int = Field(..., ge=0, le=65535)
-    fabric_index: int = Field(..., description="0 for a PASE (commissioning) session", ge=0, le=255)
-    peer_node_id: str = Field(..., description="64-bit node id, hex")
-    local_node_id: str = Field(..., description="64-bit node id, hex")
-    is_pase: bool = Field(..., description="Commissioning session rather than an operational (CASE) one")
-    subscriptions: int = Field(..., description="Active subscriptions riding on this session")
-    last_activity: AwareDatetime = Field(..., description="Last traffic in either direction")
-    last_peer_activity: AwareDatetime = Field(..., description="Last message received from the peer")
-    idle_seconds: int = Field(..., description="Seconds since last_activity")
-    peer_idle_seconds: int = Field(..., description="Seconds since last_peer_activity — the controller-liveness signal")
-
-
-class MatterSessionOccupancy(BaseModel):
-    live: int = Field(..., description="Sessions with key material installed")
-    reserved: int = Field(..., description="Ids staked by a handshake that has not completed")
-    capacity: int = Field(..., description="Size of the allocator's id space (ids 1..0xFFFE)")
-    free: int = Field(..., description="Ids held by neither a live session nor a staked handshake")
-
-
-class MatterSessionList(BaseModel):
-    sessions: list[MatterSession]
-    occupancy: MatterSessionOccupancy
-
-
-class MatterSetupPayload(BaseModel):
-    discriminator: int = Field(..., ge=0, le=4095)
-    passcode: int = Field(..., ge=1, le=99999998)
-    vendor_id: int = Field(..., ge=0, le=65535)
-    product_id: int = Field(..., ge=0, le=65535)
-    qr_code: str = Field(..., description="Onboarding payload prefixed with `MT:` per Matter §5.7.4")
-    manual_code: str = Field(..., description="11-digit decimal code with Verhoeff check digit per Matter §5.1.4")
-
-
-class MatterCommissioningWindowRequest(BaseModel):
-    duration_seconds: int | None = Field(
-        None, description="Commissioning window duration in seconds. Default 900 (15 minutes).", ge=180, le=900
-    )
-
-
-class MatterCommissioningWindowResponse(BaseModel):
-    discriminator: int = Field(..., ge=0, le=4095)
-    passcode: int = Field(..., ge=1, le=99999998)
-    duration_seconds: int = Field(..., ge=180, le=900)
-    qr_code: str
-    manual_code: str
-
-
-class MatterStatus(BaseModel):
-    enabled: bool = Field(..., description="Bridge feature flag")
-    listening: bool = Field(..., description="UDP listener bound")
-    listen_addr: str | None = Field(None, description="Effective UDP listen address")
-    endpoint_count: int = Field(..., description="Bridged-endpoint count (excludes the root and Aggregator endpoints)")
-    fabric_count: int = Field(..., description="Commissioned fabrics")
-    enabled_count: int = Field(..., description="Allowlist entries with enabled=true")
-    advertising: bool = Field(..., description="mDNS records emitted")
-    commissioning_window_open: bool
-    commissioning_window_duration_seconds: int | None = Field(None, ge=0, le=900)
-
-
-class DpKind(_TolerantStrEnum):
-    custom = "custom"
-    generic = "generic"
-    calculated = "calculated"
-    combined = "combined"
-    measurement = "measurement"
-
-
-class Mappable(_TolerantStrEnum):
-    mappable = "mappable"
-    partially_mappable = "partially_mappable"
-    unmappable = "unmappable"
-
-
-class MatterExposure(BaseModel):
-    central_name: str
-    device_address: str
-    channel_no: int
-    dp_kind: DpKind
-    dp_key: str
-    parameter_label: str | None = Field(
-        None,
-        description="Ready-to-display caption for the data point behind\n`dp_key`: locale-aware channel-typed translation when one\nexists, otherwise the title-cased key. Same resolution as\n`DataPointSummary.parameter_label`.\n",
-    )
-    display_name: str | None = None
-    enabled: bool
-    friendly_name: str | None = None
-    mappable: Mappable
-    device_type: int | None = Field(None, ge=0, le=65535)
-    device_type_label: str | None = Field(
-        None,
-        description='Operator-facing Matter device-type name for `device_type`\n(e.g. "On/Off Light"). Empty when `device_type` is zero\n(measurement rides on a host endpoint).\n',
-    )
-    clusters: list[int] | None = None
-    reason: str | None = None
-
-
-class MatterExposureList(BaseModel):
-    items: list[MatterExposure]
-
-
-class MatterExposureUpdate(BaseModel):
-    central_name: str
-    device_address: str
-    channel_no: int
-    dp_kind: DpKind
-    dp_key: str
-    enabled: bool
-    friendly_name: str | None = None
-
-
-class MatterExposureBulkUpdate(BaseModel):
-    items: list[MatterExposureUpdate]
-
-
 class UnIgnoreEntry(BaseModel):
     pattern: str
     updated_at: AwareDatetime | None = None
@@ -1839,7 +1579,7 @@ class UnIgnoreCandidateChannel(BaseModel):
     pattern: str = Field(..., description="Pattern re-enabling the parameter on exactly this model and channel.")
 
 
-class Kind2(_TolerantStrEnum):
+class Kind1(_TolerantStrEnum):
     initial = "initial"
     change = "change"
     refresh = "refresh"
@@ -1851,7 +1591,7 @@ class WsEnvelope(BaseModel):
         description='Monotonic, daemon-assigned sequence number. Strictly\nincreasing across the daemon\'s lifetime (resets to 0\non restart). Clients store the last received `seq` and\nreconnect with `{op:"subscribe", topics:[...], since:N}`\nto resume the stream.\n',
         ge=1,
     )
-    kind: Kind2 = Field(
+    kind: Kind1 = Field(
         ...,
         description="Event-family discriminator. `change` is the default\nand dominant case; `initial` is set on the first\nobservation of a data point (e.g. during cold-start\nreplay); `refresh` is reserved for periodic re-emits.\n",
     )
@@ -2086,14 +1826,14 @@ class AlarmStateChangedPayload(BaseModel):
     incident_id: int | None = Field(None, description="References the active incident; omitted when none.")
 
 
-class Kind3(_TolerantStrEnum):
+class Kind2(_TolerantStrEnum):
     exit_delay = "exit_delay"
     entry_delay = "entry_delay"
 
 
 class AlarmCountdownPayload(BaseModel):
     zone_id: str
-    kind: Kind3
+    kind: Kind2
     remaining_s: int
     total_s: int
     remaining_ms: int = Field(..., description="Remaining time in milliseconds (source fidelity).")
@@ -2218,7 +1958,7 @@ class EntityNameCatalogue(BaseModel):
     )
 
 
-class Severity3(_TolerantStrEnum):
+class Severity1(_TolerantStrEnum):
     ok = "ok"
     info = "info"
     warning = "warning"
@@ -2247,7 +1987,7 @@ class ActiveClass(_TolerantStrEnum):
 
 
 class SecurityStateChangedPayload(BaseModel):
-    severity: Severity3
+    severity: Severity1
     previous_severity: PreviousSeverity | None = Field(
         None,
         description="The severity the fold left. Omitted on the first report\nafter start-up, where there is no previous value.\n",
@@ -2449,23 +2189,6 @@ class DeviceTriggerPayload(BaseModel):
     )
     value: Any | None = Field(
         None, description="Optional value carried by the trigger event in its native CCU type. Omitted when absent."
-    )
-
-
-class MatterCommissioningProgressPayload(BaseModel):
-    stage: str = Field(..., description="Stage label (e.g. `pase_session_open`, `add_noc`, `case_session_first`).")
-    message: str | None = Field(None, description="Human-readable detail; may be empty.")
-
-
-class MatterFabricRemovedPayload(BaseModel):
-    fabric_index: int = Field(..., description="Stack-assigned fabric index of the removed fabric.", ge=1, le=254)
-
-
-class MatterEndpointAssembledPayload(BaseModel):
-    endpoint_count: int = Field(
-        ...,
-        description="Bridged-endpoint count of the assembled topology (excludes the root and Aggregator endpoints).",
-        ge=0,
     )
 
 
@@ -2837,7 +2560,7 @@ class CentralBehavior(BaseModel):
     )
 
 
-class Kind4(_TolerantStrEnum):
+class Kind3(_TolerantStrEnum):
     week_profile = "week_profile"
     climate = "climate"
 
@@ -2913,14 +2636,14 @@ class ScheduleTimeCorrection(BaseModel):
     applied: str = Field(..., description="The value actually stored")
 
 
-class Kind5(_TolerantStrEnum):
+class Kind4(_TolerantStrEnum):
     climate = "climate"
     simple = "simple"
 
 
 class Schedule(BaseModel):
     channel: ScheduleChannelRef
-    kind: Kind5
+    kind: Kind4
     domain: str | None = None
     active_profile: str | None = None
     active_profile_index: int | None = None
@@ -3397,13 +3120,13 @@ class Incident1(BaseModel):
     silenced: bool | None = None
 
 
-class Kind6(_TolerantStrEnum):
+class Kind5(_TolerantStrEnum):
     exit_delay = "exit_delay"
     entry_delay = "entry_delay"
 
 
 class Countdown(BaseModel):
-    kind: Kind6 | None = None
+    kind: Kind5 | None = None
     remaining_s: int | None = None
     total_s: int | None = None
 
@@ -3460,7 +3183,7 @@ class AlarmCodePerms(BaseModel):
     silence: bool
 
 
-class Kind7(_TolerantStrEnum):
+class Kind6(_TolerantStrEnum):
     pin = "pin"
     keypad_slot = "keypad_slot"
     remote_key = "remote_key"
@@ -3469,7 +3192,7 @@ class Kind7(_TolerantStrEnum):
 class AlarmCode(BaseModel):
     id: str
     name: str
-    kind: Kind7 = Field(..., description="Code class.")
+    kind: Kind6 = Field(..., description="Code class.")
     duress: bool | None = Field(
         None,
         description="A PIN that disarms normally but fires a silent duress alarm. Only meaningful for the pin kind.\n",
@@ -3489,7 +3212,7 @@ class AlarmCode(BaseModel):
 
 class AlarmCodeRequest(BaseModel):
     name: str
-    kind: Kind7
+    kind: Kind6
     pin: str | None = Field(
         None, description="Cleartext code, write-only, for the pin kind. Omitted on update to keep the existing hash.\n"
     )
@@ -3971,14 +3694,6 @@ class LoginRequest(BaseModel):
     password: str
 
 
-class Confirm(_TolerantStrEnum):
-    remove_all_fabrics = "remove-all-fabrics"
-
-
-class MatterFactoryResetRequest(BaseModel):
-    confirm: Confirm
-
-
 class OpenEditSessionRequest(BaseModel):
     key: str
     subject: str | None = None
@@ -4254,6 +3969,231 @@ class WiringSeam(BaseModel):
     violations: list[str] | None = Field(
         None,
         description="Ordering constraints that were already broken when the seam was attached. Empty is the normal case; a non-empty list is a wiring defect the daemon reports about itself — the collaborator IS wired, so nothing else about the daemon looks wrong.\n",
+    )
+
+
+class NodeWarning(BaseModel):
+    code: str = Field(..., description="The kind of finding, stable across host releases.")
+    message: str = Field(..., description="What is wrong, in the host's language.")
+    since: AwareDatetime | None = Field(None, description="When the host first saw it; absent when unknown.")
+
+
+class Fabric(BaseModel):
+    fabric_index: int
+    fabric_id: int = Field(..., description="Informational; use fabric_id_hex.")
+    fabric_id_hex: str
+    node_id: int = Field(..., description="Informational; use node_id_hex.")
+    node_id_hex: str
+    vendor_id: int
+    vendor_name: str
+    label: str | None = None
+    compressed_id: str
+    root_public_key: str
+
+
+class FabricList(BaseModel):
+    fabrics: list[Fabric]
+
+
+class WindowRequest(BaseModel):
+    duration_seconds: int | None = Field(None, description="180..900; 0 or absent is 900.")
+
+
+class Window(BaseModel):
+    discriminator: int | None = Field(None, description="Absent for a window on the configured credentials.")
+    passcode: int | None = Field(None, description="Absent for a window on the configured credentials.")
+    duration_seconds: int
+    qr_code: str
+    manual_code: str
+
+
+class Cluster(BaseModel):
+    id: int
+    name: str | None = None
+    revision: int | None = None
+
+
+class Endpoint(BaseModel):
+    endpoint_id: int
+    parent_endpoint_id: int
+    device_type: int
+    device_type_name: str
+    device_type_revision: int | None = Field(
+        None,
+        description="The revision the endpoint's Descriptor serves for its device type; absent for a type the schema does not know.",
+    )
+    reachable: bool
+    name: str
+    source: dict[str, str] = Field(
+        ..., description="Opaque identity of the host's source; `key` is the endpoint's stable key."
+    )
+    clusters: list[Cluster]
+
+
+class EndpointList(BaseModel):
+    endpoints: list[Endpoint]
+
+
+class Session(BaseModel):
+    session_id: int
+    fabric_index: int
+    peer_node_id: int = Field(..., description="Informational; use peer_node_id_hex.")
+    peer_node_id_hex: str
+    local_node_id: int = Field(..., description="Informational; use local_node_id_hex.")
+    local_node_id_hex: str
+    is_pase: bool
+    subscriptions: int
+    last_activity: AwareDatetime
+    last_peer_activity: AwareDatetime
+    idle_seconds: int
+    peer_idle_seconds: int
+
+
+class Occupancy(BaseModel):
+    live: int
+    reserved: int
+    capacity: int
+    free: int
+
+
+class SessionList(BaseModel):
+    sessions: list[Session]
+    occupancy: Occupancy
+
+
+class MdnsService(BaseModel):
+    service_type: str
+    instance_name: str
+    host_name: str
+    port: int
+    addresses: list[str]
+    subtypes: list[str]
+    txt: dict[str, str]
+
+
+class Ecosystem(BaseModel):
+    ecosystem: str
+    vendor_id: int
+    fabric_index: int
+    label: str | None = None
+
+
+class CompatFinding(BaseModel):
+    ecosystem: str
+    code: str
+    message: str
+    device_type: int | None = None
+
+
+class Compatibility(BaseModel):
+    ecosystems: list[Ecosystem]
+    endpoint_count: int
+    findings: list[CompatFinding]
+
+
+class Column(BaseModel):
+    key: str
+    label: str
+    filter: bool = Field(..., description="Offer a value filter built from the listed values.")
+    multi: bool | None = Field(
+        None,
+        description="Default false. The field is a comma-separated list: shown as chips, filtered by membership, the filter's options built from the individual values.",
+    )
+
+
+class FilterOption(BaseModel):
+    value: str
+    label: str
+
+
+class Filter(BaseModel):
+    field: str
+    label: str
+    options: list[FilterOption]
+    multi: bool | None = Field(
+        None,
+        description="Default false. Match by membership in the field's comma-separated list (values trimmed; an empty value never matches) instead of equality.",
+    )
+
+
+class ExposureSchema(BaseModel):
+    columns: list[Column]
+    groups: bool
+    filters: list[Filter]
+
+
+class Update(BaseModel):
+    key: str
+    enabled: bool
+    name: str | None = Field(None, description="Renames the item; absent leaves the name.")
+
+
+class UpdateList(BaseModel):
+    items: list[Update]
+
+
+class Applied(BaseModel):
+    applied: int
+
+
+class FactoryResetRequest(BaseModel):
+    confirm: Literal["remove-all-fabrics"]
+
+
+class FabricEvent(BaseModel):
+    fabric_index: int
+    vendor_id: int | None = None
+    vendor_name: str | None = None
+    label: str | None = None
+
+
+class WindowEvent(BaseModel):
+    discriminator: int | None = None
+    duration_seconds: int | None = None
+
+
+class ExposureEvent(BaseModel):
+    keys: list[str]
+
+
+class NodePairingSource(_TolerantStrEnum):
+    configured = "configured"
+    window = "window"
+
+
+class NodeMdnsFindingSeverity(_TolerantStrEnum):
+    error = "error"
+    warning = "warning"
+
+
+class NodeDiagnosticEventKind(_TolerantStrEnum):
+    pairing = "pairing"
+    session = "session"
+    discovery = "discovery"
+
+
+class NodeDiagnosticEventSeverity(_TolerantStrEnum):
+    info = "info"
+    warning = "warning"
+    error = "error"
+
+
+class NodeVerdictState(_TolerantStrEnum):
+    mappable = "mappable"
+    partially_mappable = "partially_mappable"
+    unmappable = "unmappable"
+
+
+class NodeWindowKind(_TolerantStrEnum):
+    none = "none"
+    own = "own"
+    basic = "basic"
+    enhanced = "enhanced"
+
+
+class NodeEndpointsChangedPayload(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
     )
 
 
@@ -4622,7 +4562,7 @@ class SecurityFaultChangedPayload(BaseModel):
     fault_id: str
     class_: Class1 = Field(..., alias="class")
     reason: Reason2
-    severity: Severity3
+    severity: Severity1
     source: AlarmSource
     open: bool = Field(..., description="True when the fault was raised, false when it cleared.")
     acknowledged: bool = Field(
@@ -4639,7 +4579,7 @@ class SecurityFaultChangedPayload(BaseModel):
 
 class SecurityNotificationPayload(BaseModel):
     class_: Class1 = Field(..., alias="class")
-    severity: Severity3
+    severity: Severity1
     verb: Verb
     subject: str = Field(..., description="One line, at most 120 characters, suitable as a notification title.")
     message: str = Field(..., description="A full sentence naming cause, place and time.")
@@ -4759,7 +4699,7 @@ class ScheduleDeviceSummary(BaseModel):
     name: str = Field(..., description="Display name.")
     model: str | None = Field(None, description='Device type, e.g. "HmIP-eTRV-2".')
     channel: ScheduleChannelRef
-    kind: Kind4 = Field(
+    kind: Kind3 = Field(
         ...,
         description="`week_profile` when a dedicated channel carries the profile,\n`climate` when a thermostat carries it in MASTER.\n",
     )
@@ -4828,7 +4768,7 @@ class Area(BaseModel):
 class SecurityClassState(BaseModel):
     class_: Class7 = Field(..., alias="class")
     active: bool
-    severity: Severity3 = Field(
+    severity: Severity1 = Field(
         ...,
         description="What this class contributes to the folded severity right now — not what its name implies. Colour the class from this, never from `active`: a low battery must not look like a fire. `intrusion` is arm-aware, so an active source whose zone is disarmed grades `info` rather than `alarm`; `warning` means the arm state behind at least one active source could not be resolved. `ok` while inactive.\n",
     )
@@ -4890,6 +4830,95 @@ class SecurityNotification(BaseModel):
 
 class ListSchedulesResponse(BaseModel):
     items: list[ScheduleDeviceSummary]
+
+
+class Status5(BaseModel):
+    enabled: bool
+    listening: bool
+    listen_addr: str | None = None
+    healthy: bool | None = Field(None, description="Absent when the node runs no health probe.")
+    health_note: str | None = None
+    endpoint_count: int
+    fabric_count: int
+    enabled_count: int | None = Field(None, description="Enabled selection items; absent without a selection.")
+    advertising: bool
+    commissioning_window_open: bool
+    commissioning_window_duration_seconds: int | None = None
+    window_kind: NodeWindowKind | None = None
+    window_deadline: AwareDatetime | None = Field(
+        None, description="When the open window's timer closes it, on the node's clock; absent while no window is open."
+    )
+    exposure: bool = Field(..., description="Whether the host serves a selection.")
+    csrf_token: str | None = Field(
+        None, description="The admin token of token mode; absent when the host decides admin rights."
+    )
+    warnings: list[NodeWarning] | None = Field(
+        None,
+        description="The host's findings about its own configuration; absent when the host reports none (no Options.Warnings), empty when it finds nothing.",
+    )
+
+
+class Pairing(BaseModel):
+    discriminator: int | None = Field(
+        None, description="Only for a window this handler opened on fresh credentials; the codes carry it."
+    )
+    passcode: int | None = Field(None, description="Only for a window this handler opened on fresh credentials.")
+    qr_code: str
+    manual_code: str
+    source: NodePairingSource
+    window_open: bool
+    duration_seconds: int | None = None
+
+
+class MdnsFinding(BaseModel):
+    severity: NodeMdnsFindingSeverity
+    code: str
+    message: str
+    service: str | None = None
+
+
+class Mdns(BaseModel):
+    advertising: bool
+    services: list[MdnsService]
+    findings: list[MdnsFinding]
+
+
+class DiagnosticEvent(BaseModel):
+    at: AwareDatetime
+    kind: NodeDiagnosticEventKind
+    severity: NodeDiagnosticEventSeverity
+    message: str
+    detail: dict[str, str] | None = None
+
+
+class DiagnosticEventList(BaseModel):
+    events: list[DiagnosticEvent]
+
+
+class Verdict1(BaseModel):
+    state: NodeVerdictState
+    device_type: int
+    device_type_name: str
+    clusters: list[int]
+    reason: str
+
+
+class Item(BaseModel):
+    key: str
+    name: str
+    group: str
+    fields: dict[str, str]
+    lists: dict[str, list[str]] | None = Field(
+        None,
+        description="Optional. The values of list-valued (multi) fields, by field key: one entry per value, no separator semantics, so a value may contain a comma. Wins over the comma-separated fields entry of the same key.",
+    )
+    verdict: Verdict1
+    enabled: bool
+    source: str = Field(..., description="Where the verdict comes from, in the host's words.")
+
+
+class ItemList(BaseModel):
+    items: list[Item]
 
 
 class RSSIMatrixCentral(BaseModel):
@@ -4993,7 +5022,7 @@ class CentralProbeResult(BaseModel):
 
 
 class SecuritySnapshot(BaseModel):
-    severity: Severity3 = Field(..., description="The folded overall state.")
+    severity: Severity1 = Field(..., description="The folded overall state.")
     classes: list[SecurityClassState] = Field(
         ...,
         description="One entry per class the installation has sources for, in escalation order. A class without sources is absent, not inactive.\n",
