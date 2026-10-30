@@ -39,7 +39,14 @@ from openccu_loom_client.events import ConnectionStateChangedEvent as LoomConnec
 from openccu_loom_client.exceptions import LoomConflictError, LoomForbiddenError, LoomNotFoundError
 from openccu_loom_client.wire import DAEMON_API_VERSION
 from openccu_loom_client.wire.enums import DataPointCategory
-from openccu_loom_client.wire.rest import AlarmMessage, DataPointSummary, Kind2 as Kind, Link, ServiceMessage, Snapshot
+from openccu_loom_client.wire.rest import (
+    AlarmMessage,
+    DataPointSummary,
+    Link,
+    ServiceMessage,
+    Snapshot,
+    WsEnvelopeKind as Kind,
+)
 from tests.helpers import MockDaemon
 
 

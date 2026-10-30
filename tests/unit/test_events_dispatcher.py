@@ -44,6 +44,12 @@ from openccu_loom_client.events import (
     HubInboxChangedEvent,
     HubMetricsChangedEvent,
     HubServiceMessageCountChangedEvent,
+    NodeEndpointsChangedEvent,
+    NodeExposureChangedEvent,
+    NodeFabricAddedEvent,
+    NodeFabricRemovedEvent,
+    NodeWindowClosedEvent,
+    NodeWindowOpenedEvent,
     ProgramExecutedEvent,
     ScheduleChangedEvent,
     SystemStatusChangedEvent,
@@ -434,6 +440,18 @@ class TestDispatch:
                 },
                 DataPointOptimisticRolledBackEvent,
             ),
+            # The node page family's broadcasts carry go-fabric-ui's event
+            # payloads; the optional fields are omitted when empty.
+            (
+                "node.fabric_added",
+                {"fabric_index": 1, "vendor_id": 65521, "vendor_name": "Test vendor", "label": "Home"},
+                NodeFabricAddedEvent,
+            ),
+            ("node.fabric_removed", {"fabric_index": 1}, NodeFabricRemovedEvent),
+            ("node.window_opened", {"discriminator": 3840, "duration_seconds": 900}, NodeWindowOpenedEvent),
+            ("node.window_closed", {}, NodeWindowClosedEvent),
+            ("node.endpoints_changed", {}, NodeEndpointsChangedEvent),
+            ("node.exposure_changed", {"keys": ["0001:1"]}, NodeExposureChangedEvent),
         ],
     )
     def test_other_known_types(self, type_id: str, payload: dict, expected_cls: type) -> None:

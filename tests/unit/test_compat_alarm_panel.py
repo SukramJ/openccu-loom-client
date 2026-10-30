@@ -29,7 +29,7 @@ from openccu_loom_client.compat.aiohomematic.model.alarm_panel import (
 from openccu_loom_client.events import AlarmCountdownEvent, AlarmPanelChangedEvent, EventBus
 from openccu_loom_client.store import LoomStore
 from openccu_loom_client.wire.enums import DataPointCategory
-from openccu_loom_client.wire.rest import AlarmPanelEntity, Kind2 as Kind
+from openccu_loom_client.wire.rest import AlarmPanelEntity, WsEnvelopeKind as Kind
 from openccu_loom_client.wire.ws import AlarmCountdownPayload, AlarmPanelChangedPayload
 
 

@@ -12,7 +12,7 @@ from openccu_loom_client.events import (
     new_data_points_created_event,
     new_optimistic_rollback_event,
 )
-from openccu_loom_client.wire.rest import Kind2 as Kind
+from openccu_loom_client.wire.rest import WsEnvelopeKind as Kind
 
 
 class TestDataPointsCreatedEvent:

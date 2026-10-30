@@ -16,7 +16,7 @@ from openccu_loom_client.events import (
     DeviceCreatedEvent,
     EventBus,
 )
-from openccu_loom_client.wire.rest import Kind2 as Kind
+from openccu_loom_client.wire.rest import WsEnvelopeKind as Kind
 from openccu_loom_client.wire.ws import CentralStateChangedPayload, DataPointValueChangedPayload
 
 

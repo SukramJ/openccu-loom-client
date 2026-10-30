@@ -29,7 +29,7 @@ import openccu_loom_client.compat.aiohomematic.central.held_devices as held_devi
 from openccu_loom_client.events import HubInboxChangedEvent
 from openccu_loom_client.exceptions import BaseLoomException
 from openccu_loom_client.operations.devices import DevicesOperations
-from openccu_loom_client.wire.rest import HubCountChangedPayload, Kind2 as Kind
+from openccu_loom_client.wire.rest import HubCountChangedPayload, WsEnvelopeKind as Kind
 from tests.helpers import MockDaemon
 from tests.unit.test_compat_central_adapter import _BASE, _INFO, _LITE_ENTRY, _make_config, _wait_for
 
