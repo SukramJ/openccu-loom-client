@@ -36,7 +36,7 @@ from openccu_loom_client.events import (
 )
 from openccu_loom_client.exceptions import LoomIncompatibleVersionError, LoomTransportError
 from openccu_loom_client.wire import DAEMON_API_VERSION
-from openccu_loom_client.wire.rest import DeploymentKind, Kind2 as Kind
+from openccu_loom_client.wire.rest import DeploymentKind, WsEnvelopeKind as Kind
 from openccu_loom_client.wire.ws import (
     DataPointValueChangedPayload,
     DeviceAvailabilityChangedPayload,

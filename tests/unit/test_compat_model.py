@@ -81,11 +81,11 @@ from openccu_loom_client.wire.rest import (
     DataPointSummary,
     DeviceDetail,
     HubDataPoints,
-    Kind2 as Kind,
     ProgramSummary,
     SecuritySnapshot,
     Snapshot,
     SysvarSummary,
+    WsEnvelopeKind as Kind,
 )
 from openccu_loom_client.wire.ws import (
     CentralStateChangedPayload,

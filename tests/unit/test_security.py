@@ -28,7 +28,7 @@ from openccu_loom_client.events.types import (
 from openccu_loom_client.operations import SecurityOperations
 from openccu_loom_client.transport import HttpTransport
 from openccu_loom_client.wire import DAEMON_API_VERSION
-from openccu_loom_client.wire.rest import Kind2 as Kind, SecuritySourceOverride
+from openccu_loom_client.wire.rest import SecuritySourceOverride, WsEnvelopeKind as Kind
 from openccu_loom_client.wire.ws import WsEnvelope
 from tests.helpers import MockDaemon
 

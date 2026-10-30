@@ -34,7 +34,7 @@ from openccu_loom_client.events import (
     SystemStatusChangedEvent,
     UnsubscribeCallback,
 )
-from openccu_loom_client.wire.rest import Kind2 as Kind
+from openccu_loom_client.wire.rest import WsEnvelopeKind as Kind
 
 
 @dataclass(slots=True, kw_only=True)

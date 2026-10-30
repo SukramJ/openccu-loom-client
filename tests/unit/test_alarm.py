@@ -37,7 +37,7 @@ from openccu_loom_client.wire.rest import (
     AlarmZone,
     AlarmZoneCreate,
     AlarmZoneStatus,
-    Kind2 as Kind,
+    WsEnvelopeKind as Kind,
 )
 from openccu_loom_client.wire.ws import (
     AlarmCountdownPayload,

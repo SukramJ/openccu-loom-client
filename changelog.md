@@ -1,3 +1,35 @@
+# Version 2026.10.10 (2026-10-30)
+
+- **Wire layer regenerated for daemon 0.95.0 (api 15.1.0).**
+  `DAEMON_API_VERSION` and `SCHEMA_DIGEST` move with it. This spans three
+  daemon contract steps since api 13.9.1: the Matter pages moved to
+  go-fabric-ui (api 14.0.0), the WebSocket envelope kind got its own name
+  (api 15.0.0), and the node status gained `surface` (api 15.1.0).
+- **Breaking: the Matter events are now the node events.** The daemon no
+  longer broadcasts `matter.*`. Its Matter node pushes six `node.*` topics
+  with go-fabric-ui's payloads, and the client binds each one:
+
+  | Topic                    | Event                       | Payload                       |
+  | ------------------------ | --------------------------- | ----------------------------- |
+  | `node.fabric_added`      | `NodeFabricAddedEvent`      | `FabricEvent`                 |
+  | `node.fabric_removed`    | `NodeFabricRemovedEvent`    | `FabricEvent`                 |
+  | `node.window_opened`     | `NodeWindowOpenedEvent`     | `WindowEvent`                 |
+  | `node.window_closed`     | `NodeWindowClosedEvent`     | `WindowEvent`                 |
+  | `node.endpoints_changed` | `NodeEndpointsChangedEvent` | `NodeEndpointsChangedPayload` |
+  | `node.exposure_changed`  | `NodeExposureChangedEvent`  | `ExposureEvent`               |
+
+  The six `Matter*Event` classes are removed: a daemon at api 14.0.0 or
+  later never sends them. `matter.commissioning_progress` has no successor.
+  The window closing is new; the endpoint broadcast carries an empty
+  payload, and a subscriber reloads `GET /node/endpoints`.
+
+- **The envelope kind is `WsEnvelopeKind`.** The generated `Kind2` now
+  names the schedule kind (`week_profile` / `climate`). Every import of the
+  envelope kind uses `WsEnvelopeKind`; code outside this package that
+  imported `Kind2` for `initial` / `change` / `refresh` has to switch.
+- The daemon 0.92.0 regeneration (api 13.9.1) moved only `wire/const.py`
+  and is released with this version.
+
 # Version 2026.10.9 (2026-10-15)
 
 - **Wire layer regenerated for daemon 0.91.0 (api 13.9.0).**

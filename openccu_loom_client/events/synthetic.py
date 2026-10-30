@@ -32,7 +32,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from openccu_loom_client.events.types import LoomEvent
-from openccu_loom_client.wire.rest import Kind2 as Kind
+from openccu_loom_client.wire.rest import WsEnvelopeKind as Kind
 
 if TYPE_CHECKING:
     from openccu_loom_client.model import DataPoint, Device

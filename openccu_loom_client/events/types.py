@@ -26,7 +26,7 @@ from typing import Any, ClassVar, Final
 from pydantic import BaseModel
 
 from openccu_loom_client.canonical import canonical_unique_id
-from openccu_loom_client.wire.rest import Kind2 as Kind
+from openccu_loom_client.wire.rest import WsEnvelopeKind as Kind
 from openccu_loom_client.wire.ws import (
     AddonUpdateStatus,
     AlarmCountdownPayload,
@@ -52,17 +52,14 @@ from openccu_loom_client.wire.ws import (
     DeviceReleasedPayload,
     DeviceRemovedPayload,
     DeviceTriggerPayload,
+    ExposureEvent,
+    FabricEvent,
     HubConnectivityChangedPayload,
     HubCountChangedPayload,
     HubMetricChangedPayload,
     HubSystemUpdateChangedPayload,
     InstallModeChangedPayload,
-    MatterCommissioningProgressPayload,
-    MatterCommissioningWindowResponse,
-    MatterEndpointAssembledPayload,
-    MatterExposureUpdate,
-    MatterFabric,
-    MatterFabricRemovedPayload,
+    NodeEndpointsChangedPayload,
     OptimisticRollbackPayload,
     PairingRequestsChangedPayload,
     ProgramChangedPayload,
@@ -75,6 +72,7 @@ from openccu_loom_client.wire.ws import (
     SecurityZoneChangedPayload,
     SystemStatusChangedPayload,
     SysvarChangedPayload,
+    WindowEvent,
     WsEnvelope,
 )
 
@@ -882,51 +880,60 @@ class SecurityNotificationEvent(LoomEvent):
 
 
 @dataclass(slots=True, kw_only=True)
-class MatterCommissioningProgressEvent(LoomEvent):
-    """Progress update while a Matter device is being commissioned."""
+class NodeFabricAddedEvent(LoomEvent):
+    """A controller commissioned the Matter bridge's node (a fabric was added)."""
 
-    payload: MatterCommissioningProgressPayload
-    type_id: ClassVar[str] = "matter.commissioning_progress"
-
-
-@dataclass(slots=True, kw_only=True)
-class MatterCommissioningWindowOpenedEvent(LoomEvent):
-    """A Matter commissioning window was opened for pairing."""
-
-    payload: MatterCommissioningWindowResponse
-    type_id: ClassVar[str] = "matter.commissioning_window_opened"
+    payload: FabricEvent
+    type_id: ClassVar[str] = "node.fabric_added"
 
 
 @dataclass(slots=True, kw_only=True)
-class MatterEndpointAssembledEvent(LoomEvent):
-    """A Matter endpoint finished assembling from its CCU channels."""
+class NodeFabricRemovedEvent(LoomEvent):
+    """A fabric left the Matter bridge's node, removed by an operator or by the controller itself."""
 
-    payload: MatterEndpointAssembledPayload
-    type_id: ClassVar[str] = "matter.endpoint_assembled"
-
-
-@dataclass(slots=True, kw_only=True)
-class MatterExposableChangedEvent(LoomEvent):
-    """A device's Matter exposability flag changed."""
-
-    payload: MatterExposureUpdate
-    type_id: ClassVar[str] = "matter.exposable_changed"
+    payload: FabricEvent
+    type_id: ClassVar[str] = "node.fabric_removed"
 
 
 @dataclass(slots=True, kw_only=True)
-class MatterFabricAddedEvent(LoomEvent):
-    """A Matter fabric was added (a controller joined)."""
+class NodeWindowOpenedEvent(LoomEvent):
+    """The node's commissioning window opened."""
 
-    payload: MatterFabric
-    type_id: ClassVar[str] = "matter.fabric_added"
+    payload: WindowEvent
+    type_id: ClassVar[str] = "node.window_opened"
 
 
 @dataclass(slots=True, kw_only=True)
-class MatterFabricRemovedEvent(LoomEvent):
-    """A Matter fabric was removed (a controller left)."""
+class NodeWindowClosedEvent(LoomEvent):
+    """The node's commissioning window closed."""
 
-    payload: MatterFabricRemovedPayload
-    type_id: ClassVar[str] = "matter.fabric_removed"
+    payload: WindowEvent
+    type_id: ClassVar[str] = "node.window_closed"
+
+
+@dataclass(slots=True, kw_only=True)
+class NodeEndpointsChangedEvent(LoomEvent):
+    """
+    The node reassembled its bridged endpoints.
+
+    The payload is empty; a subscriber reloads ``GET /node/endpoints``.
+    """
+
+    payload: NodeEndpointsChangedPayload
+    type_id: ClassVar[str] = "node.endpoints_changed"
+
+
+@dataclass(slots=True, kw_only=True)
+class NodeExposureChangedEvent(LoomEvent):
+    """
+    The Matter selection changed.
+
+    ``payload.keys`` names the items that changed; it is empty when the
+    daemon does not say which.
+    """
+
+    payload: ExposureEvent
+    type_id: ClassVar[str] = "node.exposure_changed"
 
 
 @dataclass(slots=True, kw_only=True)
@@ -1000,21 +1007,12 @@ _EVENT_REGISTRY: Final[dict[str, tuple[Callable[..., LoomEvent], type[BaseModel]
     SecurityZoneChangedEvent.type_id: (SecurityZoneChangedEvent, SecurityZoneChangedPayload),
     SecurityFaultChangedEvent.type_id: (SecurityFaultChangedEvent, SecurityFaultChangedPayload),
     SecurityNotificationEvent.type_id: (SecurityNotificationEvent, SecurityNotificationPayload),
-    MatterCommissioningProgressEvent.type_id: (
-        MatterCommissioningProgressEvent,
-        MatterCommissioningProgressPayload,
-    ),
-    MatterCommissioningWindowOpenedEvent.type_id: (
-        MatterCommissioningWindowOpenedEvent,
-        MatterCommissioningWindowResponse,
-    ),
-    MatterEndpointAssembledEvent.type_id: (
-        MatterEndpointAssembledEvent,
-        MatterEndpointAssembledPayload,
-    ),
-    MatterExposableChangedEvent.type_id: (MatterExposableChangedEvent, MatterExposureUpdate),
-    MatterFabricAddedEvent.type_id: (MatterFabricAddedEvent, MatterFabric),
-    MatterFabricRemovedEvent.type_id: (MatterFabricRemovedEvent, MatterFabricRemovedPayload),
+    NodeFabricAddedEvent.type_id: (NodeFabricAddedEvent, FabricEvent),
+    NodeFabricRemovedEvent.type_id: (NodeFabricRemovedEvent, FabricEvent),
+    NodeWindowOpenedEvent.type_id: (NodeWindowOpenedEvent, WindowEvent),
+    NodeWindowClosedEvent.type_id: (NodeWindowClosedEvent, WindowEvent),
+    NodeEndpointsChangedEvent.type_id: (NodeEndpointsChangedEvent, NodeEndpointsChangedPayload),
+    NodeExposureChangedEvent.type_id: (NodeExposureChangedEvent, ExposureEvent),
 }
 
 
