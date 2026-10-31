@@ -70,6 +70,7 @@ from openccu_loom_client.wire.ws import (
     SecurityNotificationPayload,
     SecurityStateChangedPayload,
     SecurityZoneChangedPayload,
+    SurfaceChangedEvent,
     SystemStatusChangedPayload,
     SysvarChangedPayload,
     WindowEvent,
@@ -937,6 +938,20 @@ class NodeExposureChangedEvent(LoomEvent):
 
 
 @dataclass(slots=True, kw_only=True)
+class NodeSurfaceChangedEvent(LoomEvent):
+    """
+    An assembly changed the surface the Matter node serves on one endpoint.
+
+    ``payload.endpoints`` holds the key of that endpoint, ``""`` for the
+    root; the daemon sends one event per endpoint. Reload the surface
+    report or the endpoint list to see the change.
+    """
+
+    payload: SurfaceChangedEvent
+    type_id: ClassVar[str] = "node.surface_changed"
+
+
+@dataclass(slots=True, kw_only=True)
 class UnknownLoomEvent(LoomEvent):
     """
     A broadcast whose ``type`` we don't know about (yet).
@@ -1013,6 +1028,7 @@ _EVENT_REGISTRY: Final[dict[str, tuple[Callable[..., LoomEvent], type[BaseModel]
     NodeWindowClosedEvent.type_id: (NodeWindowClosedEvent, WindowEvent),
     NodeEndpointsChangedEvent.type_id: (NodeEndpointsChangedEvent, NodeEndpointsChangedPayload),
     NodeExposureChangedEvent.type_id: (NodeExposureChangedEvent, ExposureEvent),
+    NodeSurfaceChangedEvent.type_id: (NodeSurfaceChangedEvent, SurfaceChangedEvent),
 }
 
 
