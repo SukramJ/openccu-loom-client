@@ -3981,9 +3981,7 @@ class Surface(BaseModel):
     extensions: list[str] = Field(..., description="The enabled ahead-of-matter.js register IDs, sorted.")
     assembled: bool = Field(..., description="The report reads the assembled topology (after the first assembly).")
     withheld_count: int = Field(..., description="Elements the level policy withheld an endpoint for.")
-    warning_count: int = Field(
-        ..., description="Profile warnings: Keep decisions of a profile policy with a warning reason."
-    )
+    warning_count: int = Field(..., description="Warn decisions: elements a policy keeps and flags (surface.Warn).")
     changed_count: int = Field(
         ..., description="Surface changes announced in this process (ConfigurationVersion raised)."
     )
@@ -4173,6 +4171,28 @@ class ExposureEvent(BaseModel):
     keys: list[str]
 
 
+class SurfaceChangedEvent(BaseModel):
+    endpoints: list[str] = Field(
+        ...,
+        description='The key of the endpoint whose served surface an assembly changed (go-fabric node.Observers.OnSurfaceChanged, one endpoint per event); "" is the root endpoint.',
+    )
+
+
+class SurfaceDeviceType(BaseModel):
+    id: str = Field(..., description='Device type id, "0x" and four hex digits.')
+    revision: int
+
+
+class SurfaceCluster(BaseModel):
+    accepted: list[str] = Field(..., description="AcceptedCommandList, sorted.")
+    attributes: list[str] = Field(..., description="AttributeList, sorted.")
+    events: list[str] = Field(..., description="The events served, sorted.")
+    featureMap: str
+    generated: list[str] = Field(..., description="GeneratedCommandList, sorted.")
+    id: str
+    revision: int = Field(..., description="ClusterRevision.")
+
+
 class NodePairingSource(_TolerantStrEnum):
     configured = "configured"
     window = "window"
@@ -4206,6 +4226,29 @@ class NodeWindowKind(_TolerantStrEnum):
     own = "own"
     basic = "basic"
     enhanced = "enhanced"
+
+
+class NodeSurfaceElementKind(_TolerantStrEnum):
+    device_type = "device-type"
+    cluster = "cluster"
+    feature = "feature"
+    attribute = "attribute"
+    command = "command"
+    event = "event"
+
+
+class NodeSurfaceElementOrigin(_TolerantStrEnum):
+    cluster_mandatory = "cluster-mandatory"
+    device_type = "device-type"
+    host_declared = "host-declared"
+    kit_default = "kit-default"
+
+
+class NodeSurfaceVerdict(_TolerantStrEnum):
+    keep = "keep"
+    warn = "warn"
+    remove = "remove"
+    refuse = "refuse"
 
 
 class NodeEndpointsChangedPayload(BaseModel):
@@ -4942,6 +4985,58 @@ class ItemList(BaseModel):
     items: list[Item]
 
 
+class SurfaceEndpoint(BaseModel):
+    clusters: list[SurfaceCluster] = Field(..., description="The server clusters, by id.")
+    deviceTypes: list[SurfaceDeviceType] = Field(..., description="The device types in the Descriptor's order.")
+    key: str = Field(
+        ...,
+        description='The endpoint\'s rendered stable key; "" for the root, "aggregator" for the Aggregator, "@<number>" for an endpoint without a key.',
+    )
+    number: int | None = Field(
+        None, description="The endpoint number; absent until the endpoint is assembled, and for the root."
+    )
+
+
+class SurfaceElement(BaseModel):
+    cluster: str = Field(..., description='The cluster id; "0x00000000" for a device type.')
+    endpoint: str = Field(..., description='The endpoint\'s key; "" for the root.')
+    id: str = Field(
+        ...,
+        description="The device type id, the cluster id, the feature's one-bit mask, or the attribute, command or event id.",
+    )
+    kind: NodeSurfaceElementKind
+    mandatory: bool = Field(..., description="Removing the element would make the composition invalid at the pin.")
+    origin: NodeSurfaceElementOrigin
+    reference: str = Field(
+        ..., description='The ahead-of-matter.js register ID it is served against; "" for the matter.js baseline.'
+    )
+
+
+class SurfaceDecision(BaseModel):
+    cluster: str
+    endpoint: str
+    id: str
+    kind: NodeSurfaceElementKind
+    mandatory: bool
+    origin: NodeSurfaceElementOrigin
+    policy: str = Field(..., description='The policy\'s name: "level", "reference", "profile:<name>" or a host\'s own.')
+    reason: str = Field(..., description="Empty for a silent keep.")
+    reference: str
+    verdict: NodeSurfaceVerdict
+
+
+class SurfaceElementChange(BaseModel):
+    after: str = Field(
+        ...,
+        description='The element\'s state after ("revision 6", "set", "served", "accepted", "generated"); "" when it is gone.',
+    )
+    before: str = Field(..., description='The state before; "" when it is new.')
+    cluster: str
+    endpoint: str
+    id: str
+    kind: NodeSurfaceElementKind
+
+
 class RSSIMatrixCentral(BaseModel):
     central: str
     interface_id: str
@@ -5065,6 +5160,21 @@ class ListGroupsResponse(BaseModel):
     entries: list[GroupCentralEntry]
 
 
+class SurfaceEffective(BaseModel):
+    endpoints: list[SurfaceEndpoint] = Field(..., description="The endpoints other than the root, by key.")
+    root: SurfaceEndpoint
+
+
+class SurfaceChange(BaseModel):
+    after: str = Field(..., description="The new surface's digest, 64 hex digits.")
+    at: AwareDatetime = Field(..., description="When the node raised the ConfigurationVersion.")
+    before: str = Field(..., description="The digest last persisted for the endpoint.")
+    changes: list[SurfaceElementChange] = Field(
+        ..., description="The differences; empty when only the earlier digest was available."
+    )
+    endpoint: str = Field(..., description="The endpoint's key.")
+
+
 class RSSIMatrixResponse(BaseModel):
     items: list[RSSIMatrixCentral]
 
@@ -5083,6 +5193,22 @@ class UnIgnoreCandidateList(BaseModel):
     reasons: list[UnIgnoreReason] | None = Field(
         None, description="Every suppression category the groups can carry, in display order."
     )
+
+
+class SurfaceReport(BaseModel):
+    assembled: bool = Field(..., description="The report reads the assembled topology.")
+    changed: list[SurfaceChange] = Field(
+        ...,
+        description="The surface changes announced in this process, oldest first (the node keeps the last hundred).",
+    )
+    decisions: list[SurfaceDecision] = Field(..., description="Every decision of the policy chain, in its order.")
+    effective: SurfaceEffective
+    extensions: list[str] = Field(..., description="The enabled ahead-of-matter.js register IDs, sorted.")
+    level: str = Field(..., description="The specification level the surface is composed at.")
+    level_origin: str = Field(..., description='"explicit", "profile <name>[, <name>…]" or "pin".')
+    policies: str = Field(..., description="The digest of the policies, 64 hex digits.")
+    profiles: list[str] = Field(..., description="The selected controller profiles, sorted.")
+    withheld: list[SurfaceElement] = Field(..., description="The elements the level policy withheld an endpoint for.")
 
 
 TaxonomyNode.model_rebuild()
