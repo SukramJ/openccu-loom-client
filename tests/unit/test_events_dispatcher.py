@@ -48,6 +48,7 @@ from openccu_loom_client.events import (
     NodeExposureChangedEvent,
     NodeFabricAddedEvent,
     NodeFabricRemovedEvent,
+    NodeSurfaceChangedEvent,
     NodeWindowClosedEvent,
     NodeWindowOpenedEvent,
     ProgramExecutedEvent,
@@ -452,6 +453,7 @@ class TestDispatch:
             ("node.window_closed", {}, NodeWindowClosedEvent),
             ("node.endpoints_changed", {}, NodeEndpointsChangedEvent),
             ("node.exposure_changed", {"keys": ["0001:1"]}, NodeExposureChangedEvent),
+            ("node.surface_changed", {"endpoints": ["0001:1"]}, NodeSurfaceChangedEvent),
         ],
     )
     def test_other_known_types(self, type_id: str, payload: dict, expected_cls: type) -> None:

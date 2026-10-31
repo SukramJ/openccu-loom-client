@@ -1,3 +1,13 @@
+# Version 2026.10.11 (2026-10-31)
+
+- **Wire layer regenerated for daemon 0.96.0 (api 15.2.0).**
+  `DAEMON_API_VERSION` and `SCHEMA_DIGEST` move with it. The daemon adds
+  `GET /node/surface` (the Matter node's surface report, `SurfaceReport`)
+  and the WebSocket broadcast `node.surface_changed`; both are additive.
+- **New event `NodeSurfaceChangedEvent`** for `node.surface_changed`, with
+  the payload `SurfaceChangedEvent`: the key of the one endpoint whose
+  served surface an assembly changed (`""` for the root).
+
 # Version 2026.10.10 (2026-10-30)
 
 - **Wire layer regenerated for daemon 0.95.0 (api 15.1.0).**
