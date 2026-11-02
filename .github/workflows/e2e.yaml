@@ -51,7 +51,7 @@ jobs:
           go build -o bin/godevccu-e2e ./cmd/godevccu-e2e
 
       - name: Set up Python
-        uses: actions/setup-python@v7.0.0
+        uses: actions/setup-python@v7.1.0
         with:
           python-version: "3.14"
 
