@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Using Homematic(IP) Local?
+    url: https://github.com/SukramJ/homematicip_local/issues/new/choose
+    about: "With the integration installed, please report there, whichever connection you use."
+  - name: Using this client directly?
+    url: https://github.com/SukramJ/openccu-loom/issues/new/choose
+    about: "Issues with this client are tracked in openccu-loom."
