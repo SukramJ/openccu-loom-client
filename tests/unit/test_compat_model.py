@@ -505,6 +505,49 @@ class TestCustomDeepParity:
         assert dp.has_sounds is False
 
 
+class TestTextDisplaySendText:
+    """``send_text`` matches aiohomematic's signature and routes to the daemon services."""
+
+    async def test_send_text_without_sound_invokes_write(self) -> None:
+        dp, transport = _cdp_instance(kind="text_display", category="text_display", supported=("write",))
+        await dp.send_text(
+            text="Hallo",
+            icon="ICON_INFO",
+            background_color="WHITE",
+            text_color="BLACK",
+            alignment="CENTER",
+            display_id=2,
+        )
+        method, path, body = transport.calls[-1]
+        assert method == "POST"
+        assert path.endswith("/cdps/text_display/write")
+        assert body == {
+            "params": {
+                "id": 2,
+                "text": "Hallo",
+                "icon": "ICON_INFO",
+                "background_color": "WHITE",
+                "text_color": "BLACK",
+                "alignment": "CENTER",
+            }
+        }
+
+    async def test_send_text_defaults_to_first_line(self) -> None:
+        dp, transport = _cdp_instance(kind="text_display", category="text_display", supported=("write",))
+        await dp.send_text(text="Hallo")
+        assert transport.calls[-1][2] == {"params": {"id": 1, "text": "Hallo"}}
+
+    async def test_send_text_with_sound_invokes_write_with_sound(self) -> None:
+        dp, transport = _cdp_instance(
+            kind="text_display", category="text_display", supported=("write", "write_with_sound")
+        )
+        await dp.send_text(text="Alarm", display_id=1, sound="SOUND_LONG", repeat=3, interval=5)
+        _method, path, body = transport.calls[-1]
+        assert path.endswith("/cdps/text_display/write_with_sound")
+        # The daemon takes INTERVAL as the decimal string of an integer 1..15.
+        assert body == {"params": {"id": 1, "text": "Alarm", "sound": "SOUND_LONG", "repeat": 3, "interval": "5"}}
+
+
 class TestGenericSetOnTime:
     """G7: generic switch set_on_time writes the sibling ON_TIME parameter."""
 

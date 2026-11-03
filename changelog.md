@@ -1,3 +1,13 @@
+# Version 2026.11.0 (unreleased)
+
+- **`CustomDpTextDisplay.send_text` for the compat layer.** Home Assistant's
+  notify entity for HmIP text displays (`HmIP-WRCD`, `HmIP-BSL` display
+  variants) calls aiohomematic's `send_text`, which the loom twin did not
+  have, so every "send text to display" failed with an `AttributeError`.
+  `send_text` now takes aiohomematic's keyword arguments and routes to the
+  daemon's `write` service, or to `write_with_sound` when a sound is given
+  (`interval` is sent as the decimal string the daemon expects).
+
 # Version 2026.10.11 (2026-10-31)
 
 - **Wire layer regenerated for daemon 0.96.0 (api 15.2.0).**
