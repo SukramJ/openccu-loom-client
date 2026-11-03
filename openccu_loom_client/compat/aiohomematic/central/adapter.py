@@ -1784,6 +1784,11 @@ class LoomCentralAdapter:
                 continue
             if not _is_creatable(dp=dp):
                 continue
+            # HA already holds an entity for a registered data point. A
+            # re-announce (a re-bootstrap after a lost replay) would spawn it a
+            # second time, which HA rejects with "does not generate unique IDs".
+            if getattr(dp, "is_registered", False):
+                continue
             # Loom and aiohomematic share identical category *values*; map by
             # value (the loom StrEnum's ``str()`` yields its repr, not the value).
             category_value = getattr(loom_category, "value", loom_category)

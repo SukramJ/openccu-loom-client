@@ -1828,6 +1828,43 @@ class TestEventBridge:
         assert len(seen) == 1
         assert AioDataPointCategory.BINARY_SENSOR in seen[0].new_data_points
 
+    async def test_data_points_created_skips_data_points_ha_already_registered(self) -> None:
+        # Regression: a re-bootstrap shortly after start re-announced every
+        # store data point, so HA spawned the ones it already had a second
+        # time ("does not generate unique IDs ... already exists").
+        central = await _adapter()
+        central._client.store.attach_channel_data_points(
+            device_address="VCU1",
+            channel_number=1,
+            data_points=[
+                DataPointSummary.model_validate(
+                    {
+                        "parameter": parameter,
+                        "type": "BOOL",
+                        "category": "binary_sensor",
+                        "data_point_type": "binary_sensor",
+                        "value": True,
+                        "observed": True,
+                        "operations": {"read": True, "write": False, "event": True},
+                        "unique_id": f"loom_test_{parameter.lower()}",
+                    }
+                )
+                for parameter in ("STATE", "ERROR")
+            ],
+        )
+        registered = next(dp for dp in central._client.store.data_points if dp.parameter == "STATE")
+        registered.register()
+        seen: list[AioDataPointsCreatedEvent] = []
+        central.event_bus.create_subscription_group(name="x").subscribe(
+            event_type=AioDataPointsCreatedEvent,
+            event_key=None,
+            handler=lambda *, event: seen.append(event),
+        )
+        await central._emit_data_points_created()
+        await central._looper.block_till_done()
+        announced = [dp.parameter for dps in seen[0].new_data_points.values() for dp in dps]
+        assert announced == ["ERROR"]
+
 
 class TestGenericDataPointFactory:
     """The generic factory trusts the daemon's category + translated name."""
