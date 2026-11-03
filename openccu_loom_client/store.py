@@ -464,9 +464,11 @@ class LoomStore:
 
         Backs the compat ``load_data_point_value`` call HA makes when an
         entity is added or manually refreshed. No-op if no transport is
-        bound. Unknown data points are ignored (same as a missed push).
+        bound or its session is closed — HA adds entities while an entry is
+        being torn down, and the value the store already holds stands in.
+        Unknown data points are ignored (same as a missed push).
         """
-        if self._transport is None:
+        if self._transport is None or not self._transport.is_connected:
             return
         summary = await self._ops_devices.get_data_point(address=address, channel=channel, parameter=parameter)
         dp = self._data_points.get((address, channel, parameter))

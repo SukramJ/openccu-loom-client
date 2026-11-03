@@ -505,6 +505,49 @@ class TestCustomDeepParity:
         assert dp.has_sounds is False
 
 
+class TestTextDisplaySendText:
+    """``send_text`` matches aiohomematic's signature and routes to the daemon services."""
+
+    async def test_send_text_without_sound_invokes_write(self) -> None:
+        dp, transport = _cdp_instance(kind="text_display", category="text_display", supported=("write",))
+        await dp.send_text(
+            text="Hallo",
+            icon="ICON_INFO",
+            background_color="WHITE",
+            text_color="BLACK",
+            alignment="CENTER",
+            display_id=2,
+        )
+        method, path, body = transport.calls[-1]
+        assert method == "POST"
+        assert path.endswith("/cdps/text_display/write")
+        assert body == {
+            "params": {
+                "id": 2,
+                "text": "Hallo",
+                "icon": "ICON_INFO",
+                "background_color": "WHITE",
+                "text_color": "BLACK",
+                "alignment": "CENTER",
+            }
+        }
+
+    async def test_send_text_defaults_to_first_line(self) -> None:
+        dp, transport = _cdp_instance(kind="text_display", category="text_display", supported=("write",))
+        await dp.send_text(text="Hallo")
+        assert transport.calls[-1][2] == {"params": {"id": 1, "text": "Hallo"}}
+
+    async def test_send_text_with_sound_invokes_write_with_sound(self) -> None:
+        dp, transport = _cdp_instance(
+            kind="text_display", category="text_display", supported=("write", "write_with_sound")
+        )
+        await dp.send_text(text="Alarm", display_id=1, sound="SOUND_LONG", repeat=3, interval=5)
+        _method, path, body = transport.calls[-1]
+        assert path.endswith("/cdps/text_display/write_with_sound")
+        # The daemon takes INTERVAL as the decimal string of an integer 1..15.
+        assert body == {"params": {"id": 1, "text": "Alarm", "sound": "SOUND_LONG", "repeat": 3, "interval": "5"}}
+
+
 class TestGenericSetOnTime:
     """G7: generic switch set_on_time writes the sibling ON_TIME parameter."""
 
@@ -1784,6 +1827,43 @@ class TestEventBridge:
         await central._looper.block_till_done()
         assert len(seen) == 1
         assert AioDataPointCategory.BINARY_SENSOR in seen[0].new_data_points
+
+    async def test_data_points_created_skips_data_points_ha_already_registered(self) -> None:
+        # Regression: a re-bootstrap shortly after start re-announced every
+        # store data point, so HA spawned the ones it already had a second
+        # time ("does not generate unique IDs ... already exists").
+        central = await _adapter()
+        central._client.store.attach_channel_data_points(
+            device_address="VCU1",
+            channel_number=1,
+            data_points=[
+                DataPointSummary.model_validate(
+                    {
+                        "parameter": parameter,
+                        "type": "BOOL",
+                        "category": "binary_sensor",
+                        "data_point_type": "binary_sensor",
+                        "value": True,
+                        "observed": True,
+                        "operations": {"read": True, "write": False, "event": True},
+                        "unique_id": f"loom_test_{parameter.lower()}",
+                    }
+                )
+                for parameter in ("STATE", "ERROR")
+            ],
+        )
+        registered = next(dp for dp in central._client.store.data_points if dp.parameter == "STATE")
+        registered.register()
+        seen: list[AioDataPointsCreatedEvent] = []
+        central.event_bus.create_subscription_group(name="x").subscribe(
+            event_type=AioDataPointsCreatedEvent,
+            event_key=None,
+            handler=lambda *, event: seen.append(event),
+        )
+        await central._emit_data_points_created()
+        await central._looper.block_till_done()
+        announced = [dp.parameter for dps in seen[0].new_data_points.values() for dp in dps]
+        assert announced == ["ERROR"]
 
 
 class TestGenericDataPointFactory:

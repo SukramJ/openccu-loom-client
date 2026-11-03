@@ -1090,6 +1090,42 @@ class CustomDpTextDisplay(_CustomEntitySurface):
         """Return whether the display is in burst-limit warning (not surfaced yet)."""
         return False
 
+    async def send_text(
+        self,
+        *,
+        text: str,
+        icon: str | None = None,
+        background_color: str | None = None,
+        text_color: str | None = None,
+        alignment: str | None = None,
+        display_id: int = 1,
+        sound: str | None = None,
+        repeat: int | None = None,
+        interval: int | None = None,
+    ) -> None:
+        """
+        Send text to one display line, mirroring aiohomematic's ``CustomDpTextDisplay.send_text``.
+
+        Routes to the daemon's ``write`` service, or to ``write_with_sound``
+        when a sound is given. ``write_with_sound`` carries text and icon only,
+        so colours and alignment are not applied together with a sound. The
+        daemon takes ``interval`` as the decimal string of an integer 1..15.
+        """
+        params: dict[str, Any] = {"id": int(display_id), "text": text}
+        if icon is not None:
+            params["icon"] = icon
+        if sound is None:
+            styling = {"background_color": background_color, "text_color": text_color, "alignment": alignment}
+            params.update({key: value for key, value in styling.items() if value is not None})
+            await self.invoke(operation="write", params=params)
+            return
+        params["sound"] = sound
+        if repeat is not None:
+            params["repeat"] = int(repeat)
+        if interval is not None:
+            params["interval"] = str(int(interval))
+        await self.invoke(operation="write_with_sound", params=params)
+
     async def write(self, **params: Any) -> None:
         """Write text to the display, passing through line/content params."""
         await self.invoke(operation="write", params=params or None)

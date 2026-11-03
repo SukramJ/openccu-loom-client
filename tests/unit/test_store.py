@@ -17,8 +17,11 @@ from typing import Any
 
 import pytest
 
+from openccu_loom_client.auth import NoAuth
+from openccu_loom_client.config import LoomConfig
 from openccu_loom_client.model import LinkRole
 from openccu_loom_client.store import LoomStore
+from openccu_loom_client.transport.http import HttpTransport
 from openccu_loom_client.wire.rest import (
     CalculatedDPSummary,
     ChannelSummary,
@@ -568,6 +571,8 @@ class TestLiveUpdates:
 class _PayloadTransport:
     """Returns a settable payload from every request (for refresh tests)."""
 
+    is_connected = True
+
     def __init__(self, *, payload: Any) -> None:
         self.payload = payload
 
@@ -659,6 +664,19 @@ class TestRefreshStaleGuard:
         dp = store.get_data_point(address="VCU0001", channel=1, parameter="STATE")
         assert dp is not None
         assert dp.value is False  # newer refresh wins
+
+    async def test_refresh_on_a_closed_transport_keeps_the_value(self) -> None:
+        # Regression: HA adds entities while an entry is being torn down; the
+        # value read then hit a closed session and failed the entity add with
+        # "HttpTransport not connected". The snapshot value stays instead.
+        transport = HttpTransport(config=LoomConfig(host="127.0.0.1", auth=NoAuth()))
+        store = self._store_with_value(transport=transport, value=True, modified_at="2026-05-24T10:00:00Z")
+
+        await store.refresh_data_point(address="VCU0001", channel=1, parameter="STATE")
+
+        dp = store.get_data_point(address="VCU0001", channel=1, parameter="STATE")
+        assert dp is not None
+        assert dp.value is True
 
 
 class TestInPlaceUpsertHardening:

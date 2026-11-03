@@ -34,11 +34,19 @@ from openccu_loom_client.model import DataPoint
 from openccu_loom_client.wire.enums import DataPointCategory
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from openccu_loom_client.store import LoomStore
 
 _LOGGER: Final = logging.getLogger(__name__)
 
 _UNSET: Final = object()
+
+
+# The base ``DataPoint.value`` getter, read off the class dict: the mixin is not a
+# ``DataPoint`` subclass, so ``super()`` cannot reach it statically, and mypy types a
+# property accessed on its class as a plain callable (no ``fget``).
+_DATA_POINT_VALUE_GETTER: Final[Callable[[Any], Any]] = vars(DataPoint)["value"].fget
 
 
 class _GenericEntitySurface(_GenericProtocolSurface):
@@ -114,7 +122,7 @@ class _GenericEntitySurface(_GenericProtocolSurface):
         override = getattr(self, "_value_override", _UNSET)
         if override is not _UNSET:
             return override
-        return self._resolve_enum(raw=DataPoint.value.fget(self))
+        return self._resolve_enum(raw=_DATA_POINT_VALUE_GETTER(self))
 
     @value.setter
     def value(self, new_value: Any) -> None:
