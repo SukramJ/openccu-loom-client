@@ -351,6 +351,11 @@ class HttpTransport:
         """Return the last ``/info`` payload, or ``None`` before connect."""
         return self._info
 
+    @property
+    def is_connected(self) -> bool:
+        """Return whether a session is open, i.e. between :meth:`connect` and :meth:`close`."""
+        return self._session is not None and not self._session.closed
+
     async def recheck_contract(self) -> bool:
         """
         Re-run the ``/info`` handshake against a daemon that may have changed.
@@ -425,7 +430,7 @@ class HttpTransport:
         Retry: enabled by default for idempotent verbs, disabled for
         POST/PATCH. Override via ``allow_retry``.
         """
-        if self._session is None or self._session.closed:
+        if not self.is_connected:
             msg = "HttpTransport not connected — call connect() first"
             raise LoomTransportError(msg)
 

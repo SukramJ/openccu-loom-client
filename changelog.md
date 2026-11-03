@@ -7,6 +7,16 @@
   `send_text` now takes aiohomematic's keyword arguments and routes to the
   daemon's `write` service, or to `write_with_sound` when a sound is given
   (`interval` is sent as the decimal string the daemon expects).
+- **No more duplicate entities after a re-bootstrap.** The compat
+  `DataPointsCreatedEvent` re-announced every store data point, so a
+  re-bootstrap shortly after start (lost WebSocket replay) made Home
+  Assistant spawn entities it already had and log "does not generate unique
+  IDs … already exists". Data points HA has registered are no longer
+  re-announced, as the hub data points and event groups already were.
+- **Adding an entity during teardown no longer fails.** `refresh_data_point`
+  is a no-op once the transport's session is closed (new
+  `HttpTransport.is_connected`); before, the read raised
+  "HttpTransport not connected" and Home Assistant dropped the entity.
 
 # Version 2026.10.11 (2026-10-31)
 
