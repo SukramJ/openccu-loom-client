@@ -25,3 +25,6 @@ htmlcov/
 # `make generate` can read its contract assets. Untracked, and `gh pr create`
 # warns about it on every run otherwise.
 /openccu-loom/
+
+# Claude Code local settings
+.claude/settings.local.json
