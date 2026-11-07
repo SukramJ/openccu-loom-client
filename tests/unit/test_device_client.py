@@ -358,21 +358,58 @@ class TestDeviceChannelsView:
 
 
 class TestDeviceWeekProfile:
-    """The store-registered week-profile data point surfaces on the device."""
+    """
+    The store-registered week-profile data points surface on the device.
+
+    The three properties follow aiohomematic's ``Device``
+    (``model/device.py``): ``week_profile_data_point`` prefers the default
+    schedule and falls back to the climate one, ``climate_week_profile_data_point``
+    is the climate schedule only, and ``week_profile_data_points`` lists the
+    default schedule ahead of the climate one.
+    """
 
     def test_none_by_default(self) -> None:
         store = _store_with(device=_device(address="VCU1"), channels=[])
         device = store.get_device(address="VCU1")
         assert device is not None
         assert device.week_profile_data_point is None
+        assert device.climate_week_profile_data_point is None
+        assert device.week_profile_data_points == ()
 
-    def test_returns_registered_dp(self) -> None:
+    def test_sole_climate_schedule(self) -> None:
+        # A thermostat: its one schedule is the climate schedule, and the
+        # generic accessor falls back to it.
         store = _store_with(device=_device(address="VCU1"), channels=[])
-        sentinel = object()
-        store.set_week_profile_data_point(address="VCU1", data_point=sentinel)
+        climate = object()
+        store.set_week_profile_data_point(address="VCU1", data_point=climate, climate=True)
         device = store.get_device(address="VCU1")
         assert device is not None
-        assert device.week_profile_data_point is sentinel
+        assert device.week_profile_data_point is climate
+        assert device.climate_week_profile_data_point is climate
+        assert device.week_profile_data_points == (climate,)
+
+    def test_sole_default_schedule(self) -> None:
+        store = _store_with(device=_device(address="VCU1"), channels=[])
+        default = object()
+        store.set_week_profile_data_point(address="VCU1", data_point=default, climate=False)
+        device = store.get_device(address="VCU1")
+        assert device is not None
+        assert device.week_profile_data_point is default
+        assert device.climate_week_profile_data_point is None
+        assert device.week_profile_data_points == (default,)
+
+    def test_both_schedules(self) -> None:
+        # HmIP-WGT/WGTC: the generic accessor keeps the switch schedule, the
+        # climate entity reads the heating schedule.
+        store = _store_with(device=_device(address="VCU1"), channels=[])
+        default, climate = object(), object()
+        store.set_week_profile_data_point(address="VCU1", data_point=climate, climate=True)
+        store.set_week_profile_data_point(address="VCU1", data_point=default, climate=False)
+        device = store.get_device(address="VCU1")
+        assert device is not None
+        assert device.week_profile_data_point is default
+        assert device.climate_week_profile_data_point is climate
+        assert device.week_profile_data_points == (default, climate)
 
 
 class TestDeviceForcedAvailability:

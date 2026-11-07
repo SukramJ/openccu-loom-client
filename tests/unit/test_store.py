@@ -769,8 +769,9 @@ class TestInPlaceUpsertHardening:
 
     def test_device_removal_purges_week_profile_dp(self) -> None:
         store = self._populated()
-        store.set_week_profile_data_point(address="VCU0001", data_point=object())
-        assert store.get_week_profile_data_point(address="VCU0001") is not None
+        store.set_week_profile_data_point(address="VCU0001", data_point=object(), climate=False)
+        store.set_week_profile_data_point(address="VCU0001", data_point=object(), climate=True)
+        assert len(store.get_week_profile_data_points(address="VCU0001")) == 2
 
         store.apply_device_removed(
             payload=DeviceRemovedPayload.model_validate(
@@ -778,7 +779,7 @@ class TestInPlaceUpsertHardening:
             )
         )
 
-        assert store.get_week_profile_data_point(address="VCU0001") is None
+        assert store.get_week_profile_data_points(address="VCU0001") == ()
 
 
 class _RacingCdpTransport:

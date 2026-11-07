@@ -27,7 +27,11 @@ from openccu_loom_client.compat.aiohomematic.central.refresh import install_refr
 from openccu_loom_client.compat.aiohomematic.model.combined import CombinedDurationDp
 from openccu_loom_client.compat.aiohomematic.model.custom import BaseCustomDpClimate, make_custom_data_point
 from openccu_loom_client.compat.aiohomematic.model.generic import make_generic_data_point
-from openccu_loom_client.compat.aiohomematic.model.week_profile import ScheduleChannelSwitch, WeekProfileDp
+from openccu_loom_client.compat.aiohomematic.model.week_profile import (
+    ClimateWeekProfileDp,
+    ScheduleChannelSwitch,
+    WeekProfileDp,
+)
 from openccu_loom_client.events import DataPointValueChangedEvent, EventBus
 from openccu_loom_client.store import LoomStore
 from openccu_loom_client.wire.rest import (
@@ -448,11 +452,12 @@ def _week_profile_response(
     channel: int,
     schedule_type: str = "default",
     schedule_enabled: dict[str, bool] | None = None,
+    unique_id: str | None = None,
 ) -> WeekProfileResponse:
     return WeekProfileResponse.model_validate(
         {
             "address": f"{address}:{channel}",
-            "unique_id": f"loom_week_profile_{address.lower()}_week_profile",
+            "unique_id": unique_id or f"loom_week_profile_{address.lower()}_week_profile",
             "schedule_type": schedule_type,
             "min_temp": 4.5 if schedule_type == "climate" else 0,
             "max_temp": 30.5 if schedule_type == "climate" else 0,
@@ -621,6 +626,86 @@ class TestScheduleDiscovery:
         switches = [dp for dp in adapter._extra_data_points if isinstance(dp, ScheduleChannelSwitch)]
         assert len(profiles) == 1
         assert {sw.channel_key for sw in switches} == {"1_1", "1_2"}
+
+    @staticmethod
+    def _glass_thermostat_store() -> LoomStore:
+        """HmIP-WGTC as the daemon serves it since 0.97.0: switch schedule on 7, heating schedule on 8."""
+        store = _store_with_device(
+            address="VCU1",
+            model="HmIP-WGTC",
+            name="Wandthermostat",
+            channels=[
+                _channel(
+                    address="VCU1",
+                    number=7,
+                    name="Wandthermostat Wochenprogramm",
+                    channel_type="SWITCH_WEEK_PROFILE",
+                ),
+                _channel(address="VCU1", number=8, name="Wandthermostat:8"),
+            ],
+        )
+        store.attach_custom_data_points(
+            device_address="VCU1",
+            cdps=[_cdp_summary(name="SET_POINT_TEMPERATURE@8", category="climate", channel_no=8)],
+        )
+        return store
+
+    async def test_glass_thermostat_spawns_both_schedules(self) -> None:
+        # Daemon api 15.6.0 keys the heating schedule of a two-schedule device
+        # `loom_climate_week_profile_…`, so both schedules are entities of their
+        # own: the switch schedule with its switches, the heating schedule as
+        # the climate entity's schedule.
+        store = self._glass_thermostat_store()
+        schedules = _FakeSchedulesOps(
+            week_profiles={
+                ("VCU1", 7): _week_profile_response(address="VCU1", channel=7, schedule_enabled={"1_1": True}),
+                ("VCU1", 8): _week_profile_response(
+                    address="VCU1",
+                    channel=8,
+                    schedule_type="climate",
+                    unique_id="loom_climate_week_profile_vcu1_week_profile",
+                ),
+            }
+        )
+        adapter = _adapter_for(store, schedules=schedules)
+        await adapter._bootstrap_schedules()
+
+        profiles = [dp for dp in adapter._extra_data_points if isinstance(dp, WeekProfileDp)]
+        switches = [dp for dp in adapter._extra_data_points if isinstance(dp, ScheduleChannelSwitch)]
+        assert sorted(dp.unique_id for dp in profiles) == [
+            "loom_climate_week_profile_vcu1_week_profile",
+            "loom_week_profile_vcu1_week_profile",
+        ]
+        assert {sw.channel_key for sw in switches} == {"1_1"}
+        device = store.get_device(address="VCU1")
+        assert device is not None
+        assert type(device.week_profile_data_point) is WeekProfileDp
+        assert device.week_profile_data_point.channel_no == 7
+        assert isinstance(device.climate_week_profile_data_point, ClimateWeekProfileDp)
+        assert device.climate_week_profile_data_point.channel_no == 8
+        assert len(device.week_profile_data_points) == 2
+
+    async def test_glass_thermostat_on_an_older_daemon_keeps_the_switch_schedule(self) -> None:
+        # Before api 15.6.0 the daemon gave both schedules
+        # `loom_week_profile_…`. Two entities on one unique_id are one entity
+        # too many for the consumer, so the second schedule is not spawned and
+        # the device stays as it was: switch schedule only.
+        store = self._glass_thermostat_store()
+        schedules = _FakeSchedulesOps(
+            week_profiles={
+                ("VCU1", 7): _week_profile_response(address="VCU1", channel=7, schedule_enabled={"1_1": True}),
+                ("VCU1", 8): _week_profile_response(address="VCU1", channel=8, schedule_type="climate"),
+            }
+        )
+        adapter = _adapter_for(store, schedules=schedules)
+        await adapter._bootstrap_schedules()
+
+        profiles = [dp for dp in adapter._extra_data_points if isinstance(dp, WeekProfileDp)]
+        assert [(dp.unique_id, dp.channel_no) for dp in profiles] == [("loom_week_profile_vcu1_week_profile", 7)]
+        device = store.get_device(address="VCU1")
+        assert device is not None
+        assert device.climate_week_profile_data_point is None
+        assert len(device.week_profile_data_points) == 1
 
     async def test_device_without_cdp_spawns_nothing(self) -> None:
         # aiohomematic only initialises week profiles through a custom DP
