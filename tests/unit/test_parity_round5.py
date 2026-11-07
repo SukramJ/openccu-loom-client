@@ -19,6 +19,8 @@ from typing import Any
 
 from aiohomematic.async_support import Looper
 from aiohomematic.central.events import DataPointStateChangedEvent, EventBus as AioEventBus
+from aiohomematic.const import DataPointUsage as AioDataPointUsage, DeviceTriggerEventType as AioDeviceTriggerEventType
+from aiohomematic.model.event import ClickEvent as AioClickEvent
 import pytest
 
 from openccu_loom_client.compat.aiohomematic.central import CentralConfig
@@ -26,7 +28,8 @@ from openccu_loom_client.compat.aiohomematic.central.adapter import LoomCentralA
 from openccu_loom_client.compat.aiohomematic.central.refresh import install_refresh_bridge
 from openccu_loom_client.compat.aiohomematic.model.combined import CombinedDurationDp
 from openccu_loom_client.compat.aiohomematic.model.custom import BaseCustomDpClimate, make_custom_data_point
-from openccu_loom_client.compat.aiohomematic.model.generic import make_generic_data_point
+from openccu_loom_client.compat.aiohomematic.model.event import ClickEvent, DeviceErrorEvent, ImpulseEvent
+from openccu_loom_client.compat.aiohomematic.model.generic import DpButton, make_generic_data_point
 from openccu_loom_client.compat.aiohomematic.model.week_profile import (
     ClimateWeekProfileDp,
     ScheduleChannelSwitch,
@@ -35,6 +38,7 @@ from openccu_loom_client.compat.aiohomematic.model.week_profile import (
 from openccu_loom_client.events import DataPointValueChangedEvent, EventBus
 from openccu_loom_client.store import LoomStore
 from openccu_loom_client.wire.rest import (
+    CalculatedDPSummary,
     CustomDPSummary,
     DataPointSummary,
     DeviceDetail,
@@ -1377,3 +1381,252 @@ class TestCalculatedTranslatedName:
         summary = _synthesize_summary(value_dp=value_dp, translated_name="Zeitdauer")
         assert summary.translated_name == "Zeitdauer"
         assert summary.parameter == "DURATION"
+
+
+# ---------------------------------------------------------------------------
+# Device actions and triggers — generic_data_points / generic_events
+# ---------------------------------------------------------------------------
+
+_PRESS_OPS_EVENT_ONLY = {"read": False, "write": False, "event": True}
+_PRESS_OPS_WRITABLE = {"read": False, "write": True, "event": True}
+
+
+def _event_group(*, address: str, channel: int, kind: str, parameters: list[str]) -> dict[str, Any]:
+    return {
+        "channel_address": f"{address}:{channel}",
+        "kind": kind,
+        "event_types": [p.lower() for p in parameters],
+        "parameters": parameters,
+        "available": True,
+        "unique_id": f"loom_event_group_{kind}_{address.lower()}_{channel}",
+    }
+
+
+def _remote_store() -> LoomStore:
+    """
+    Return a remote with the three event flavours the daemon declares.
+
+    Channel 1 is a physical key: PRESS_SHORT / PRESS_LONG are events only
+    (usage ``event``, typed button — the daemon gives an event-only press that
+    category, openccu-loom internal/north/mqtt/discovery.go). Channel 2 is a
+    writable key (usage ``data_point``) the reference offers as a device action.
+    Channel 3 carries a key the channel operation mode disables (``no_create``)
+    and one the reference never spawns (``ignored``). Channel 0 carries an
+    impulse and a device-error source next to a plain sensor.
+    """
+    address = "VCU1"
+    store = _store_with_device(
+        address=address,
+        model="HmIP-RC8",
+        name="Fernbedienung",
+        channels=[
+            _channel(
+                address=address,
+                number=0,
+                name="Fernbedienung:0",
+                event_groups=[
+                    _event_group(address=address, channel=0, kind="impulse", parameters=["SEQUENCE_OK"]),
+                    _event_group(address=address, channel=0, kind="device_error", parameters=["ERROR_CODE"]),
+                ],
+            ),
+            _channel(
+                address=address,
+                number=1,
+                name="Fernbedienung:1",
+                event_groups=[
+                    _event_group(address=address, channel=1, kind="keypress", parameters=["PRESS_SHORT", "PRESS_LONG"])
+                ],
+            ),
+            _channel(
+                address=address,
+                number=2,
+                name="Fernbedienung:2",
+                event_groups=[_event_group(address=address, channel=2, kind="keypress", parameters=["PRESS_SHORT"])],
+            ),
+            _channel(
+                address=address,
+                number=3,
+                name="Fernbedienung:3",
+                event_groups=[
+                    _event_group(address=address, channel=3, kind="keypress", parameters=["PRESS_SHORT", "PRESS_LONG"])
+                ],
+            ),
+        ],
+    )
+    press = {"type": "ACTION", "value": None, "category": "button"}
+    store.attach_channel_data_points(
+        device_address=address,
+        channel_number=0,
+        data_points=[
+            _dp_summary(parameter="OPERATING_VOLTAGE", value=3.0, usage="data_point"),
+            _dp_summary(parameter="SEQUENCE_OK", type="BOOL", operations=_PRESS_OPS_EVENT_ONLY, usage="event"),
+            _dp_summary(parameter="ERROR_CODE", type="INTEGER", operations=_PRESS_OPS_EVENT_ONLY, usage="event"),
+        ],
+    )
+    store.attach_channel_data_points(
+        device_address=address,
+        channel_number=1,
+        data_points=[
+            _dp_summary(parameter="PRESS_SHORT", operations=_PRESS_OPS_EVENT_ONLY, usage="event", **press),
+            _dp_summary(parameter="PRESS_LONG", operations=_PRESS_OPS_EVENT_ONLY, usage="event", **press),
+        ],
+    )
+    store.attach_channel_data_points(
+        device_address=address,
+        channel_number=2,
+        data_points=[
+            _dp_summary(
+                parameter="PRESS_SHORT",
+                operations=_PRESS_OPS_WRITABLE,
+                usage="data_point",
+                unique_id="loom_vcu1_2_press_short",
+                **press,
+            )
+        ],
+    )
+    store.attach_channel_data_points(
+        device_address=address,
+        channel_number=3,
+        data_points=[
+            _dp_summary(
+                parameter="PRESS_SHORT",
+                operations=_PRESS_OPS_EVENT_ONLY,
+                usage="no_create",
+                unique_id="loom_vcu1_3_press_short",
+                **press,
+            ),
+            _dp_summary(
+                parameter="PRESS_LONG",
+                operations=_PRESS_OPS_EVENT_ONLY,
+                usage="ignored",
+                unique_id="loom_vcu1_3_press_long",
+                **press,
+            ),
+        ],
+    )
+    return store
+
+
+class TestDeviceGenericDataPoints:
+    """
+    ``Device.generic_data_points`` follows aiohomematic's creation rules.
+
+    A keypress source is generic only when writable, an impulse or
+    device-error source never, an ignored parameter not at all, and the
+    calculated data points live apart (aiohomematic ``model/__init__.py``,
+    ``_process_parameter``; ``model/generic/__init__.py``,
+    ``DataPointTypeResolver``).
+    """
+
+    def test_events_and_calculated_data_points_are_not_generic(self) -> None:
+        store = _remote_store()
+        _adapter_for(store)  # installs the compat factories, the calculated one among them
+        store.attach_channel_calculated_data_points(
+            device_address="VCU1",
+            channel_number=0,
+            calculated=[
+                CalculatedDPSummary.model_validate(
+                    {
+                        "name": "OPERATING_VOLTAGE_LEVEL",
+                        "category": "sensor",
+                        "value": 80.0,
+                        "observed": True,
+                        "available": True,
+                        "unique_id": "loom_calculated_vcu1_0_operating_voltage_level",
+                    }
+                )
+            ],
+        )
+        device = store.get_device(address="VCU1")
+        assert device is not None
+        assert sorted((dp.channel_number, dp.parameter) for dp in device.generic_data_points) == [
+            (0, "OPERATING_VOLTAGE"),
+            (2, "PRESS_SHORT"),
+        ]
+
+    def test_device_action_sees_only_the_writable_key(self) -> None:
+        # homematicip_local device_action.py lists DpAction/DpButton with
+        # PRESS_SHORT / PRESS_LONG. An event-only key is typed button by the
+        # daemon too; were it generic, every physical key would offer an
+        # action the reference does not, one that writes a read-only parameter.
+        store = _remote_store()
+        device = store.get_device(address="VCU1")
+        assert device is not None
+        buttons = [
+            (dp.channel_number, dp.parameter)
+            for dp in device.generic_data_points
+            if isinstance(dp, DpButton) and dp.parameter in ("PRESS_SHORT", "PRESS_LONG") and dp.is_writable
+        ]
+        assert buttons == [(2, "PRESS_SHORT")]
+
+
+class TestDeviceGenericEvents:
+    """``Device.generic_events`` carries the daemon-declared event sources as aiohomematic event twins."""
+
+    def test_one_event_per_declared_source_with_its_flavour(self) -> None:
+        store = _remote_store()
+        _adapter_for(store)
+        device = store.get_device(address="VCU1")
+        assert device is not None
+        events = {(e.channel_no, e.parameter): e for e in device.generic_events}
+        assert set(events) == {
+            (0, "SEQUENCE_OK"),
+            (0, "ERROR_CODE"),
+            (1, "PRESS_SHORT"),
+            (1, "PRESS_LONG"),
+            (2, "PRESS_SHORT"),
+            (3, "PRESS_SHORT"),
+        }, "an ignored source is no event, as in the reference"
+        assert type(events[(1, "PRESS_SHORT")]) is ClickEvent
+        assert type(events[(0, "SEQUENCE_OK")]) is ImpulseEvent
+        assert type(events[(0, "ERROR_CODE")]) is DeviceErrorEvent
+        assert events[(1, "PRESS_LONG")].event_type is AioDeviceTriggerEventType.KEYPRESS
+        assert events[(0, "SEQUENCE_OK")].event_type is AioDeviceTriggerEventType.IMPULSE
+        assert events[(0, "ERROR_CODE")].event_type is AioDeviceTriggerEventType.DEVICE_ERROR
+
+    def test_usage_follows_the_reference(self) -> None:
+        store = _remote_store()
+        _adapter_for(store)
+        device = store.get_device(address="VCU1")
+        assert device is not None
+        usage = {(e.channel_no, e.parameter): e.usage for e in device.generic_events}
+        assert usage[(1, "PRESS_SHORT")] is AioDataPointUsage.EVENT
+        assert usage[(2, "PRESS_SHORT")] is AioDataPointUsage.EVENT
+        assert usage[(3, "PRESS_SHORT")] is AioDataPointUsage.NO_CREATE
+
+    def test_event_data_is_what_the_keypress_push_carries(self) -> None:
+        # A device trigger fires when the HA bus event matches the data it was
+        # built from. The push path (central/refresh.py) reports the device's
+        # interface_id, model, address, channel and parameter; the event's
+        # get_event_data must produce the same fields.
+        store = _remote_store()
+        _adapter_for(store)
+        device = store.get_device(address="VCU1")
+        assert device is not None
+        event = next(e for e in device.generic_events if (e.channel_no, e.parameter) == (1, "PRESS_LONG"))
+        data = event.get_event_data()
+        assert (data.interface_id, data.model, data.device_address, data.channel_no, data.parameter) == (
+            "home:HmIP-RF",
+            "HmIP-RC8",
+            "VCU1",
+            1,
+            "PRESS_LONG",
+        )
+        assert data.value is None
+
+    def test_twins_are_not_aiohomematic_instances(self) -> None:
+        # Pins why homematicip_local's device_trigger.py has to dispatch on a
+        # (aiohomematic, loom) pair: the twin satisfies the surface, not the class.
+        store = _remote_store()
+        _adapter_for(store)
+        device = store.get_device(address="VCU1")
+        assert device is not None
+        assert not any(isinstance(e, AioClickEvent) for e in device.generic_events)
+
+    def test_without_the_compat_layer_there_are_no_events(self) -> None:
+        # The bare client has no event classes to build; the compat adapter
+        # installs them, as it does the data-point factories.
+        store = _remote_store()
+        device = store.get_device(address="VCU1")
+        assert device is not None
+        assert device.generic_events == ()

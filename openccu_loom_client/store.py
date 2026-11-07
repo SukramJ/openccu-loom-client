@@ -219,6 +219,10 @@ class LoomStore:
         # Same hook for Custom Data Points — the compat layer injects a
         # factory that returns the right categorised ``CustomDp*`` class.
         self._cdp_factory: Callable[..., CustomDataPoint] | None = None
+        # Same hook for the device's trigger sources: the compat layer injects a
+        # factory that wraps an event data point in aiohomematic's event twin
+        # (``Device.generic_events``). ``None`` = the bare client has no events.
+        self._generic_event_factory: Callable[..., Any] | None = None
         # Per-device week-profile data points (the compat layer's
         # ``WeekProfileDp`` / ``ClimateWeekProfileDp``), registered by the
         # adapter at bootstrap so the base :class:`Device` can expose them.
@@ -398,6 +402,25 @@ class LoomStore:
     def set_custom_data_point_factory(self, *, factory: Callable[..., CustomDataPoint] | None) -> None:
         """Install a factory that builds (subclasses of) :class:`CustomDataPoint`."""
         self._cdp_factory = factory
+
+    def set_generic_event_factory(self, *, factory: Callable[..., Any] | None) -> None:
+        """
+        Install the factory that wraps a device's event data points as events.
+
+        Called as ``factory(data_point=…, kind=…)`` with the daemon-declared
+        event-group flavour (``keypress`` / ``impulse`` / ``device_error``);
+        it returns the event, or ``None`` for a source that is no event.
+        """
+        self._generic_event_factory = factory
+
+    @property
+    def generic_event_factory(self) -> Callable[..., Any] | None:
+        """Return the installed generic-event factory, or ``None``."""
+        return self._generic_event_factory
+
+    def is_calculated_data_point(self, *, address: str, channel: int, parameter: str) -> bool:
+        """Return whether a data point was registered as a daemon-calculated one."""
+        return (address, channel, parameter) in self._calculated_dp_keys
 
     def _build_custom_data_point(
         self,

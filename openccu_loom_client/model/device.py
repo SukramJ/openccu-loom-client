@@ -7,11 +7,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+import logging
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Final
 
+from openccu_loom_client.exceptions import LoomValidationError
 from openccu_loom_client.model.device_client import DeviceClient
 from openccu_loom_client.operations.devices import DevicesOperations
+from openccu_loom_client.operations.links import LinksOperations
+from openccu_loom_client.wire.enums import DataPointUsage
 from openccu_loom_client.wire.rest import DeviceAvailability, DeviceFirmware, DeviceSummary, TaxonomyAssignment
 
 # The daemon's "never observed" marker for the availability timestamps
@@ -25,6 +29,12 @@ if TYPE_CHECKING:
     from openccu_loom_client.model.channel import Channel
     from openccu_loom_client.model.data_point import DataPoint
     from openccu_loom_client.store import LoomStore
+
+_LOGGER: Final = logging.getLogger(__name__)
+
+# The daemon's event-group flavour for a keypress (aiohomematic's
+# DeviceTriggerEventType.KEYPRESS.short).
+_KEYPRESS_KIND: Final = "keypress"
 
 
 @dataclass(frozen=True, slots=True)
@@ -444,6 +454,41 @@ class Device:
         """Return an aiohomematic-compatible device-definition archive (raw zip bytes)."""
         return await self._devices_ops().export_device_definition(address=self.address)
 
+    async def create_central_links(self) -> None:
+        """Enable central click-event forwarding on every eligible channel (aiohomematic parity)."""
+        await self._central_links(create=True)
+
+    async def remove_central_links(self) -> None:
+        """Disable central click-event forwarding on every eligible channel (aiohomematic parity)."""
+        await self._central_links(create=False)
+
+    async def _central_links(self, *, create: bool) -> None:
+        """
+        Switch the device's central links, a no-op for a device that has none.
+
+        aiohomematic's ``Device`` skips a device that is not relevant for
+        central-link management without an error. The daemon refuses such a
+        device instead — wrong interface, a virtual-remote model — with 422
+        validation, the only 422 this device-level route answers (openccu-loom
+        ``internal/north/rest/handlers/central_links.go``, ``centralLinksError``;
+        the other 422 needs a ``channel`` this call never sends). That refusal
+        becomes the reference's no-op; every other failure still raises.
+        """
+        transport = self._store.transport
+        if transport is None:
+            msg = "LoomStore has no transport bound — cannot reach link operations"
+            raise RuntimeError(msg)
+        links = LinksOperations(transport=transport)
+        try:
+            if create:
+                await links.create_central_links(address=self.address)
+            else:
+                await links.remove_central_links(address=self.address)
+        except LoomValidationError:
+            _LOGGER.debug(
+                "central links not supported by %s, nothing to %s", self.address, "create" if create else "remove"
+            )
+
     def _devices_ops(self) -> DevicesOperations:
         """Build the device-operations façade against the store's transport."""
         transport = self._store.transport
@@ -453,6 +498,74 @@ class Device:
         return DevicesOperations(transport=transport)
 
     # ---- graph navigation ----
+
+    @property
+    def generic_data_points(self) -> tuple[DataPoint, ...]:
+        """
+        Return the device's generic data points, as aiohomematic's ``Device``.
+
+        The store holds every parameter as a data point; aiohomematic does not.
+        Its rules (``model/__init__.py`` ``_process_parameter``,
+        ``model/generic/__init__.py`` ``DataPointTypeResolver``): a keypress
+        source is a generic data point only when it is writable (a
+        ``DpButton`` beside its ``ClickEvent``), an impulse or device-error
+        source never is, an ignored parameter is not created at all, and the
+        calculated data points live apart. The event sources are the members of
+        the event groups the daemon declares on the channel. Kept in, an
+        event-only key — which the daemon types button — would offer a device
+        action the reference does not have, one that writes a read-only
+        parameter.
+        """
+        generic: list[DataPoint] = []
+        for channel in self.channels:
+            not_generic = {
+                parameter
+                for declared in channel.summary.event_groups or ()
+                for parameter in declared.parameters
+                if declared.kind != _KEYPRESS_KIND
+            }
+            keypress = {
+                parameter
+                for declared in channel.summary.event_groups or ()
+                if declared.kind == _KEYPRESS_KIND
+                for parameter in declared.parameters
+            }
+            for dp in channel.data_points:
+                if (
+                    dp.summary.usage == DataPointUsage.Ignored
+                    or dp.parameter in not_generic
+                    or (dp.parameter in keypress and not dp.is_writable)
+                    or self._store.is_calculated_data_point(
+                        address=self.address, channel=dp.channel_number, parameter=dp.parameter
+                    )
+                ):
+                    continue
+                generic.append(dp)
+        return tuple(generic)
+
+    @property
+    def generic_events(self) -> tuple[Any, ...]:
+        """
+        Return the device's trigger sources as aiohomematic event twins.
+
+        A source is a member of an event group the daemon declares on the
+        channel (``ChannelSummary.event_groups``) that emits events — the same
+        set the event entities are built from. The compat layer installs the
+        factory that wraps it; without it the bare client has no events.
+        """
+        factory = self._store.generic_event_factory
+        if factory is None:
+            return ()
+        events: list[Any] = []
+        for channel in self.channels:
+            for declared in channel.summary.event_groups or ():
+                members = frozenset(declared.parameters)
+                for dp in channel.data_points:
+                    if dp.parameter not in members or not dp.emits_events:
+                        continue
+                    if (event := factory(data_point=dp, kind=declared.kind)) is not None:
+                        events.append(event)
+        return tuple(events)
 
     @property
     def channels(self) -> _ChannelsView:

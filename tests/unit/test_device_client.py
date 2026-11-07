@@ -18,6 +18,7 @@ from typing import Any
 
 import pytest
 
+from openccu_loom_client.exceptions import LoomUpstreamUnavailableError
 from openccu_loom_client.model.device_client import DeviceClient
 from openccu_loom_client.operations.datapoints import DataPointsOperations
 from openccu_loom_client.store import LoomStore
@@ -501,3 +502,81 @@ class TestDeviceReloadExport:
         assert device is not None
         with pytest.raises(RuntimeError, match="no transport"):
             await device.reload_device_config()
+
+
+# The problem the daemon answers for a device the central-link eligibility rule
+# rejects (wrong interface, virtual-remote model): 422 validation
+# (openccu-loom internal/north/rest/handlers/central_links.go, centralLinksError).
+_CENTRAL_LINKS_UNSUPPORTED = {
+    "type": "https://openccu-loom.dev/errors/validation",
+    "title": "Central links unsupported",
+    "status": 422,
+    "code": "validation",
+}
+
+
+class TestDeviceCentralLinks:
+    """
+    ``create_central_links`` / ``remove_central_links`` on the device, as aiohomematic's ``Device``.
+
+    aiohomematic skips a device that is not relevant for central-link
+    management without an error (``model/device.py``,
+    ``if self.relevant_for_central_link_management``); the daemon refuses it
+    with 422. The device turns that refusal into the reference's no-op.
+    """
+
+    async def test_create_posts_the_device_route(self, http) -> None:
+        t, mock = http
+        mock.post("/api/v1/devices/VCU1/central-links", status=202, payload={})
+        store = _store_with(device=_device(address="VCU1"), channels=[])
+        store.set_transport(transport=t)
+        device = store.get_device(address="VCU1")
+        assert device is not None
+        await device.create_central_links()
+        assert _find_call(mock, "POST").path == "/api/v1/devices/VCU1/central-links"
+
+    async def test_remove_deletes_the_device_route(self, http) -> None:
+        t, mock = http
+        mock.delete("/api/v1/devices/VCU1/central-links", status=202, payload={})
+        store = _store_with(device=_device(address="VCU1"), channels=[])
+        store.set_transport(transport=t)
+        device = store.get_device(address="VCU1")
+        assert device is not None
+        await device.remove_central_links()
+        assert _find_call(mock, "DELETE").path == "/api/v1/devices/VCU1/central-links"
+
+    @pytest.mark.parametrize(("method", "call"), [("POST", "create_central_links"), ("DELETE", "remove_central_links")])
+    async def test_unsupported_device_is_a_no_op(self, http, method: str, call: str) -> None:
+        t, mock = http
+        mock.add_response(
+            method,
+            "/api/v1/devices/VCU1/central-links",
+            status=422,
+            payload=_CENTRAL_LINKS_UNSUPPORTED,
+            content_type="application/problem+json",
+        )
+        store = _store_with(device=_device(address="VCU1"), channels=[])
+        store.set_transport(transport=t)
+        device = store.get_device(address="VCU1")
+        assert device is not None
+        await getattr(device, call)()  # must not raise
+
+    async def test_other_failures_still_raise(self, http) -> None:
+        t, mock = http
+        mock.post(
+            "/api/v1/devices/VCU1/central-links",
+            status=502,
+            payload={
+                "type": "https://openccu-loom.dev/errors/upstream_unavailable",
+                "title": "Central links failed",
+                "status": 502,
+                "code": "upstream_unavailable",
+            },
+            content_type="application/problem+json",
+        )
+        store = _store_with(device=_device(address="VCU1"), channels=[])
+        store.set_transport(transport=t)
+        device = store.get_device(address="VCU1")
+        assert device is not None
+        with pytest.raises(LoomUpstreamUnavailableError):
+            await device.create_central_links()

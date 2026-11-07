@@ -472,6 +472,7 @@ def test_aiohomematic_custom_protocol_surface_has_not_drifted() -> None:
 # compat module (`_pair(CustomDpSwitch, "CustomDpSwitch", _c)`).
 _CALL_SHAPE_MODULE_PAIRS: tuple[tuple[str, str], ...] = (
     ("aiohomematic.model.custom", "openccu_loom_client.compat.aiohomematic.model.custom"),
+    ("aiohomematic.model.event", "openccu_loom_client.compat.aiohomematic.model.event"),
     ("aiohomematic.model.generic", "openccu_loom_client.compat.aiohomematic.model.generic"),
     ("aiohomematic.model.hub", "openccu_loom_client.compat.aiohomematic.model.hub"),
 )
