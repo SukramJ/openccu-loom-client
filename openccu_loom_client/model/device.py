@@ -392,9 +392,22 @@ class Device:
         return self.model
 
     @property
+    def climate_week_profile_data_point(self) -> Any:
+        """Return the data point of the device's climate schedule, or ``None`` if it has none."""
+        return self._store.get_week_profile_data_point(address=self.address, climate=True)
+
+    @property
     def week_profile_data_point(self) -> Any:
-        """Return the device's climate week-profile data point, or ``None`` if it has none."""
-        return self._store.get_week_profile_data_point(address=self.address)
+        """Return the data point of the default schedule, else of the climate schedule (as aiohomematic)."""
+        default = self._store.get_week_profile_data_point(address=self.address, climate=False)
+        if default is not None:
+            return default
+        return self._store.get_week_profile_data_point(address=self.address, climate=True)
+
+    @property
+    def week_profile_data_points(self) -> tuple[Any, ...]:
+        """Return the data points of all schedules of the device, the default schedule first."""
+        return self._store.get_week_profile_data_points(address=self.address)
 
     @property
     def client(self) -> DeviceClient:

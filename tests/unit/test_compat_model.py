@@ -1753,7 +1753,7 @@ class TestEventBridge:
 
         store = LoomStore()
         wp_dp = _WeekProfileDp()
-        store.set_week_profile_data_point(address="VCU1", data_point=wp_dp)
+        store.set_week_profile_data_point(address="VCU1", data_point=wp_dp, climate=True)
         bus = EventBus()
         group = bus.create_subscription_group(name="t")
         looper = Looper()
@@ -1793,6 +1793,51 @@ class TestEventBridge:
         await looper.block_till_done()
         assert wp_dp.reloads == 1
         assert len(seen) == 1
+
+    async def test_schedule_change_reaches_the_schedule_of_its_channel(self) -> None:
+        """A device with two schedules: a push reloads the one on its channel, never the other."""
+
+        class _WeekProfileDp:
+            def __init__(self, *, unique_id: str, channel_no: int) -> None:
+                self.unique_id = unique_id
+                self.channel_no = channel_no
+                self.reloads = 0
+                self.value = 0
+
+            async def reload_schedule(self) -> None:
+                self.reloads += 1
+                self.value += 1
+
+        store = LoomStore()
+        switch_dp = _WeekProfileDp(unique_id="loom_week_profile_vcu1_week_profile", channel_no=7)
+        climate_dp = _WeekProfileDp(unique_id="loom_climate_week_profile_vcu1_week_profile", channel_no=8)
+        store.set_week_profile_data_point(address="VCU1", data_point=switch_dp, climate=False)
+        store.set_week_profile_data_point(address="VCU1", data_point=climate_dp, climate=True)
+        bus = EventBus()
+        group = bus.create_subscription_group(name="t")
+        looper = Looper()
+        ha_bus = AioEventBus(task_scheduler=looper)
+        install_refresh_bridge(group=group, store=store, ha_bus=ha_bus, central_name="home")
+        seen: list[str] = []
+        ha_bus.create_subscription_group(name="x").subscribe(
+            event_type=DataPointStateChangedEvent,
+            event_key=None,
+            handler=lambda *, event: seen.append(event.unique_id),
+        )
+
+        await bus.publish(
+            event=ScheduleChangedEvent(
+                seq=1,
+                kind=Kind.change,
+                ts="2026-11-07T08:00:00Z",
+                payload=ScheduleChangedPayload.model_validate(
+                    {"central": "home", "interface_id": "home:HmIP-RF", "device_address": "VCU1", "channel": 8}
+                ),
+            )
+        )
+        await looper.block_till_done()
+        assert (switch_dp.reloads, climate_dp.reloads) == (0, 1)
+        assert seen == ["loom_climate_week_profile_vcu1_week_profile"]
 
     async def test_data_points_created_groups_by_aiohomematic_category(self) -> None:
         # Regression: the loom DataPointCategory StrEnum's ``str()`` yields its

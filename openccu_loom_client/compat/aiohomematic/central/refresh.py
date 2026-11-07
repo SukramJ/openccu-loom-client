@@ -392,10 +392,10 @@ def _wire_schedules(*, group: SubscriptionGroup, store: LoomStore, ha_bus: AioEv
     Re-read a channel's week profile after a ``schedules.changed`` push.
 
     The broadcast deliberately carries no profile body — a week profile is
-    large and a subscriber only needs to invalidate. The device's
-    :class:`WeekProfileDp` is the one object holding the cached schedule
-    (and the entry count HA renders), so it re-reads, and the entity is
-    pinged afterwards so the new count reaches HA.
+    large and a subscriber only needs to invalidate. The
+    :class:`WeekProfileDp` of the pushed channel is the one object holding
+    that schedule's cache (and the entry count HA renders), so it re-reads,
+    and the entity is pinged afterwards so the new count reaches HA.
 
     A device without a schedule entity — most of them — is skipped
     without a fetch. The push also fires for a profile this client wrote
@@ -405,8 +405,17 @@ def _wire_schedules(*, group: SubscriptionGroup, store: LoomStore, ha_bus: AioEv
 
     async def on_schedule_changed(event: LoomScheduleChangedEvent) -> None:
         p = event.payload
-        wp_dp = store.get_week_profile_data_point(address=p.device_address)
-        if wp_dp is None or getattr(wp_dp, "channel_no", None) != p.channel:
+        # A device carries up to two schedules on two channels (HmIP-WGT/WGTC);
+        # the push names the channel, so it reaches only the schedule there.
+        wp_dp = next(
+            (
+                dp
+                for dp in store.get_week_profile_data_points(address=p.device_address)
+                if getattr(dp, "channel_no", None) == p.channel
+            ),
+            None,
+        )
+        if wp_dp is None:
             return
         try:
             await wp_dp.reload_schedule()

@@ -219,10 +219,13 @@ class LoomStore:
         # Same hook for Custom Data Points — the compat layer injects a
         # factory that returns the right categorised ``CustomDp*`` class.
         self._cdp_factory: Callable[..., CustomDataPoint] | None = None
-        # Per-device week-profile data point (the compat layer's
-        # ``WeekProfileDp``), registered by the adapter at bootstrap so the
-        # base :class:`Device` can expose it as ``week_profile_data_point``.
-        self._week_profile_dps: dict[str, Any] = {}
+        # Per-device week-profile data points (the compat layer's
+        # ``WeekProfileDp`` / ``ClimateWeekProfileDp``), registered by the
+        # adapter at bootstrap so the base :class:`Device` can expose them.
+        # Keyed by address, then by kind (``True`` = climate schedule): a
+        # device carries at most one schedule of each kind, as in
+        # aiohomematic's ``Device`` (HmIP-WGT/WGTC carry both).
+        self._week_profile_dps: dict[str, dict[bool, Any]] = {}
 
     # ---- central identity ----
 
@@ -584,13 +587,18 @@ class LoomStore:
 
     # ---- week-profile data points ----
 
-    def set_week_profile_data_point(self, *, address: str, data_point: Any) -> None:
-        """Register a device's week-profile data point (built by the compat adapter)."""
-        self._week_profile_dps[address] = data_point
+    def set_week_profile_data_point(self, *, address: str, data_point: Any, climate: bool) -> None:
+        """Register a device's climate or default week-profile data point (built by the compat adapter)."""
+        self._week_profile_dps.setdefault(address, {})[climate] = data_point
 
-    def get_week_profile_data_point(self, *, address: str) -> Any:
-        """Return a device's week-profile data point, or ``None`` if it has none."""
-        return self._week_profile_dps.get(address)
+    def get_week_profile_data_point(self, *, address: str, climate: bool) -> Any:
+        """Return a device's climate or default week-profile data point, or ``None`` if it has none."""
+        return self._week_profile_dps.get(address, {}).get(climate)
+
+    def get_week_profile_data_points(self, *, address: str) -> tuple[Any, ...]:
+        """Return a device's week-profile data points, the default schedule ahead of the climate one."""
+        by_kind = self._week_profile_dps.get(address, {})
+        return tuple(dp for dp in (by_kind.get(False), by_kind.get(True)) if dp is not None)
 
     # ---- programs ----
 
@@ -1213,9 +1221,9 @@ class LoomStore:
         stale_cdps = [cdp_key for cdp_key in self._cdps if cdp_key[0] == addr]
         for cdp_key in stale_cdps:
             self._drop_cdp(key=cdp_key)
-        # The per-device week-profile DP is registered outside the channel
-        # graph, so channel GC never reaches it — drop it explicitly, else
-        # it accrues across unpair events (a slow leak).
+        # The per-device week-profile DPs are registered outside the channel
+        # graph, so channel GC never reaches them — drop them explicitly, else
+        # they accrue across unpair events (a slow leak).
         self._week_profile_dps.pop(addr, None)
 
     def apply_sysvar_changed(self, *, payload: SysvarChangedPayload) -> None:

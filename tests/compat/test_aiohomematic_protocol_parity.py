@@ -54,12 +54,14 @@ from aiohomematic.interfaces.model import (
     CallbackDataPointProtocol,
     ClimateWeekProfileDataPointProtocol,
     CustomDataPointProtocol,
+    DeviceProtocol,
     GenericDataPointProtocol,
     GenericProgramDataPointProtocol,
     GenericSysvarDataPointProtocol,
 )
 
 from openccu_loom_client.compat.aiohomematic.model import custom as _custom, generic as _generic, hub as _hub
+from openccu_loom_client.model.device import Device
 from openccu_loom_client.store import LoomStore
 from openccu_loom_client.wire.enums import DataPointCategory
 from openccu_loom_client.wire.rest import CustomDPSummary, DataPointSummary, Operations, ProgramSummary, SysvarSummary
@@ -276,10 +278,10 @@ def test_climate_week_profile_twin_satisfies_its_protocol() -> None:
     """
     The climate twin must satisfy the protocol the integration gates on.
 
-    `homematicip_local` reads `device.week_profile_data_point` and keeps it
-    only when it satisfies `ClimateWeekProfileDataPointProtocol`
-    (`climate.py:141-144`, `sensor.py:329`) — nine `isinstance` sites, the most
-    of any protocol there. A twin that failed it would leave the climate entity
+    `homematicip_local` reads `device.climate_week_profile_data_point` for the
+    climate entity and dispatches the week-profile sensor and the schedule
+    services on `ClimateWeekProfileDataPointProtocol` (`climate.py:141`,
+    `sensor.py:328`). A twin that failed it would leave the climate entity
     without its week-profile surface, silently.
 
     Two classes serve that attribute and only one is supposed to match:
@@ -303,6 +305,48 @@ def test_climate_week_profile_twin_satisfies_its_protocol() -> None:
         "WeekProfileDp now satisfies the climate protocol too, so the isinstance split the adapter and the "
         "integration rely on no longer discriminates. Either that is intended and both sides need a new "
         "discriminator, or a climate-only member leaked onto the base class."
+    )
+
+
+# Week-profile members of aiohomematic's `DeviceProtocol` the loom `Device`
+# does not carry. Three return aiohomematic's `WeekProfile` objects, the
+# reference's internal schedule model, which this backend has no twin for: the
+# daemon owns the schedule. Two are the reference model wiring itself up — a
+# custom data point initialising the profile (`model/custom/data_point.py`) and
+# the data-point factory registering its result
+# (`model/week_profile_data_point.py`); the compat adapter does that job here.
+# None of the five is read by homematicip_local or aiohomematic-config
+# (`schedule_facade.py`); both go through the data points.
+_DEVICE_WEEK_PROFILE_EXEMPT: dict[str, str] = {
+    "climate_week_profile": "aiohomematic WeekProfile object; consumers read climate_week_profile_data_point",
+    "has_week_profile": "reference model flag; no consumer reads it",
+    "init_week_profile": "reference model wiring; the compat adapter spawns the schedules",
+    "set_week_profile_data_point": "reference model wiring; the compat adapter registers on the store",
+    "week_profile": "aiohomematic WeekProfile object; consumers read week_profile_data_point",
+    "week_profiles": "aiohomematic WeekProfile objects; consumers read week_profile_data_points",
+}
+
+
+def test_device_carries_the_week_profile_data_points_of_the_reference() -> None:
+    """
+    The loom `Device` must expose every week-profile data point the reference device does.
+
+    homematicip_local 2.12.4 reads `device.climate_week_profile_data_point` in
+    the climate entity and `device.week_profile_data_points` in the
+    week-profile sensor. A `Device` without them raised `AttributeError` in the
+    platform setup and no climate entity was created on this backend at all.
+    Nothing caught it: the protocol checks here covered data-point twins only,
+    never the device they hang off. The member set is read from
+    `DeviceProtocol` itself, so the next week-profile member upstream adds
+    fails here instead of in a user's log.
+    """
+    members = sorted(name for name in _protocol_attrs(DeviceProtocol) if "week_profile" in name)
+    stale = sorted(set(_DEVICE_WEEK_PROFILE_EXEMPT) - set(members))
+    assert stale == [], f"exemptions name members DeviceProtocol no longer has: {stale}"
+    missing = sorted(name for name in members if name not in _DEVICE_WEEK_PROFILE_EXEMPT and not hasattr(Device, name))
+    assert missing == [], (
+        f"loom Device misses {missing} of aiohomematic's DeviceProtocol — a consumer reading them raises "
+        "AttributeError on this backend"
     )
 
 

@@ -1,4 +1,26 @@
-# Version 2026.11.2 (unreleased)
+# Version 2026.11.2 (2026-11-07)
+
+- **Climate entities work again with homematicip_local 2.12.4.** The
+  integration reads `device.climate_week_profile_data_point` and
+  `device.week_profile_data_points`, which aiohomematic 2026.11.3 added. The
+  loom `Device` had neither, so platform setup raised `AttributeError` and no
+  climate entity and no week-profile sensor was created on this backend.
+  `Device` now has both, with aiohomematic's rules: `week_profile_data_point`
+  prefers the default schedule, `week_profile_data_points` lists the default
+  schedule first.
+- **Glass wall thermostats get their heating schedule.** An HmIP-WGT or
+  HmIP-WGTC carries a switch schedule on channel 7 and a heating schedule on
+  channel 8. The adapter used to probe one schedule channel per device, so the
+  heating schedule never loaded. It now probes the WEEK_PROFILE channel and
+  the climate channel, and the store holds one schedule of each kind per
+  device. A daemon before api 15.6.0 (openccu-loom 0.97.1) gives both schedules
+  the same `unique_id`; there the heating schedule is skipped and the device
+  keeps its switch schedule, as before. A `schedules.changed` push reloads the
+  schedule on the pushed channel only.
+- **New guard: the loom `Device` carries the week-profile data points of
+  aiohomematic's `DeviceProtocol`.** The member set is read from the protocol,
+  so a week-profile member added upstream fails the test, not a user's setup.
+  Five reference-internal members are listed as exempt with the reason.
 
 - **Light on-time travels with the switch-on.** If the daemon advertises
   `cdp.bounded_on.v1` (openccu-loom api 15.5.0), a dimmer sends a staged
