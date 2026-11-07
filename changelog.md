@@ -1,4 +1,16 @@
-# Version 2026.11.1 (unreleased)
+# Version 2026.11.2 (unreleased)
+
+- **Light on-time travels with the switch-on.** If the daemon advertises
+  `cdp.bounded_on.v1` (openccu-loom api 15.5.0), a dimmer sends a staged
+  on-time as `seconds` on its final `turn_on` / `set_level`. Colour, kelvin
+  and effect are sent first, so the on-time is in the last write.
+  `Capability.CDP_BOUNDED_ON` and `LoomStore.has_capability` are new. An older
+  daemon only has its own `set_timer_on_time` stage, so there the on-time is
+  applied only to a plain `turn_on`. Combined with brightness, colour or
+  effect it is dropped with a warning, and is no longer left staged on the
+  daemon for a later switch-on.
+
+# Version 2026.11.1 (2026-11-07)
 
 - **`switch_set_on_time`, `light_set_on_time` and `valve_set_on_time` work
   again.** Home Assistant calls `set_timer_on_time` without `await` and then

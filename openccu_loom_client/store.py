@@ -307,6 +307,18 @@ class LoomStore:
         """Return the bound transport, or ``None`` if none is attached yet."""
         return self._transport
 
+    def has_capability(self, *, capability: str) -> bool:
+        """
+        Report whether the daemon behind the bound transport advertises ``capability``.
+
+        The store-side twin of :meth:`LoomClient.has_capability`, for the model
+        objects that reach the daemon through the store and pick an operation
+        by what the daemon understands. ``False`` without a transport or
+        before its handshake: no evidence the feature is there.
+        """
+        info = self._transport.info if self._transport is not None else None
+        return info is not None and capability in (info.capabilities or [])
+
     # ---- operation façades ----
     #
     # The store used to build its own requests. Seventeen of its eighteen path
