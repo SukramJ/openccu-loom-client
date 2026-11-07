@@ -50,6 +50,12 @@ class Capability(StrEnum):
     #: A central can be an openccu-lite system (``system_type``
     #: ``openccu-lite``).
     SOUTH_OPENCCU_LITE = "south.openccu_lite.v1"
+    #: Always emitted from api 15.5.0 on. Every custom-data-point switch-on
+    #: that can be bounded takes its duration in the command as
+    #: ``seconds``: the switch's ``turn_on_for``, the valve's ``open`` and
+    #: the light's ``turn_on`` / ``set_level``. Without it, a light has only
+    #: the daemon-side ``set_timer_on_time`` stage.
+    CDP_BOUNDED_ON = "cdp.bounded_on.v1"
     # Emitted when the matching subsystem is configured.
     ALARM = "alarm.v1"
     HISTORY = "history.v1"

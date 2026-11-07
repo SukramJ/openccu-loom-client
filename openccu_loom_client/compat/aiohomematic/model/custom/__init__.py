@@ -34,6 +34,7 @@ import logging
 from typing import TYPE_CHECKING, Any, ClassVar, Final
 
 from openccu_loom_client.canonical import canonical_unique_id
+from openccu_loom_client.capabilities import Capability
 from openccu_loom_client.compat.aiohomematic._upstream import ClimateMode, ClimateProfile
 from openccu_loom_client.compat.aiohomematic.model._protocol_surface import _CustomProtocolSurface, _NameData
 from openccu_loom_client.model import CustomDataPoint
@@ -457,13 +458,24 @@ class CustomDpDimmer(_CustomEntitySurface):
         """
         Turn the light on, optionally setting brightness, colour, kelvin, or effect.
 
-        A staged or explicit on-time reaches the daemon only on a plain
-        switch-on: the daemon has no light operation that carries a duration,
-        only its own ``set_timer_on_time`` staging, which its ``turn_on``
-        consumes (one ON_TIME + LEVEL write) and its ``set_level`` ignores. The
-        two calls go back to back so the daemon-side stage is never left open.
+        A staged or explicit on-time travels with the switch-on as ``seconds``
+        on a daemon that advertises ``cdp.bounded_on.v1``: colour, kelvin and
+        effect go first, and the final ``turn_on`` / ``set_level`` writes the
+        on-time together with the level. An older daemon has only its own
+        ``set_timer_on_time`` stage, which its ``turn_on`` consumes and its
+        ``set_level`` ignores; there the on-time reaches only a plain
+        switch-on, and the two calls go back to back.
         """
         seconds = self._consume_timer_on_time(on_time=_kwargs.pop("on_time", None))
+        if seconds is not None and self._store.has_capability(capability=Capability.CDP_BOUNDED_ON):
+            await self._turn_on_bounded(
+                seconds=seconds,
+                brightness=brightness,
+                hs_color=hs_color,
+                color_temp_kelvin=color_temp_kelvin,
+                effect=effect,
+            )
+            return
         plain = hs_color is None and color_temp_kelvin is None and effect is None and brightness is None
         if seconds is not None and plain:
             await self.invoke(operation="set_timer_on_time", params={"seconds": seconds})
@@ -489,6 +501,27 @@ class CustomDpDimmer(_CustomEntitySurface):
             await self.invoke(operation="set_level", params={"brightness": int(brightness)})
         elif hs_color is None and color_temp_kelvin is None and effect is None:
             await self.invoke(operation="turn_on")
+
+    async def _turn_on_bounded(
+        self,
+        *,
+        seconds: float,
+        brightness: int | None,
+        hs_color: tuple[float, float] | None,
+        color_temp_kelvin: int | None,
+        effect: str | None,
+    ) -> None:
+        """Set colour, kelvin and effect, then switch on bounded by ``seconds`` in one write."""
+        if hs_color is not None:
+            await self.invoke(operation="set_color", params={"hue": hs_color[0], "saturation": hs_color[1]})
+        if color_temp_kelvin is not None:
+            await self.invoke(operation="set_kelvin", params={"kelvin": int(color_temp_kelvin)})
+        if effect is not None:
+            await self.invoke(operation="set_effect", params={"effect": effect})
+        if brightness is not None:
+            await self.invoke(operation="set_level", params={"brightness": int(brightness), "seconds": seconds})
+            return
+        await self.invoke(operation="turn_on", params={"seconds": seconds})
 
     async def turn_off(self, **_kwargs: Any) -> None:
         """Turn the light off and drop a staged on-time."""
