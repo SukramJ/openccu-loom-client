@@ -4781,7 +4781,7 @@ class WeekProfileResponse(BaseModel):
     address: str
     unique_id: str = Field(
         ...,
-        description='Canonical loom-namespaced routing key for the device-level\nweek-profile sensor entity\n(`loom_week_profile_<device-addr>_week_profile`), built over the\nowning device address + parameter "WEEK_PROFILE" + prefix\n"week_profile". Bit-identical to the client-synthesised key so the\nclient consumes it instead of recomputing it. Always present and\nnon-empty (the serial-readiness gate guarantees the central-id slot).\n',
+        description='Canonical loom-namespaced routing key for the device-level\nweek-profile sensor entity\n(`loom_week_profile_<device-addr>_week_profile`), built over the\nowning device address + parameter "WEEK_PROFILE" + prefix\n"week_profile". A climate schedule that shares its device with a\nsecond schedule (HmIP-WGT, HmIP-WGTC) takes the prefix\n"climate_week_profile" instead\n(`loom_climate_week_profile_<device-addr>_week_profile`), as in the\nreference stack, so the two schedules of one device never share a\nkey (since 15.6.0). Bit-identical to the client-synthesised key so\nthe client consumes it instead of recomputing it. Always present and\nnon-empty (the serial-readiness gate guarantees the central-id slot).\n',
     )
     schedule_type: ScheduleType
     min_temp: float
