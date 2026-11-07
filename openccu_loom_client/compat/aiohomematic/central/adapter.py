@@ -88,6 +88,7 @@ from openccu_loom_client.compat.aiohomematic.model.custom import (
     CustomDpSoundPlayer,
     make_custom_data_point,
 )
+from openccu_loom_client.compat.aiohomematic.model.event import make_generic_event
 from openccu_loom_client.compat.aiohomematic.model.event_group import build_event_groups
 from openccu_loom_client.compat.aiohomematic.model.generic import make_generic_data_point
 from openccu_loom_client.compat.aiohomematic.model.hub import make_program_data_points, make_sysvar_data_point
@@ -1219,6 +1220,7 @@ class LoomCentralAdapter:
         client.store.set_data_point_factory(factory=make_generic_data_point)
         client.store.set_calculated_data_point_factory(factory=make_calculated_data_point)
         client.store.set_custom_data_point_factory(factory=make_custom_data_point)
+        client.store.set_generic_event_factory(factory=make_generic_event)
         client.store.set_alarm_panel_factory(factory=make_alarm_panel_data_point)
         # Hub entities follow the same rule: one live object per entity, owned
         # by the store, so a catalogue refresh or a push reaches the instance

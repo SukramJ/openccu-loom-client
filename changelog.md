@@ -1,3 +1,23 @@
+# Version 2026.11.3 (2026-11-07)
+
+- **Device actions and device triggers work on this backend.** Home Assistant
+  lists a device's actions from `device.generic_data_points` and its triggers
+  from `device.generic_events`; the loom `Device` had neither, so both raised
+  `AttributeError`. `generic_data_points` follows aiohomematic's creation
+  rules: a keypress source is generic only when writable, impulse and
+  device-error sources never, ignored parameters not at all, calculated data
+  points live apart. `generic_events` wraps every member of the event groups
+  the daemon declares in the new twins `ClickEvent`, `ImpulseEvent` and
+  `DeviceErrorEvent` (`compat/aiohomematic/model/event.py`) with
+  aiohomematic's `event_type`, `usage` and `get_event_data`. They are not
+  aiohomematic instances, so a consumer dispatching on
+  `aiohomematic.model.event.ClickEvent` has to pair it with the twin.
+- **`Device.create_central_links()` / `remove_central_links()`.** They call the
+  daemon's device route. A device the daemon refuses as unsupported (422) is a
+  no-op, as aiohomematic skips a device that is not relevant for central-link
+  management; every other failure still raises.
+- The call-shape guard now covers the event twins.
+
 # Version 2026.11.2 (2026-11-07)
 
 - **Climate entities work again with homematicip_local 2.12.4.** The
