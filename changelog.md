@@ -1,4 +1,32 @@
-# Version 2026.11.0 (unreleased)
+# Version 2026.11.1 (unreleased)
+
+- **`switch_set_on_time`, `light_set_on_time` and `valve_set_on_time` work
+  again.** Home Assistant calls `set_timer_on_time` without `await` and then
+  sends a separate `turn_on` / `open`, as aiohomematic expects. On the compat
+  twins `set_timer_on_time` was a coroutine, so the call was dropped unrun
+  and the next switch-on went out unbounded: an HMIP-PSM meant to run a
+  circulation pump for 900 s stayed on until switched off by hand. The
+  on-time is now staged on the twin, as aiohomematic does, and the next
+  switch-on consumes it. A switch sends one `turn_on_for`, so the daemon
+  writes ON_TIME and STATE together, even when the output is already on. A
+  valve sends `open` with `seconds`. Before, it sent `duration`, which the
+  daemon reads as milliseconds. `turn_off` / `close` drop a staged on-time.
+- **Light on-time: plain switch-on only.** A dimmer applies a staged on-time
+  only to a plain `turn_on`, via the daemon's `set_timer_on_time` +
+  `turn_on`. Combined with brightness, colour or effect, the daemon has no
+  operation that carries a duration, so the on-time is dropped with a
+  warning. It is no longer left staged on the daemon for some later
+  switch-on.
+- **`event` is a coroutine, like aiohomematic's.** The integration's MQTT
+  consumer passes its result to `hass.create_task`, which rejects `None`.
+- **New guard: twins keep aiohomematic's sync/async call shape.**
+  `test_twin_methods_have_the_reference_call_shape` compares every public
+  method a twin shares with its aiohomematic class. The protocol checks
+  prove that a member exists, but cannot tell a coroutine from a plain
+  method. Six member names that no consumer calls remain as a listed
+  ratchet.
+
+# Version 2026.11.0 (2026-11-03)
 
 - **`CustomDpTextDisplay.send_text` for the compat layer.** Home Assistant's
   notify entity for HmIP text displays (`HmIP-WRCD`, `HmIP-BSL` display

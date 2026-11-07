@@ -30,6 +30,7 @@ State-key reference (daemon ``internal/payload/state.go`` +
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any, ClassVar, Final
 
 from openccu_loom_client.canonical import canonical_unique_id
@@ -40,6 +41,8 @@ from openccu_loom_client.wire.enums import DataPointCategory
 
 if TYPE_CHECKING:
     from openccu_loom_client.store import LoomStore
+
+_LOGGER: Final = logging.getLogger(__name__)
 
 # Valid wire tokens for the aiohomematic climate enums; unknown daemon
 # tokens are skipped instead of raising on enum construction.
@@ -300,17 +303,23 @@ class CustomDpSwitch(_CustomEntitySurface):
         # collapses that server-side, so there is no separate group value.
         return None
 
-    async def turn_on(self, **_kwargs: Any) -> None:
-        """Turn the switch on."""
+    async def turn_on(self, *, on_time: float | None = None, **_kwargs: Any) -> None:
+        """
+        Turn the switch on, bounded by an explicit or staged on-time.
+
+        A bounded switch-on is one ``turn_on_for``: the daemon writes ON_TIME and
+        STATE together, and does so even when the output is already on, so a
+        running pump picks up the new timer.
+        """
+        if (seconds := self._consume_timer_on_time(on_time=on_time)) is not None:
+            await self.invoke(operation="turn_on_for", params={"seconds": seconds})
+            return
         await self.invoke(operation="turn_on")
 
     async def turn_off(self, **_kwargs: Any) -> None:
-        """Turn the switch off."""
+        """Turn the switch off and drop a staged on-time."""
+        self.reset_timer_on_time()
         await self.invoke(operation="turn_off")
-
-    async def set_timer_on_time(self, *, on_time: float) -> None:
-        """Turn on for a fixed duration (daemon ``turn_on_for``)."""
-        await self.invoke(operation="turn_on_for", params={"seconds": float(on_time)})
 
 
 # ---- light ----
@@ -436,10 +445,6 @@ class CustomDpDimmer(_CustomEntitySurface):
         # Last-brightness restore is HA-side bookkeeping; no daemon write.
         self._state["brightness"] = value
 
-    async def set_timer_on_time(self, *, on_time: float) -> None:
-        """Turn on for a fixed duration in seconds."""
-        await self.invoke(operation="set_timer_on_time", params={"seconds": float(on_time)})
-
     async def turn_on(
         self,
         *,
@@ -449,7 +454,28 @@ class CustomDpDimmer(_CustomEntitySurface):
         effect: str | None = None,
         **_kwargs: Any,
     ) -> None:
-        """Turn the light on, optionally setting brightness, colour, kelvin, or effect."""
+        """
+        Turn the light on, optionally setting brightness, colour, kelvin, or effect.
+
+        A staged or explicit on-time reaches the daemon only on a plain
+        switch-on: the daemon has no light operation that carries a duration,
+        only its own ``set_timer_on_time`` staging, which its ``turn_on``
+        consumes (one ON_TIME + LEVEL write) and its ``set_level`` ignores. The
+        two calls go back to back so the daemon-side stage is never left open.
+        """
+        seconds = self._consume_timer_on_time(on_time=_kwargs.pop("on_time", None))
+        plain = hs_color is None and color_temp_kelvin is None and effect is None and brightness is None
+        if seconds is not None and plain:
+            await self.invoke(operation="set_timer_on_time", params={"seconds": seconds})
+            await self.invoke(operation="turn_on")
+            return
+        if seconds is not None:
+            _LOGGER.warning(
+                "%s: on-time %.1f s not applied — the daemon cannot bound a light switch-on that also sets "
+                "brightness, colour or effect",
+                self.full_name,
+                seconds,
+            )
         if hs_color is not None:
             await self.invoke(
                 operation="set_color",
@@ -465,7 +491,8 @@ class CustomDpDimmer(_CustomEntitySurface):
             await self.invoke(operation="turn_on")
 
     async def turn_off(self, **_kwargs: Any) -> None:
-        """Turn the light off."""
+        """Turn the light off and drop a staged on-time."""
+        self.reset_timer_on_time()
         await self.invoke(operation="turn_off")
 
     async def set_brightness(self, *, brightness: int) -> None:
@@ -1022,17 +1049,22 @@ class CustomDpIpIrrigationValve(_CustomEntitySurface):
         """Return the group-channel aggregate; always ``None`` under the daemon model."""
         return None
 
-    async def open(self) -> None:
-        """Open the valve."""
+    async def open(self, *, on_time: float | None = None, **_kwargs: Any) -> None:
+        """
+        Open the valve, bounded by an explicit or staged on-time.
+
+        The duration goes as ``seconds``: the daemon reads a bare number under
+        its ``duration`` alias as milliseconds.
+        """
+        if (seconds := self._consume_timer_on_time(on_time=on_time)) is not None:
+            await self.invoke(operation="open", params={"seconds": seconds})
+            return
         await self.invoke(operation="open")
 
-    async def close(self) -> None:
-        """Close the valve."""
+    async def close(self, **_kwargs: Any) -> None:
+        """Close the valve and drop a staged on-time."""
+        self.reset_timer_on_time()
         await self.invoke(operation="close")
-
-    async def set_timer_on_time(self, *, on_time: float) -> None:
-        """Open the valve for a fixed duration in seconds."""
-        await self.invoke(operation="open", params={"duration": float(on_time)})
 
 
 # ---- text display ----

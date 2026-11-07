@@ -411,3 +411,81 @@ def test_aiohomematic_custom_protocol_surface_has_not_drifted() -> None:
         f"  added (new upstream protocols): {sorted(added)}\n"
         f"  removed (gone upstream): {sorted(removed)}"
     )
+
+
+# --- call shape: sync vs. coroutine ---
+#
+# The protocol checks above prove a member *exists*; they cannot tell a
+# coroutine from a plain method, and that difference is invisible until the
+# integration calls it. `homematicip_local` calls `set_timer_on_time` without
+# `await` (`switch.py`, `light.py`, `valve.py`); on the twins it was a
+# coroutine, so the call created it and dropped it unrun and every
+# `*_set_on_time` service did nothing. Here every public method a twin shares
+# with its aiohomematic class must have the same call shape.
+#
+# The class pairing is the integration's own rule: `backend_types.py` pairs
+# each aiohomematic class with the twin of the same name in the matching
+# compat module (`_pair(CustomDpSwitch, "CustomDpSwitch", _c)`).
+_CALL_SHAPE_MODULE_PAIRS: tuple[tuple[str, str], ...] = (
+    ("aiohomematic.model.custom", "openccu_loom_client.compat.aiohomematic.model.custom"),
+    ("aiohomematic.model.generic", "openccu_loom_client.compat.aiohomematic.model.generic"),
+    ("aiohomematic.model.hub", "openccu_loom_client.compat.aiohomematic.model.hub"),
+)
+
+# Known divergences, by member name. None of these names is called on a data
+# point by `homematicip_local` or `aiohomematic-config` (grep of both trees for
+# `.<name>(` at the pinned versions). A name leaves this set when its twins are
+# aligned; the test fails while a listed name no longer diverges, so the set
+# cannot outlive its reason. A new divergence is not added here without
+# checking the consumers first.
+_KNOWN_CALL_SHAPE_DIVERGENCES: frozenset[str] = frozenset(
+    {
+        "finalize_init",
+        "on_config_changed",
+        "publish_data_point_updated_event",
+        "publish_device_removed_event",
+        "write_unconfirmed_value",
+        "write_value",
+    }
+)
+
+
+def _call_shape_divergences() -> dict[str, list[str]]:
+    import importlib
+    import inspect
+
+    found: dict[str, list[str]] = {}
+    for aio_name, loom_name in _CALL_SHAPE_MODULE_PAIRS:
+        aio_mod = importlib.import_module(aio_name)
+        loom_mod = importlib.import_module(loom_name)
+        for cls_name in sorted(set(dir(aio_mod)) & set(dir(loom_mod))):
+            aio_cls, loom_cls = getattr(aio_mod, cls_name), getattr(loom_mod, cls_name)
+            if not (inspect.isclass(aio_cls) and inspect.isclass(loom_cls)):
+                continue
+            for member in sorted(set(dir(aio_cls)) & set(dir(loom_cls))):
+                if member.startswith("_"):
+                    continue
+                if isinstance(inspect.getattr_static(aio_cls, member, None), property) or isinstance(
+                    inspect.getattr_static(loom_cls, member, None), property
+                ):
+                    continue
+                aio_fn, loom_fn = getattr(aio_cls, member), getattr(loom_cls, member)
+                if not (callable(aio_fn) and callable(loom_fn)):
+                    continue
+                aio_async = inspect.iscoroutinefunction(aio_fn)
+                if aio_async != inspect.iscoroutinefunction(loom_fn):
+                    shape = "async" if aio_async else "sync"
+                    found.setdefault(member, []).append(f"{cls_name} (aiohomematic: {shape})")
+    return found
+
+
+def test_twin_methods_have_the_reference_call_shape() -> None:
+    found = _call_shape_divergences()
+    new = {name: where for name, where in found.items() if name not in _KNOWN_CALL_SHAPE_DIVERGENCES}
+    assert not new, (
+        "compat twins differ from aiohomematic in sync/async call shape. A caller that does not await a "
+        "coroutine drops it unrun; one that awaits a plain method gets a TypeError. Align the twin:\n"
+        + "\n".join(f"  {name}: {', '.join(where)}" for name, where in sorted(new.items()))
+    )
+    stale = sorted(_KNOWN_CALL_SHAPE_DIVERGENCES - found.keys())
+    assert not stale, f"no longer divergent, drop from _KNOWN_CALL_SHAPE_DIVERGENCES: {stale}"

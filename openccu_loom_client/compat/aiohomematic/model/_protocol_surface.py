@@ -131,8 +131,14 @@ class _CommonProtocolSurface:
     def cleanup_subscriptions(self, *_args: Any, **_kwargs: Any) -> None:
         """No-op: subscriptions are owned by the client's event bus, not the DP."""
 
-    def event(self, *_args: Any, **_kwargs: Any) -> None:
-        """No-op: value/event ingestion flows through the daemon → store path."""
+    async def event(self, *_args: Any, **_kwargs: Any) -> None:
+        """
+        No-op: value/event ingestion flows through the daemon → store path.
+
+        A coroutine like the reference's: ``homematicip_local``'s MQTT consumer
+        hands the result straight to ``hass.create_task`` (``mqtt.py``), which
+        rejects ``None``.
+        """
 
     # ---- service-call introspection (no per-DP service registry on loom) ----
 
@@ -467,9 +473,18 @@ class _CustomProtocolSurface(_CommonProtocolSurface):
     def translated_full_name(self) -> str | None:
         return None
 
+    # The on-time staged for the next switch-on. The reference stages it on the
+    # data point and lets the next ``turn_on`` / ``open`` consume it, and
+    # ``homematicip_local`` relies on that: its ``*_set_on_time`` services call
+    # ``set_timer_on_time`` without ``await`` and then issue a separate
+    # ``turn_on``. Staging client-side keeps the daemon command stateless — the
+    # consuming call sends the duration with the switch-on in one operation, so
+    # no other daemon client can consume or inherit it.
+    _pending_on_time: float | None = None
+
     @property
     def timer_on_time(self) -> float | None:
-        return None
+        return self._pending_on_time
 
     @property
     def timer_on_time_running(self) -> bool:
@@ -489,10 +504,25 @@ class _CustomProtocolSurface(_CommonProtocolSurface):
         """No-op."""
 
     def reset_timer_on_time(self, *_args: Any, **_kwargs: Any) -> None:
-        """No-op."""
+        """Drop a staged on-time."""
+        self._pending_on_time = None
 
-    async def set_timer_on_time(self, *, on_time: float) -> None:
-        """No-op default: only CDP kinds with a timed-on operation override this."""
+    def set_timer_on_time(self, *, on_time: float) -> None:
+        """Stage ``on_time`` (seconds) for the next switch-on; sends nothing."""
+        self._pending_on_time = on_time
+
+    def _consume_timer_on_time(self, *, on_time: float | None = None) -> float | None:
+        """
+        Return the on-time for this switch-on and clear the staged one.
+
+        An explicit ``on_time`` wins over a staged one, as in the reference. A
+        non-positive value means "no timer": the daemon rejects it, and the
+        reference's only use of it — cancelling a still-running timer — has no
+        daemon operation.
+        """
+        staged, self._pending_on_time = self._pending_on_time, None
+        seconds = on_time if on_time is not None else staged
+        return float(seconds) if seconds is not None and seconds > 0 else None
 
     def unsubscribe_from_data_point_updated(self, *_args: Any, **_kwargs: Any) -> None:
         """No-op: the client owns subscriptions."""
