@@ -1349,7 +1349,17 @@ class ServiceMessage(BaseModel):
     rooms: list[str] | None = Field(None, description="Rooms assigned to the triggering channel.")
     functions: list[str] | None = Field(None, description="Functions (Gewerke) assigned to the triggering channel.")
     quittable: bool
-    display_name: str | None = Field(None, description="Human-readable translation of the message code.")
+    display_name: str | None = Field(
+        None,
+        description='Human-readable translation of the message code. For an enum\ntrigger datapoint it is the translation of `value_text` when\nthere is one (ERROR 7 reads "Sabotage" like in the CCU WebUI).\n',
+    )
+    value: str | None = Field(
+        None, description='The alarm\'s value as the CCU prints it ("7"). Omitted when the\nCCU reports none.\n'
+    )
+    value_text: str | None = Field(
+        None,
+        description='The value-list entry the CCU resolved `value` to for an enum\ntrigger datapoint ("SABOTAGE"). Omitted for every other\ndatapoint type and for a list slot without a name.\n',
+    )
 
 
 class SuppressedServiceMessage(BaseModel):
