@@ -698,6 +698,16 @@ def _to_service_message(*, message: Any) -> ServiceMessageData:
     all along, the loader never read them. ``description`` and
     ``priority`` went the other way — the script never emitted either, so
     both are gone from the wire and the record carries no slot for them.
+
+    ``value`` and ``value_text`` arrived with daemon api 15.7.0: the CCU
+    names the alarm of an enum parameter after parameter and value
+    (``AL-NEQ0632439:1.ERROR-7``), and the daemon reports the value and
+    the value-list entry it resolves to (``SABOTAGE``) beside the
+    ``display_name`` it already translated from them. An older daemon
+    omits both, and the record keeps aiohomematic's empty defaults.
+    ``message_code`` stays empty: aiohomematic derives it from the name
+    itself, and the daemon's ``display_name`` is what every consumer
+    renders.
     """
     return ServiceMessageData(
         msg_id=message.id,
@@ -709,6 +719,8 @@ def _to_service_message(*, message: Any) -> ServiceMessageData:
         msg_type=0,
         msg_type_name=message.type or "",
         display_name=message.display_name or "",
+        value=message.value or "",
+        value_text=message.value_text or "",
         address=message.address or "",
         device_name=message.device_name or "",
         counter=message.counter or 0,

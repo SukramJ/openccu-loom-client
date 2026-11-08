@@ -1921,3 +1921,39 @@ class TestBackupForbiddenIsNotSwallowed:
         central, mock_daemon = connected
         mock_daemon.post(f"{_BASE}/backups", status=500, payload={"status": 500})
         assert await central.create_backup_and_download() is None
+
+
+class TestServiceMessageEnumValue:
+    """``value`` / ``value_text`` of daemon api 15.7.0 reach the aiohomematic record."""
+
+    def test_value_and_value_text_are_handed_through(self) -> None:
+        """An HM-Sec-SCo sabotage: the CCU names the alarm ERROR-7, the daemon resolves it."""
+        message = ServiceMessage.model_validate(
+            {
+                "id": "7249",
+                "name": "AL-NEQ0632439:1.ERROR-7",
+                "address": "NEQ0632439:1",
+                "device_name": "Buero_Fenster_Hof",
+                "type": "GENERIC",
+                "timestamp": datetime(2026, 11, 7, 17, 19, 27, tzinfo=UTC),
+                "counter": 1,
+                "quittable": True,
+                "display_name": "Sabotage",
+                "value": "7",
+                "value_text": "SABOTAGE",
+            }
+        )
+        record = adapter_module._to_service_message(message=message)
+        assert record.display_name == "Sabotage"
+        assert record.value == "7"
+        assert record.value_text == "SABOTAGE"
+        assert dataclasses.asdict(record)["value_text"] == "SABOTAGE"
+
+    def test_older_daemon_leaves_the_defaults(self) -> None:
+        """A daemon before api 15.7.0 omits both fields; the record keeps aiohomematic's empty strings."""
+        message = ServiceMessage.model_validate(
+            {"id": "1", "name": "AL-ABC:0.LOW_BAT", "counter": 1, "quittable": False, "display_name": "Low battery"}
+        )
+        record = adapter_module._to_service_message(message=message)
+        assert record.value == ""
+        assert record.value_text == ""
