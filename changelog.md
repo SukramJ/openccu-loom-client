@@ -1,3 +1,16 @@
+# Version 2026.11.4 (2026-11-08)
+
+- **Service messages carry the CCU's value and value text.** The CCU names
+  the alarm of an enum parameter after parameter and value
+  (`AL-NEQ0632439:1.ERROR-7`, an HM-Sec-SCo sabotage). Daemon api 15.7.0
+  reports that `value` and the value-list entry it resolves to
+  (`value_text`, `SABOTAGE`) beside the `display_name` it translates from
+  them ("Sabotage" instead of `ERROR-7`); `_to_service_message` hands both
+  through to aiohomematic's `ServiceMessageData`, whose fields of the same
+  name arrived with aiohomematic 2026.11.5. An older daemon omits both and
+  the record keeps the empty defaults. Wire layer regenerated against daemon
+  api 15.7.0.
+
 # Version 2026.11.3 (2026-11-07)
 
 - **Device actions and device triggers work on this backend.** Home Assistant
