@@ -523,6 +523,13 @@ class ClimateWeekProfileDp(WeekProfileDp):
             _to_schedule_profile(value=week_profile.current_profile, default=None) or ScheduleProfile.P1
         )
 
+    def _replace_week_profile(self, *, week_profile: WeekProfileResponse) -> None:
+        """Replace the descriptor in place, and let the active profile follow the daemon's."""
+        super()._replace_week_profile(week_profile=week_profile)
+        self._current_schedule_profile = (
+            _to_schedule_profile(value=week_profile.current_profile, default=None) or ScheduleProfile.P1
+        )
+
     # ---- profile metadata ----
 
     @property

@@ -24,8 +24,8 @@
   extras by `unique_id`, the store takes a calculated record in place, and a
   second pass against an unchanged daemon announces nothing (#236).
 - **A schema-digest mismatch warns only across an API major.** A daemon an
-  additive minor ahead (built for 15.2, daemon at 15.7 in openccu-loom#1053)
-  logged a WARNING on every connect. It is now INFO with the same wording;
+  additive minor ahead (a client built for api 15.2 against a newer 15.x
+  daemon, the log of openccu-loom#1053) logged a WARNING on every connect. It is now INFO with the same wording;
   a different major, or an unparsable version, still warns.
 - **Wire layer regenerated for daemon 0.99.0 (api 15.9.0).** It spans 15.8.0
   (node routes `GET /node/endpoints/{ep}`, `GET /node/endpoints/{ep}/events`,

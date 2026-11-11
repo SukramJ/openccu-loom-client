@@ -56,7 +56,15 @@ from openccu_loom_client.events import (
     new_daemon_latency_changed_event,
     new_data_points_created_event,
 )
-from openccu_loom_client.exceptions import BaseLoomException, LoomIncompatibleVersionError, LoomNotFoundError
+from openccu_loom_client.exceptions import (
+    BaseLoomException,
+    LoomBoxGateError,
+    LoomHttpError,
+    LoomIncompatibleVersionError,
+    LoomNotFoundError,
+    LoomRateLimitedError,
+    LoomTransportError,
+)
 from openccu_loom_client.operations import (
     AlarmOperations,
     BackupOperations,
@@ -185,6 +193,20 @@ def _channel_dp_map(
         entry.device_address: {channel.number: list(channel.data_points or ()) for channel in entry.channels or ()}
         for entry in device_channels or ()
     }
+
+
+def _is_transient_readiness_error(*, err: BaseLoomException) -> bool:
+    """
+    Return whether a ``GET /system/ccu`` failure is worth retrying.
+
+    Transient: the daemon unreachable or restarting (a transport error), or a
+    server-side or throttling answer. Not transient: a 4xx such as the 404 of an
+    older daemon without the route or a narrowed credential's 403, and the
+    transport errors that are verdicts (incompatible version, box gate).
+    """
+    if isinstance(err, LoomHttpError):
+        return err.status >= 500 or isinstance(err, LoomRateLimitedError)
+    return isinstance(err, LoomTransportError) and not isinstance(err, (LoomIncompatibleVersionError, LoomBoxGateError))
 
 
 class LoomClient:
@@ -371,11 +393,31 @@ class LoomClient:
         may mediate several CCUs and another one's readiness says nothing about
         this client's. ``None`` when the endpoint is unreadable (an older
         daemon, or a credential the daemon narrows the CCU coordinates away
-        from).
+        from) — and, here, on a transient failure too; :meth:`wait_until_ready`
+        tells the two apart.
+        """
+        try:
+            return await self._read_readiness()
+        except BaseLoomException as err:
+            _LOGGER.debug("readiness unavailable (GET /system/ccu): %s", err)
+            return None
+
+    async def _read_readiness(self) -> Readiness | None:
+        """
+        Read readiness like :meth:`get_readiness`, but raise a transient failure.
+
+        ``None`` means the daemon does not report readiness to this client (an
+        older daemon without the route, a narrowed credential). A transport
+        error or a server-side answer (5xx, throttling) while the daemon is
+        coming up says nothing about that and is raised, so a waiter retries
+        instead of reading it as "no readiness here" and walking a half-built
+        model (openccu-loom#1053).
         """
         try:
             entries = await self.system.list_system_ccus()
         except BaseLoomException as err:
+            if _is_transient_readiness_error(err=err):
+                raise
             _LOGGER.debug("readiness unavailable (GET /system/ccu): %s", err)
             return None
         if not entries:
@@ -416,7 +458,20 @@ class LoomClient:
         deadline = asyncio.get_running_loop().time() + timeout_seconds
         logged = False
         while True:
-            readiness = await self.get_readiness()
+            try:
+                readiness = await self._read_readiness()
+            except BaseLoomException as err:
+                # Transient (the daemon restarting, a 5xx): not an answer — retry.
+                if asyncio.get_running_loop().time() >= deadline:
+                    _LOGGER.warning(
+                        "daemon readiness still unreadable after %.0fs (%s) — continuing anyway",
+                        timeout_seconds,
+                        err,
+                    )
+                    return False
+                _LOGGER.debug("readiness read failed transiently (GET /system/ccu): %s — retrying", err)
+                await asyncio.sleep(_READINESS_POLL_SECONDS)
+                continue
             if readiness is None:
                 return True  # nothing reports readiness here; never block on it
             if readiness.ready:

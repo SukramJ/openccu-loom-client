@@ -2066,3 +2066,32 @@ class TestRebootstrapKeepsIdentity:
             dp for dp in first.values() if isinstance(dp, CalculatedDpBinarySensor)
         )
         assert adapter._update_data_points_of_store() == [next(dp for dp in first.values() if isinstance(dp, DpUpdate))]
+
+    async def test_climate_week_profile_follows_the_daemons_current_profile(self) -> None:
+        from openccu_loom_client.compat.aiohomematic.model.week_profile import ClimateWeekProfileDp
+        from tests.unit.test_parity_round5 import (
+            _adapter_for,
+            _cdp_summary,
+            _channel,
+            _FakeSchedulesOps,
+            _store_with_device,
+            _week_profile_response,
+        )
+
+        store = _store_with_device(channels=[_channel(address="VCU1", number=1, name="Thermostat KU:1")])
+        store.attach_custom_data_points(device_address="VCU1", cdps=[_cdp_summary()])
+        descriptor = _week_profile_response(address="VCU1", channel=1, schedule_type="climate")
+        schedules = _FakeSchedulesOps(
+            week_profiles={("VCU1", 1): descriptor.model_copy(update={"current_profile": "P1"})}
+        )
+        adapter = _adapter_for(store, schedules=schedules)
+        await adapter._bootstrap_schedules()
+        (first,) = list(adapter._extra_data_points)
+        assert isinstance(first, ClimateWeekProfileDp)
+        assert first.current_schedule_profile.value == "P1"
+
+        # The operator switched the active profile while the client was away.
+        schedules.week_profiles[("VCU1", 1)] = descriptor.model_copy(update={"current_profile": "P3"})
+        await adapter._bootstrap_schedules()
+        assert list(adapter._extra_data_points) == [first]
+        assert first.current_schedule_profile.value == "P3"
