@@ -56,7 +56,15 @@ from openccu_loom_client.events import (
     new_daemon_latency_changed_event,
     new_data_points_created_event,
 )
-from openccu_loom_client.exceptions import BaseLoomException, LoomIncompatibleVersionError, LoomNotFoundError
+from openccu_loom_client.exceptions import (
+    BaseLoomException,
+    LoomBoxGateError,
+    LoomHttpError,
+    LoomIncompatibleVersionError,
+    LoomNotFoundError,
+    LoomRateLimitedError,
+    LoomTransportError,
+)
 from openccu_loom_client.operations import (
     AlarmOperations,
     BackupOperations,
@@ -185,6 +193,20 @@ def _channel_dp_map(
         entry.device_address: {channel.number: list(channel.data_points or ()) for channel in entry.channels or ()}
         for entry in device_channels or ()
     }
+
+
+def _is_transient_readiness_error(*, err: BaseLoomException) -> bool:
+    """
+    Return whether a ``GET /system/ccu`` failure is worth retrying.
+
+    Transient: the daemon unreachable or restarting (a transport error), or a
+    server-side or throttling answer. Not transient: a 4xx such as the 404 of an
+    older daemon without the route or a narrowed credential's 403, and the
+    transport errors that are verdicts (incompatible version, box gate).
+    """
+    if isinstance(err, LoomHttpError):
+        return err.status >= 500 or isinstance(err, LoomRateLimitedError)
+    return isinstance(err, LoomTransportError) and not isinstance(err, (LoomIncompatibleVersionError, LoomBoxGateError))
 
 
 class LoomClient:
@@ -371,11 +393,31 @@ class LoomClient:
         may mediate several CCUs and another one's readiness says nothing about
         this client's. ``None`` when the endpoint is unreadable (an older
         daemon, or a credential the daemon narrows the CCU coordinates away
-        from).
+        from) — and, here, on a transient failure too; :meth:`wait_until_ready`
+        tells the two apart.
+        """
+        try:
+            return await self._read_readiness()
+        except BaseLoomException as err:
+            _LOGGER.debug("readiness unavailable (GET /system/ccu): %s", err)
+            return None
+
+    async def _read_readiness(self) -> Readiness | None:
+        """
+        Read readiness like :meth:`get_readiness`, but raise a transient failure.
+
+        ``None`` means the daemon does not report readiness to this client (an
+        older daemon without the route, a narrowed credential). A transport
+        error or a server-side answer (5xx, throttling) while the daemon is
+        coming up says nothing about that and is raised, so a waiter retries
+        instead of reading it as "no readiness here" and walking a half-built
+        model (openccu-loom#1053).
         """
         try:
             entries = await self.system.list_system_ccus()
         except BaseLoomException as err:
+            if _is_transient_readiness_error(err=err):
+                raise
             _LOGGER.debug("readiness unavailable (GET /system/ccu): %s", err)
             return None
         if not entries:
@@ -416,7 +458,20 @@ class LoomClient:
         deadline = asyncio.get_running_loop().time() + timeout_seconds
         logged = False
         while True:
-            readiness = await self.get_readiness()
+            try:
+                readiness = await self._read_readiness()
+            except BaseLoomException as err:
+                # Transient (the daemon restarting, a 5xx): not an answer — retry.
+                if asyncio.get_running_loop().time() >= deadline:
+                    _LOGGER.warning(
+                        "daemon readiness still unreadable after %.0fs (%s) — continuing anyway",
+                        timeout_seconds,
+                        err,
+                    )
+                    return False
+                _LOGGER.debug("readiness read failed transiently (GET /system/ccu): %s — retrying", err)
+                await asyncio.sleep(_READINESS_POLL_SECONDS)
+                continue
             if readiness is None:
                 return True  # nothing reports readiness here; never block on it
             if readiness.ready:
@@ -989,9 +1044,14 @@ class LoomClient:
         funnel. The re-bootstrap runs as a tracked background task (never
         inline) so the N×M snapshot walk can't block the read loop and trip the
         inbound-ping deadline. De-duplicated two ways: a second trigger while a
-        walk is running is dropped, and one arriving within
-        ``_REBOOTSTRAP_COOLDOWN_SECONDS`` of the previous walk finishing is
-        dropped too — so a burst can't re-walk the snapshot back-to-back.
+        walk is running or pending is dropped (it is subsumed), and one arriving
+        within ``_REBOOTSTRAP_COOLDOWN_SECONDS`` of the previous walk finishing
+        is deferred to the cooldown's end — so a burst can't re-walk the
+        snapshot back-to-back, yet the last loss is never lost. That matters
+        after a daemon restart: an early loss walks while the daemon is still
+        bringing up, and the daemon's own post-bring-up ``replay_lost`` can land
+        inside the cooldown; dropping it would leave the premature walk's model
+        in place (openccu-loom#1053).
         """
         if self._closing:
             return
@@ -1007,11 +1067,17 @@ class LoomClient:
         if self._last_rebootstrap_finished is not None:
             since = asyncio.get_running_loop().time() - self._last_rebootstrap_finished
             if since < _REBOOTSTRAP_COOLDOWN_SECONDS:
-                _LOGGER.debug(
-                    "WS replay lost (oldest_seq=%s) — re-bootstrap cooldown (%.1fs of %.1fs), skipping",
+                delay = _REBOOTSTRAP_COOLDOWN_SECONDS - since
+                _LOGGER.info(
+                    "WS replay lost (oldest_seq=%s) — re-bootstrap cooldown (%.1fs of %.1fs), deferring by %.1fs",
                     oldest_seq,
                     since,
                     _REBOOTSTRAP_COOLDOWN_SECONDS,
+                    delay,
+                )
+                self._rebootstrap_task = asyncio.create_task(
+                    self._run_deferred_rebootstrap(delay),
+                    name="openccu-loom-rebootstrap-deferred",
                 )
                 return
         _LOGGER.warning("WS replay lost (oldest_seq=%s) — scheduling store re-bootstrap", oldest_seq)
@@ -1039,9 +1105,25 @@ class LoomClient:
         """
         self._rebootstrap_hook = hook
 
+    async def _run_deferred_rebootstrap(self, delay: float, /) -> None:
+        """Sleep out the rest of the cooldown, then run the re-bootstrap."""
+        await asyncio.sleep(delay)
+        await self._run_rebootstrap()
+
     async def _run_rebootstrap(self) -> None:
-        """Body of the replay-lost re-bootstrap; logs and swallows failures."""
+        """
+        Body of the replay-lost re-bootstrap; logs and swallows failures.
+
+        Waits for the daemon's readiness first, like the initial start does: a
+        loss right after a daemon restart (its seq restarts at 1) would
+        otherwise walk a half-built model whose usage marks are not applied yet
+        and turn hidden parameters into creatable data points
+        (openccu-loom#1053). The wait is bounded by
+        :attr:`LoomConfig.readiness_wait_seconds`, and a timeout is not fatal —
+        the walk runs anyway.
+        """
         try:
+            await self.wait_until_ready()
             await self.bootstrap()
             if (hook := self._rebootstrap_hook) is not None:
                 await hook()

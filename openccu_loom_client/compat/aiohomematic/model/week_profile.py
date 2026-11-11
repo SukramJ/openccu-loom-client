@@ -318,6 +318,16 @@ class WeekProfileDp(_ScheduleEntityBase):
             prefix="schedule_channel_switch",
         )
 
+    def _replace_week_profile(self, *, week_profile: WeekProfileResponse) -> None:
+        """
+        Replace the daemon's week-profile descriptor in place (a re-bootstrap).
+
+        The instance stays the one HA holds; the descriptor-derived state
+        (targets, limits, the enabled map) follows the daemon's current answer.
+        """
+        self._week_profile = week_profile
+        self._schedule_enabled = dict(week_profile.schedule_enabled) if week_profile.schedule_enabled else None
+
     def update_from(self, *, schedule: Schedule) -> None:
         """Recompute the entry count from a fetched channel schedule."""
         self._schedule = schedule
@@ -510,6 +520,13 @@ class ClimateWeekProfileDp(WeekProfileDp):
             schedules_ops=schedules_ops,
         )
         self._current_schedule_profile: ScheduleProfile = (
+            _to_schedule_profile(value=week_profile.current_profile, default=None) or ScheduleProfile.P1
+        )
+
+    def _replace_week_profile(self, *, week_profile: WeekProfileResponse) -> None:
+        """Replace the descriptor in place, and let the active profile follow the daemon's."""
+        super()._replace_week_profile(week_profile=week_profile)
+        self._current_schedule_profile = (
             _to_schedule_profile(value=week_profile.current_profile, default=None) or ScheduleProfile.P1
         )
 

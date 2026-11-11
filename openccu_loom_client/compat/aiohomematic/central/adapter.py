@@ -92,7 +92,7 @@ from openccu_loom_client.compat.aiohomematic.model.event import make_generic_eve
 from openccu_loom_client.compat.aiohomematic.model.event_group import build_event_groups
 from openccu_loom_client.compat.aiohomematic.model.generic import make_generic_data_point
 from openccu_loom_client.compat.aiohomematic.model.hub import make_program_data_points, make_sysvar_data_point
-from openccu_loom_client.compat.aiohomematic.model.update import make_update_data_point
+from openccu_loom_client.compat.aiohomematic.model.update import DpUpdate, make_update_data_point
 from openccu_loom_client.compat.aiohomematic.model.week_profile import (
     ClimateWeekProfileDp,
     ScheduleChannelSwitch,
@@ -114,7 +114,7 @@ from openccu_loom_client.wire.enums import CentralState, DataPointCategory
 from openccu_loom_client.wire.rest import BackupEntry
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
+    from collections.abc import Iterable, Iterator, Mapping
 
     from openccu_loom_client.client import LoomClient
     from openccu_loom_client.events import EventBus
@@ -237,6 +237,50 @@ def _is_creatable(*, dp: Any) -> bool:
     return usage not in _NON_CREATABLE_USAGES
 
 
+class _ExtraDataPoints:
+    """
+    The adapter-built data points without a store summary, keyed by ``unique_id``.
+
+    Week profiles, schedule switches and combined numbers. Every bootstrap pass
+    (the start and each re-bootstrap) rebuilds this layer, and HA holds the
+    instances the first pass announced: a pass that built new objects would
+    announce them as new entities, which HA rejects with "does not generate
+    unique IDs" while the old instance keeps the entity. So a pass looks its
+    data point up here first and updates the existing instance in place; only a
+    ``unique_id`` not held yet adds an object. One container shared by
+    reference between the adapter (writer) and the query facade (reader).
+    """
+
+    __slots__ = ("_by_uid",)
+
+    def __init__(self) -> None:
+        self._by_uid: dict[str, tuple[str, Any]] = {}
+
+    def __iter__(self) -> Iterator[Any]:
+        return iter(self.values())
+
+    def __len__(self) -> int:
+        return len(self._by_uid)
+
+    def values(self) -> tuple[Any, ...]:
+        """Return the data points, in insertion order."""
+        return tuple(dp for _, dp in self._by_uid.values())
+
+    def get(self, *, unique_id: str) -> Any:
+        """Return the data point keyed ``unique_id``, or ``None``."""
+        entry = self._by_uid.get(unique_id)
+        return entry[1] if entry is not None else None
+
+    def put(self, *, address: str, data_point: Any) -> None:
+        """Hold ``data_point`` under its ``unique_id`` for the device ``address``."""
+        self._by_uid[data_point.unique_id] = (address, data_point)
+
+    def retain(self, *, addresses: set[str]) -> None:
+        """Drop the data points of every device not in ``addresses``."""
+        for uid in [uid for uid, (address, _) in self._by_uid.items() if address not in addresses]:
+            del self._by_uid[uid]
+
+
 @dataclass(slots=True)
 class _SpawnedSchedules:
     """The schedules one bootstrap pass spawned for one device: their kinds (``True`` = climate) and keys."""
@@ -345,11 +389,11 @@ class _DeviceCoordinator:
 class _QueryFacade:
     """``central.query_facade`` surface."""
 
-    def __init__(self, *, client: LoomClient, extra_data_points: list[Any]) -> None:
+    def __init__(self, *, client: LoomClient, extra_data_points: _ExtraDataPoints) -> None:
         self._client = client
         # Adapter-built data points without a store summary (week
         # profiles, schedule switches, combined numbers). The adapter
-        # owns and fills the list during bootstrap; the facade only
+        # owns and fills the registry during bootstrap; the facade only
         # reads it, so sharing the reference keeps both in sync.
         self._extra_data_points = extra_data_points
         # Event groups carry per-instance state (registered flag, last
@@ -411,7 +455,7 @@ class _QueryFacade:
             *self._client.store.data_points,
             *self._client.store.custom_data_points,
             *self._client.store.alarm_panels,
-            *self._extra_data_points,
+            *self._extra_data_points.values(),
         ):
             dp_category = getattr(dp, "category", None)
             if target is not None and dp_category != target:
@@ -1274,8 +1318,12 @@ class LoomCentralAdapter:
         self._ha_bus: Final = AioEventBus(task_scheduler=self._looper)
         # Adapter-built data points without a store summary (week
         # profiles, schedule switches, combined numbers); shared with
-        # the query facade so the platforms see them.
-        self._extra_data_points: Final[list[Any]] = []
+        # the query facade so the platforms see them. Keyed by unique_id so a
+        # re-bootstrap updates the instances HA holds instead of adding twins.
+        self._extra_data_points: Final = _ExtraDataPoints()
+        # One firmware-update data point per device, kept across passes for the
+        # same reason: HA holds the instance the first announce carried.
+        self._update_data_points: Final[dict[str, DpUpdate]] = {}
         # locale-aware labels of suppressed calculated DPs, keyed by
         # (device_address, channel_no) — consumed by the combined-DP
         # bootstrap to name the replacement number like the reference.
@@ -1538,9 +1586,11 @@ class LoomCentralAdapter:
 
         The client's re-bootstrap has already refilled the store by the time
         this runs, so only the layered model and the announcement are missing.
-        Both are idempotent for what HA already has: the announcement carries
-        the un-registered data points, and the alarm-panel announce keeps its
-        own identity set, so a device HA already spawned is not spawned twice.
+        Both are idempotent for what HA already has: the store, the update
+        cache and the extras registry keep every instance HA holds and update
+        it in place, the announcement carries only the un-registered data
+        points, and the alarm-panel announce keeps its own identity set — so
+        against an unchanged store the second announce is empty (#236).
 
         Never raises — this runs inside the client's re-bootstrap task, and a
         failure here must not look like a failed walk.
@@ -1781,11 +1831,7 @@ class LoomCentralAdapter:
         hub_dps = self.hub_coordinator.get_hub_data_points(registered=False)
         # One firmware-update data point per updatable device (uid
         # ``loom_<address>_update``), mirroring aiohomematic's DpUpdate.
-        update_dps = [
-            make_update_data_point(device=device, store=self._client.store)
-            for device in self._client.store.devices
-            if device.summary.updatable
-        ]
+        update_dps = self._update_data_points_of_store()
         event_groups = self.query_facade.get_event_groups(registered=False)
         alarm_panels = list(self._client.store.alarm_panels)
         # Identity map so only panels that actually survive the category gate
@@ -1795,7 +1841,7 @@ class LoomCentralAdapter:
         for dp in (
             *self._client.store.data_points,
             *self._client.store.custom_data_points,
-            *self._extra_data_points,
+            *self._extra_data_points.values(),
             *hub_dps,
             *update_dps,
             *event_groups,
@@ -1833,6 +1879,36 @@ class LoomCentralAdapter:
                     new_data_points={category: tuple(dps) for category, dps in grouped.items()},
                 )
             )
+
+    def _update_data_points_of_store(self) -> list[DpUpdate]:
+        """
+        Return the firmware-update data point of every updatable device, cached.
+
+        A device keeps its ``DpUpdate`` across calls — HA registers the instance
+        it was announced with, and a fresh one per call would never be
+        registered and so be announced again. An entry is dropped once its
+        device left the store (or was replaced by a new object), and a device
+        that turns non-updatable keeps its entry, so turning back does not mint
+        a second instance for the entity HA still holds.
+        """
+        store = self._client.store
+        devices = {device.address: device for device in store.devices}
+        for address in [a for a, dp in self._update_data_points.items() if devices.get(a) is not dp.device]:
+            del self._update_data_points[address]
+        out: list[DpUpdate] = []
+        for address, device in devices.items():
+            if not device.summary.updatable:
+                continue
+            dp = self._update_data_points.get(address)
+            if dp is None:
+                dp = make_update_data_point(device=device, store=store)
+                self._update_data_points[address] = dp
+            out.append(dp)
+        return out
+
+    def _retain_extra_data_points(self) -> None:
+        """Drop the adapter-built data points of devices that left the store."""
+        self._extra_data_points.retain(addresses={device.address for device in self._client.store.devices})
 
     async def _bootstrap_hub_catalogue(self) -> None:
         """
@@ -1905,8 +1981,13 @@ class LoomCentralAdapter:
         case is a daemon before api 15.6.0, which keyed both schedules of a
         device ``loom_week_profile_<device>_week_profile``; there the device
         keeps its switch schedule only, as before.
+
+        A second pass (a re-bootstrap) finds every data point it would spawn in
+        the extras registry and updates that instance in place, appending
+        nothing — HA already holds it.
         """
         store = self._client.store
+        self._retain_extra_data_points()
         for device in list(store.devices):
             cdps = store.custom_data_points_of(address=device.address)
             if not cdps:
@@ -1964,20 +2045,27 @@ class LoomCentralAdapter:
         spawned.kinds.add(climate)
         spawned.unique_ids.add(week_profile.unique_id)
         wp_cls = ClimateWeekProfileDp if climate else WeekProfileDp
-        wp_dp = wp_cls(
-            store=store,
-            device=device,
-            channel_no=channel_no,
-            week_profile=week_profile,
-            schedules_ops=self._client.schedules,
-        )
+        existing = self._extra_data_points.get(unique_id=week_profile.unique_id)
+        wp_dp: WeekProfileDp
+        if type(existing) is wp_cls and existing.device is device:
+            # A re-bootstrap: HA holds this instance — refresh it in place.
+            wp_dp = existing
+            wp_dp._replace_week_profile(week_profile=week_profile)
+        else:
+            wp_dp = wp_cls(
+                store=store,
+                device=device,
+                channel_no=channel_no,
+                week_profile=week_profile,
+                schedules_ops=self._client.schedules,
+            )
         try:
             schedule = await self._client.schedules.get_channel_schedule(address=device.address, channel=channel_no)
         except Exception:
             _LOGGER.debug("schedule fetch failed for %s:%s", device.address, channel_no, exc_info=True)
         else:
             wp_dp.update_from(schedule=schedule)
-        self._extra_data_points.append(wp_dp)
+        self._extra_data_points.put(address=device.address, data_point=wp_dp)
         # Register on the store so the base Device can expose it as
         # ``week_profile_data_point`` / ``climate_week_profile_data_point``
         # (the HA climate entity and schedule services reach it there).
@@ -1985,15 +2073,19 @@ class LoomCentralAdapter:
         if not with_switches:
             return
         for channel_key in week_profile.schedule_enabled or {}:
-            self._extra_data_points.append(
-                ScheduleChannelSwitch(
+            held = self._extra_data_points.get(unique_id=wp_dp.target_channel_unique_id(channel_key=channel_key))
+            if isinstance(held, ScheduleChannelSwitch) and held._week_profile_dp is wp_dp:
+                continue  # HA holds it; it reads its state through wp_dp
+            self._extra_data_points.put(
+                address=device.address,
+                data_point=ScheduleChannelSwitch(
                     store=store,
                     device=device,
                     channel_no=channel_no,
                     channel_key=channel_key,
                     week_profile_dp=wp_dp,
                     schedules_ops=self._client.schedules,
-                )
+                ),
             )
 
     async def _bootstrap_combined_data_points(self) -> None:
@@ -2005,22 +2097,31 @@ class LoomCentralAdapter:
         DURATION pair too, but invisible), so the seconds-typed number
         spawns solely on channels hosting a plain siren CDP that carries
         both ``DURATION_VALUE`` and ``DURATION_UNIT``.
+
+        A second pass keeps the instance HA holds and only refreshes its
+        summary (the label may have changed); see :class:`_ExtraDataPoints`.
         """
         store = self._client.store
+        self._retain_extra_data_points()
         for device in list(store.devices):
             for cdp in store.custom_data_points_of(address=device.address):
                 if not isinstance(cdp, BaseCustomDpSiren) or isinstance(cdp, CustomDpSoundPlayer):
                     continue
                 channel_no = cdp.summary.channel_no
                 if channel_has_duration_pair(store=store, address=device.address, channel_no=channel_no):
-                    self._extra_data_points.append(
-                        CombinedDurationDp(
-                            store=store,
-                            device=device,
-                            channel_no=channel_no,
-                            translated_name=self._suppressed_calc_labels.get((device.address, channel_no)),
-                        )
+                    # Built first so the unique_id format stays in one place;
+                    # discarded when HA already holds an instance of it.
+                    combined = CombinedDurationDp(
+                        store=store,
+                        device=device,
+                        channel_no=channel_no,
+                        translated_name=self._suppressed_calc_labels.get((device.address, channel_no)),
                     )
+                    held = self._extra_data_points.get(unique_id=combined.unique_id)
+                    if isinstance(held, CombinedDurationDp):
+                        held._replace_summary(summary=combined.summary)
+                        continue
+                    self._extra_data_points.put(address=device.address, data_point=combined)
 
     async def stop(self) -> None:
         """Cancel the reconcile loop + refresh bridge, close the client, and stop."""

@@ -1957,3 +1957,141 @@ class TestServiceMessageEnumValue:
         record = adapter_module._to_service_message(message=message)
         assert record.value == ""
         assert record.value_text == ""
+
+
+class TestRebootstrapKeepsIdentity:
+    """#236: a re-bootstrap against an unchanged store announces nothing and keeps every instance HA holds."""
+
+    async def test_second_pass_announces_nothing_and_keeps_every_instance(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        from aiohomematic.central.events import DataPointsCreatedEvent as AioDataPointsCreatedEvent
+
+        from openccu_loom_client.compat.aiohomematic.model.calculated import CalculatedDpBinarySensor
+        from openccu_loom_client.compat.aiohomematic.model.combined import CombinedDurationDp
+        from openccu_loom_client.compat.aiohomematic.model.update import DpUpdate
+        from openccu_loom_client.compat.aiohomematic.model.week_profile import ScheduleChannelSwitch, WeekProfileDp
+        from openccu_loom_client.wire.rest import CalculatedDPSummary
+        from tests.unit.test_parity_round5 import (
+            _adapter_for,
+            _attach_duration_pair,
+            _cdp_summary,
+            _channel,
+            _FakeSchedulesOps,
+            _store_with_device,
+            _week_profile_response,
+        )
+
+        # A siren (combined duration number) with a switch week profile (profile
+        # + schedule switch), a calculated DP, and a firmware update.
+        store = _store_with_device(
+            address="VCU1",
+            model="HmIP-ASIR",
+            name="Alarmsirene",
+            channels=[
+                _channel(address="VCU1", number=3, name="Alarmsirene:3"),
+                _channel(address="VCU1", number=8, name="Wochenprogramm", channel_type="SWITCH_WEEK_PROFILE"),
+            ],
+        )
+        device = store.get_device(address="VCU1")
+        assert device is not None
+        device._update_summary(summary=device.summary.model_copy(update={"updatable": True}))
+        _attach_duration_pair(store, address="VCU1", channel=3)
+        store.attach_custom_data_points(
+            device_address="VCU1",
+            cdps=[_cdp_summary(name="ACOUSTIC@3", category="siren", kind="siren", channel_no=3)],
+        )
+        schedules = _FakeSchedulesOps(
+            week_profiles={
+                ("VCU1", 8): _week_profile_response(address="VCU1", channel=8, schedule_enabled={"1_1": True})
+            }
+        )
+        adapter = _adapter_for(store, schedules=schedules)  # installs the calculated-DP factory
+        calc = CalculatedDPSummary.model_validate(
+            {
+                "name": "WINDOW_OPEN",
+                "category": "binary_sensor",
+                "value": False,
+                "observed": True,
+                "unique_id": "loom_calculated_vcu1_3_window_open",
+                "available": True,
+            }
+        )
+
+        def client_rewalk() -> None:
+            # The client's own re-bootstrap re-attaches the unchanged records.
+            store.attach_channel_calculated_data_points(device_address="VCU1", channel_number=3, calculated=[calc])
+
+        async def _noop(**_kwargs: object) -> None:
+            return None
+
+        # The hook's I/O steps have nothing to read here; the layered model and
+        # the announcement are what is under test.
+        monkeypatch.setattr(adapter, "_bootstrap_hub_catalogue", _noop)
+        monkeypatch.setattr(adapter, "_bootstrap_custom_data_points", _noop)
+        monkeypatch.setattr(adapter.hub_coordinator, "fetch_hub_singleton_data", _noop)
+        monkeypatch.setattr(adapter._held_devices, "sync", _noop)
+        adapter._state = CentralState.Running
+
+        seen: list[tuple[Any, ...]] = []
+        group = adapter.event_bus.create_subscription_group(name="spawn")
+        group.subscribe(
+            event_type=AioDataPointsCreatedEvent,
+            event_key=None,
+            handler=lambda *, event: seen.append(tuple(dp for dps in event.new_data_points.values() for dp in dps)),
+        )
+
+        client_rewalk()
+        await adapter._on_store_rebootstrapped()
+        await adapter._looper.block_till_done()
+        assert len(seen) == 1
+        first = {dp.unique_id: dp for dp in seen[0]}
+        kinds = (DpUpdate, CalculatedDpBinarySensor, WeekProfileDp, ScheduleChannelSwitch, CombinedDurationDp)
+        for kind in kinds:
+            assert any(isinstance(dp, kind) for dp in first.values()), kind
+        for dp in first.values():
+            dp.register()  # what HA does when it spawns the entity
+        extras_before = {dp.unique_id: dp for dp in adapter._extra_data_points}
+
+        client_rewalk()
+        await adapter._on_store_rebootstrapped()
+        await adapter._looper.block_till_done()
+
+        assert "failed" not in caplog.text
+        assert len(seen) == 1, f"second pass announced {[dp.unique_id for dp in seen[1]]}"
+        assert len(adapter._extra_data_points) == len(extras_before)
+        for uid, dp in extras_before.items():
+            assert adapter._extra_data_points.get(unique_id=uid) is dp, uid
+        assert store.get_data_point(address="VCU1", channel=3, parameter="WINDOW_OPEN") is next(
+            dp for dp in first.values() if isinstance(dp, CalculatedDpBinarySensor)
+        )
+        assert adapter._update_data_points_of_store() == [next(dp for dp in first.values() if isinstance(dp, DpUpdate))]
+
+    async def test_climate_week_profile_follows_the_daemons_current_profile(self) -> None:
+        from openccu_loom_client.compat.aiohomematic.model.week_profile import ClimateWeekProfileDp
+        from tests.unit.test_parity_round5 import (
+            _adapter_for,
+            _cdp_summary,
+            _channel,
+            _FakeSchedulesOps,
+            _store_with_device,
+            _week_profile_response,
+        )
+
+        store = _store_with_device(channels=[_channel(address="VCU1", number=1, name="Thermostat KU:1")])
+        store.attach_custom_data_points(device_address="VCU1", cdps=[_cdp_summary()])
+        descriptor = _week_profile_response(address="VCU1", channel=1, schedule_type="climate")
+        schedules = _FakeSchedulesOps(
+            week_profiles={("VCU1", 1): descriptor.model_copy(update={"current_profile": "P1"})}
+        )
+        adapter = _adapter_for(store, schedules=schedules)
+        await adapter._bootstrap_schedules()
+        (first,) = list(adapter._extra_data_points)
+        assert isinstance(first, ClimateWeekProfileDp)
+        assert first.current_schedule_profile.value == "P1"
+
+        # The operator switched the active profile while the client was away.
+        schedules.week_profiles[("VCU1", 1)] = descriptor.model_copy(update={"current_profile": "P3"})
+        await adapter._bootstrap_schedules()
+        assert list(adapter._extra_data_points) == [first]
+        assert first.current_schedule_profile.value == "P3"

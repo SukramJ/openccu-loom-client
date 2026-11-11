@@ -869,6 +869,71 @@ class _CalcRefreshTransport:
         return self.record
 
 
+class TestCalculatedReattachKeepsInstance:
+    """#236: a re-bootstrap re-attaches calculated DPs in place — HA holds the instance."""
+
+    @staticmethod
+    def _calc(*, category: str, value: object, available: bool) -> CalculatedDPSummary:
+        return CalculatedDPSummary.model_validate(
+            {
+                "name": "DEW_POINT",
+                "category": category,
+                "value": value,
+                "observed": True,
+                "available": available,
+                "unique_id": "loom_calc_dew",
+            }
+        )
+
+    def _store(self) -> LoomStore:
+        from openccu_loom_client.compat.aiohomematic.model.calculated import make_calculated_data_point
+
+        store = LoomStore()
+        store.load_snapshot(snapshot=_snapshot(devices=[_device_summary()]))
+        store.set_calculated_data_point_factory(factory=make_calculated_data_point)
+        return store
+
+    def test_attach_twice_keeps_the_object_and_updates_its_summary(self) -> None:
+        store = self._store()
+        attach = store.attach_channel_calculated_data_points
+        attach(
+            device_address="VCU0001",
+            channel_number=1,
+            calculated=[self._calc(category="sensor", value=9.3, available=True)],
+        )
+        first = store.get_data_point(address="VCU0001", channel=1, parameter="DEW_POINT")
+        assert first is not None
+        attach(
+            device_address="VCU0001",
+            channel_number=1,
+            calculated=[self._calc(category="sensor", value=11.0, available=False)],
+        )
+        again = store.get_data_point(address="VCU0001", channel=1, parameter="DEW_POINT")
+        assert again is first
+        assert again.summary.value == 11.0
+        assert again.is_valid is False
+
+    def test_a_category_flip_rebuilds_the_class(self) -> None:
+        from openccu_loom_client.compat.aiohomematic.model.calculated import CalculatedDpBinarySensor
+
+        store = self._store()
+        attach = store.attach_channel_calculated_data_points
+        attach(
+            device_address="VCU0001",
+            channel_number=1,
+            calculated=[self._calc(category="sensor", value=9.3, available=True)],
+        )
+        first = store.get_data_point(address="VCU0001", channel=1, parameter="DEW_POINT")
+        attach(
+            device_address="VCU0001",
+            channel_number=1,
+            calculated=[self._calc(category="binary_sensor", value=True, available=True)],
+        )
+        again = store.get_data_point(address="VCU0001", channel=1, parameter="DEW_POINT")
+        assert again is not first
+        assert isinstance(again, CalculatedDpBinarySensor)
+
+
 class TestCalculatedRefreshCarriesAvailability:
     """A calc-dps re-read is where the client learns the daemon's verdict."""
 

@@ -35,6 +35,7 @@ from openccu_loom_client.events import (
     DeviceReleasedEvent,
 )
 from openccu_loom_client.exceptions import LoomIncompatibleVersionError, LoomTransportError
+from openccu_loom_client.transport.http import HttpTransport
 from openccu_loom_client.wire import DAEMON_API_VERSION
 from openccu_loom_client.wire.rest import DeploymentKind, WsEnvelopeKind as Kind
 from openccu_loom_client.wire.ws import (
@@ -928,6 +929,40 @@ class TestReadinessGate:
             with patch.object(client_module, "_READINESS_POLL_SECONDS", 0.01):
                 assert await client.wait_until_ready(timeout_seconds=2.0) is True
 
+    async def test_a_transient_failure_is_retried_not_read_as_no_readiness(
+        self, mock_daemon: MockDaemon, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # #236 review: a 503 while the daemon comes up is not "an old daemon
+        # without readiness" — the re-bootstrap must not walk until it is ready.
+        monkeypatch.setattr(client_module, "_READINESS_POLL_SECONDS", 0.01)
+        _wire_endpoints(mock_daemon)
+        ccu = "/api/v1/system/ccu"
+        unready = {"type": "https://openccu-loom.dev/errors/service_unready", "title": "restarting", "status": 503}
+        # No transport-level retry, so each 503 reaches the readiness wait.
+        http = HttpTransport(config=mock_daemon.config, backoff_sequence=())
+        async with LoomClient(config=mock_daemon.config, http_transport=http) as client:
+            mock_daemon.get(ccu, payload=unready, status=503)
+            mock_daemon.get(ccu, payload=unready, status=503)
+            mock_daemon.get(ccu, payload=self._ccu_entry(phase="ready", ready=True))
+            start = len(mock_daemon.requests)
+            await client._on_replay_lost(1)
+            assert client._rebootstrap_task is not None
+            await asyncio.wait_for(client._rebootstrap_task, timeout=5.0)
+            paths = [r.path for r in mock_daemon.requests[start:]]
+            assert paths.count("/api/v1/snapshot") == 1
+            snapshot_at = paths.index("/api/v1/snapshot")
+            assert paths[:snapshot_at].count(ccu) >= 3
+            assert paths[snapshot_at - 1] == ccu
+
+    async def test_a_daemon_without_the_route_does_not_block(self, mock_daemon: MockDaemon) -> None:
+        # No stub for GET /system/ccu → the mock daemon answers 404.
+        mock_daemon.get("/api/v1/info", payload=_INFO)
+        async with LoomClient(config=mock_daemon.config) as client:
+            loop = asyncio.get_running_loop()
+            started = loop.time()
+            assert await client.wait_until_ready(timeout_seconds=5.0) is True
+            assert loop.time() - started < 1.0
+
     async def test_timeout_comes_from_the_config(self, mock_daemon: MockDaemon) -> None:
         """How long a caller can afford to block is the caller's question."""
         mock_daemon.get("/api/v1/info", payload=_INFO)
@@ -1194,12 +1229,13 @@ class TestReplayLostRebootstrap:
             await asyncio.wait_for(client._rebootstrap_task, timeout=1.0)
             assert calls == 1
 
-    async def test_replay_lost_cooldown_skips_back_to_back_reboots(
+    async def test_replay_lost_inside_cooldown_is_deferred_not_dropped(
         self, mock_daemon: MockDaemon, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # A second loss inside the cooldown window after a completed walk is
-        # dropped — the just-taken snapshot is still authoritative.
-        monkeypatch.setattr("openccu_loom_client.client._REBOOTSTRAP_COOLDOWN_SECONDS", 1000.0)
+        # #236: a second loss inside the cooldown is the daemon's post-bring-up
+        # resync in the field — deferred to the cooldown's end, never dropped.
+        # A third loss while the deferred walk is pending is subsumed by it.
+        monkeypatch.setattr("openccu_loom_client.client._REBOOTSTRAP_COOLDOWN_SECONDS", 0.2)
         _wire_endpoints(mock_daemon)
         async with LoomClient(config=mock_daemon.config) as client:
             calls = 0
@@ -1214,9 +1250,45 @@ class TestReplayLostRebootstrap:
             await asyncio.wait_for(client._rebootstrap_task, timeout=1.0)
             assert calls == 1
 
-            # Within cooldown → dropped, no new walk scheduled.
+            # Within cooldown → deferred: scheduled, but not walked yet.
             await client._on_replay_lost(902)
+            deferred = client._rebootstrap_task
+            assert deferred is not None
+            assert not deferred.done()
+            # Well inside the 0.2 s cooldown the walk has still not run.
+            await asyncio.sleep(0.05)
             assert calls == 1
+            assert not deferred.done()
+
+            # A further loss while the deferred walk is pending is de-duplicated.
+            await client._on_replay_lost(903)
+            assert client._rebootstrap_task is deferred
+
+            await asyncio.wait_for(deferred, timeout=1.0)
+            assert calls == 2
+
+    async def test_replay_lost_rebootstrap_waits_for_readiness(
+        self, mock_daemon: MockDaemon, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # #236: a loss right after a daemon restart must not walk a half-built
+        # model — no /snapshot until GET /system/ccu reports ready, then one.
+        monkeypatch.setattr("openccu_loom_client.client._READINESS_POLL_SECONDS", 0.01)
+        _wire_endpoints(mock_daemon)
+        ccu = "/api/v1/system/ccu"
+        async with LoomClient(config=mock_daemon.config) as client:
+            # Queued after connect, so every one of them is a readiness poll.
+            mock_daemon.get(ccu, payload=TestReadinessGate._ccu_entry(phase="loading_devices", ready=False))
+            mock_daemon.get(ccu, payload=TestReadinessGate._ccu_entry(phase="loading_devices", ready=False))
+            mock_daemon.get(ccu, payload=TestReadinessGate._ccu_entry(phase="ready", ready=True))
+            start = len(mock_daemon.requests)
+            await client._on_replay_lost(1)
+            assert client._rebootstrap_task is not None
+            await asyncio.wait_for(client._rebootstrap_task, timeout=2.0)
+            paths = [r.path for r in mock_daemon.requests[start:]]
+            assert paths.count("/api/v1/snapshot") == 1
+            # The snapshot is fetched only after the third poll reported ready.
+            assert paths.index("/api/v1/snapshot") > 2
+            assert paths[:3] == [ccu, ccu, ccu]
 
     async def test_replay_lost_reboots_again_after_cooldown(
         self, mock_daemon: MockDaemon, monkeypatch: pytest.MonkeyPatch

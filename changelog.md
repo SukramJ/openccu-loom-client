@@ -1,3 +1,41 @@
+# Version 2026.11.5 (2026-11-11)
+
+- **A re-bootstrap waits for the daemon's readiness.** After a daemon restart
+  the WebSocket resumes with a `replay_lost` (its sequence restarts at 1), and
+  the client re-walked the snapshot at once — while the daemon was still
+  bringing its devices up, so hidden parameters (`UNREACH`, `BOOTED`, the
+  generic `STATE` under a switch …) read as creatable and Home Assistant
+  created entities a cold start never creates (openccu-loom#1053, #236). The
+  re-bootstrap now waits for `GET /system/ccu` to report ready, bounded by
+  `LoomConfig.readiness_wait_seconds` like the start; a timeout walks anyway.
+- **A `replay_lost` inside the re-bootstrap cooldown is deferred, not
+  dropped.** The daemon sends one once its bring-up has published the model;
+  in the field it arrived 15 s after the premature walk and was swallowed by
+  the 30 s cooldown, so the half-built model stayed. A loss inside the
+  cooldown now schedules one re-bootstrap at the cooldown's end; further
+  losses while it is pending fold into it (#236).
+- **A re-bootstrap no longer floods the log with "does not generate unique
+  IDs".** Home Assistant holds the instances the first announce carried, but a
+  re-bootstrap rebuilt the firmware-update entities, the calculated data
+  points, the week profiles, the schedule switches and the combined duration
+  numbers as new objects and announced them again — one duplicate-ID error per
+  entity, and the store's calculated sensors lost their live instance. The
+  adapter now keeps the update data points per device and the adapter-built
+  extras by `unique_id`, the store takes a calculated record in place, and a
+  second pass against an unchanged daemon announces nothing (#236).
+- **A schema-digest mismatch warns only across an API major.** A daemon an
+  additive minor ahead (a client built for api 15.2 against a newer 15.x
+  daemon, the log of openccu-loom#1053) logged a WARNING on every connect. It is now INFO with the same wording;
+  a different major, or an unparsable version, still warns.
+- **Wire layer regenerated for daemon 0.99.0 (api 15.9.0).** It spans 15.8.0
+  (node routes `GET /node/endpoints/{ep}`, `GET /node/endpoints/{ep}/events`,
+  `GET /node/topology`, `POST /node/mdns/reannounce`,
+  `POST /node/maintenance/erase`) and 15.9.0 (`Session` gains the optional
+  `created_at`, `resumed`, `transport` and `peer_lost`; controller kinds join
+  the diagnostic event kind enum). All additive and none reached by this
+  client — the Matter façade left the wheel in 2026-08. `DAEMON_API_VERSION`
+  and `SCHEMA_DIGEST` move to 15.9.0.
+
 # Version 2026.11.4 (2026-11-08)
 
 - **Service messages carry the CCU's value and value text.** The CCU names

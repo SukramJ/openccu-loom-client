@@ -23,6 +23,8 @@ from openccu_loom_client.model import DataPoint
 from openccu_loom_client.wire.rest import CalculatedDPSummary, DataPointSummary
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from openccu_loom_client.store import LoomStore
 
 
@@ -38,12 +40,16 @@ class _CalculatedKeyMixin:
         device_address: str
         channel_number: int
         _store: LoomStore
+        _replace_summary: Callable[..., None]
 
     # Daemon verdict on the derived value, carried by the calc-dps record
     # (``available``, daemon API 3.13.0). Defaults to True so a record from an
     # older daemon — where the field is absent — keeps the previous behaviour
     # instead of silencing every calculated entity.
     _calculated_available: bool = True
+    # Whether the class reads as a binary sensor; a record whose category
+    # flips cannot be taken in place and makes the store rebuild the DP.
+    _binary: bool = False
 
     def apply_calculated_availability(self, *, available: bool) -> None:
         """
@@ -53,6 +59,20 @@ class _CalculatedKeyMixin:
         attach and the explicit re-read behind ``load_data_point_value``.
         """
         self._calculated_available = available
+
+    def _replace_calculated_summary(self, *, calc: CalculatedDPSummary) -> bool:
+        """
+        Take a fresh calc-dps record in place (called by the store on a re-bootstrap).
+
+        Returns ``False`` without touching the instance when the record's
+        category no longer matches this class (sensor ↔ binary sensor), so the
+        store builds the right class instead.
+        """
+        if calc_is_binary(summary=calc) != self._binary:
+            return False
+        self._replace_summary(summary=synthesize_summary(calc=calc))
+        self.apply_calculated_availability(available=calc.available)
+        return True
 
     @property
     def is_valid(self) -> bool:
@@ -110,6 +130,8 @@ class CalculatedDpSensor(_CalculatedKeyMixin, DpSensor):
 
 class CalculatedDpBinarySensor(_CalculatedKeyMixin, DpBinarySensor):
     """Daemon-calculated binary sensor (window open, alarms, …)."""
+
+    _binary = True
 
 
 def synthesize_summary(*, calc: CalculatedDPSummary) -> DataPointSummary:

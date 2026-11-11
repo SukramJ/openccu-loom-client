@@ -1476,11 +1476,22 @@ class LoomStore:
         They live in the same ``(address, channel, parameter)`` map as the
         generic data points, so ``apply_value_changed`` routes the daemon's
         ``datapoint.value_changed`` pushes to them without special-casing.
+
+        A re-bootstrap keeps the live instance, as the generic path does: an
+        existing calculated DP takes the new record in place
+        (``_replace_calculated_summary``, which answers ``False`` when the
+        record no longer fits the instance's class), and only a new or
+        re-classed one is built. Rebuilding would orphan the instance HA holds
+        and announce a twin it rejects as a duplicate unique ID.
         """
         if self._calculated_factory is None:
             return
         for calc in calculated:
             key = (device_address, channel_number, calc.name)
+            existing = self._data_points.get(key) if key in self._calculated_dp_keys else None
+            replace = getattr(existing, "_replace_calculated_summary", None)
+            if replace is not None and replace(calc=calc):
+                continue
             self._data_points[key] = self._calculated_factory(
                 summary=calc,
                 device_address=device_address,
