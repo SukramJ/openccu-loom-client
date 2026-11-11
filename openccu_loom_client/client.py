@@ -989,9 +989,14 @@ class LoomClient:
         funnel. The re-bootstrap runs as a tracked background task (never
         inline) so the N×M snapshot walk can't block the read loop and trip the
         inbound-ping deadline. De-duplicated two ways: a second trigger while a
-        walk is running is dropped, and one arriving within
-        ``_REBOOTSTRAP_COOLDOWN_SECONDS`` of the previous walk finishing is
-        dropped too — so a burst can't re-walk the snapshot back-to-back.
+        walk is running or pending is dropped (it is subsumed), and one arriving
+        within ``_REBOOTSTRAP_COOLDOWN_SECONDS`` of the previous walk finishing
+        is deferred to the cooldown's end — so a burst can't re-walk the
+        snapshot back-to-back, yet the last loss is never lost. That matters
+        after a daemon restart: an early loss walks while the daemon is still
+        bringing up, and the daemon's own post-bring-up ``replay_lost`` can land
+        inside the cooldown; dropping it would leave the premature walk's model
+        in place (openccu-loom#1053).
         """
         if self._closing:
             return
@@ -1007,11 +1012,17 @@ class LoomClient:
         if self._last_rebootstrap_finished is not None:
             since = asyncio.get_running_loop().time() - self._last_rebootstrap_finished
             if since < _REBOOTSTRAP_COOLDOWN_SECONDS:
-                _LOGGER.debug(
-                    "WS replay lost (oldest_seq=%s) — re-bootstrap cooldown (%.1fs of %.1fs), skipping",
+                delay = _REBOOTSTRAP_COOLDOWN_SECONDS - since
+                _LOGGER.info(
+                    "WS replay lost (oldest_seq=%s) — re-bootstrap cooldown (%.1fs of %.1fs), deferring by %.1fs",
                     oldest_seq,
                     since,
                     _REBOOTSTRAP_COOLDOWN_SECONDS,
+                    delay,
+                )
+                self._rebootstrap_task = asyncio.create_task(
+                    self._run_deferred_rebootstrap(delay),
+                    name="openccu-loom-rebootstrap-deferred",
                 )
                 return
         _LOGGER.warning("WS replay lost (oldest_seq=%s) — scheduling store re-bootstrap", oldest_seq)
@@ -1039,9 +1050,25 @@ class LoomClient:
         """
         self._rebootstrap_hook = hook
 
+    async def _run_deferred_rebootstrap(self, delay: float, /) -> None:
+        """Sleep out the rest of the cooldown, then run the re-bootstrap."""
+        await asyncio.sleep(delay)
+        await self._run_rebootstrap()
+
     async def _run_rebootstrap(self) -> None:
-        """Body of the replay-lost re-bootstrap; logs and swallows failures."""
+        """
+        Body of the replay-lost re-bootstrap; logs and swallows failures.
+
+        Waits for the daemon's readiness first, like the initial start does: a
+        loss right after a daemon restart (its seq restarts at 1) would
+        otherwise walk a half-built model whose usage marks are not applied yet
+        and turn hidden parameters into creatable data points
+        (openccu-loom#1053). The wait is bounded by
+        :attr:`LoomConfig.readiness_wait_seconds`, and a timeout is not fatal —
+        the walk runs anyway.
+        """
         try:
+            await self.wait_until_ready()
             await self.bootstrap()
             if (hook := self._rebootstrap_hook) is not None:
                 await hook()
