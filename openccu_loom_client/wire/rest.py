@@ -4011,6 +4011,12 @@ class NodeWarning(BaseModel):
     since: AwareDatetime | None = Field(None, description="When the host first saw it; absent when unknown.")
 
 
+class Counter(BaseModel):
+    code: str = Field(..., description="The counter's stable machine name, e.g. discards.")
+    value: int = Field(..., description="The count since the host started.", ge=0)
+    message: str = Field(..., description="What the counter counts, in one line in the host's language.")
+
+
 class Fabric(BaseModel):
     fabric_index: int
     fabric_id: int = Field(..., description="Informational; use fabric_id_hex.")
@@ -4063,25 +4069,6 @@ class Endpoint(BaseModel):
     clusters: list[Cluster]
 
 
-class EndpointList(BaseModel):
-    endpoints: list[Endpoint]
-
-
-class Session(BaseModel):
-    session_id: int
-    fabric_index: int
-    peer_node_id: int = Field(..., description="Informational; use peer_node_id_hex.")
-    peer_node_id_hex: str
-    local_node_id: int = Field(..., description="Informational; use local_node_id_hex.")
-    local_node_id_hex: str
-    is_pase: bool
-    subscriptions: int
-    last_activity: AwareDatetime
-    last_peer_activity: AwareDatetime
-    idle_seconds: int
-    peer_idle_seconds: int
-
-
 class Occupancy(BaseModel):
     live: int
     reserved: int
@@ -4089,9 +4076,31 @@ class Occupancy(BaseModel):
     free: int
 
 
-class SessionList(BaseModel):
-    sessions: list[Session]
-    occupancy: Occupancy
+class SessionParameters(BaseModel):
+    idle_interval_ms: int = Field(..., description="SESSION_IDLE_INTERVAL.")
+    active_interval_ms: int = Field(..., description="SESSION_ACTIVE_INTERVAL.")
+    active_threshold_ms: int = Field(..., description="SESSION_ACTIVE_THRESHOLD.")
+    data_model_revision: int
+    interaction_model_revision: int
+    specification_version_hex: str = Field(
+        ..., description='SPECIFICATION_VERSION as 8 uppercase hex digits, e.g. "01050000".'
+    )
+    max_paths_per_invoke: int
+    supported_transports: int = Field(
+        ..., description="The SUPPORTED_TRANSPORTS bitmap, the transports beside MRP over UDP."
+    )
+    tcp: bool = Field(..., description="The bitmap names TCP in either role.")
+    max_tcp_message_size: int | None = Field(None, description="MAX_TCP_MESSAGE_SIZE in bytes; present with tcp.")
+
+
+class TopologyRef(BaseModel):
+    page: str
+    id: str
+
+
+class TopologyDetail(BaseModel):
+    key: str = Field(..., description="A stable key a page translates (`device_type`, `clusters`, …).")
+    value: str
 
 
 class MdnsService(BaseModel):
@@ -4122,6 +4131,16 @@ class Compatibility(BaseModel):
     ecosystems: list[Ecosystem]
     endpoint_count: int
     findings: list[CompatFinding]
+
+
+class HealthSampleEvent(BaseModel):
+    healthy: bool
+    note: str = Field(..., description="The probe's stable English note.")
+    sampled_at: AwareDatetime = Field(..., description="When the handler received the verdict, on the node's clock.")
+
+
+class NodesChangedEvent(BaseModel):
+    keys: list[str]
 
 
 class Column(BaseModel):
@@ -4173,6 +4192,10 @@ class FactoryResetRequest(BaseModel):
     confirm: Literal["remove-all-fabrics"]
 
 
+class EraseRequest(BaseModel):
+    confirm: Literal["erase-node"]
+
+
 class FabricEvent(BaseModel):
     fabric_index: int
     vendor_id: int | None = None
@@ -4185,6 +4208,21 @@ class WindowEvent(BaseModel):
     duration_seconds: int | None = None
 
 
+class SessionEvent(BaseModel):
+    session_id: int
+    fabric_index: int
+    peer_node_id: int = Field(..., description="Informational; use peer_node_id_hex.")
+    peer_node_id_hex: str
+    local_node_id: int = Field(..., description="Informational; use local_node_id_hex.")
+    local_node_id_hex: str
+    is_pase: bool
+    subscriptions: int
+    last_activity: AwareDatetime
+    last_peer_activity: AwareDatetime
+    idle_seconds: int
+    peer_idle_seconds: int
+
+
 class ExposureEvent(BaseModel):
     keys: list[str]
 
@@ -4194,6 +4232,14 @@ class SurfaceChangedEvent(BaseModel):
         ...,
         description='The key of the endpoint whose served surface an assembly changed (go-fabric node.Observers.OnSurfaceChanged, one endpoint per event); "" is the root endpoint.',
     )
+
+
+class AttributeChangedEvent(BaseModel):
+    endpoint: int
+    cluster_hex: str = Field(
+        ..., description='The cluster id as `id_hex` elsewhere: "0x" and at least four uppercase hex digits.'
+    )
+    attributes: list[str] = Field(..., description="The ids of the attributes that changed, ascending, in hex.")
 
 
 class SurfaceDeviceType(BaseModel):
@@ -4211,6 +4257,64 @@ class SurfaceCluster(BaseModel):
     revision: int = Field(..., description="ClusterRevision.")
 
 
+class EndpointDeviceType(BaseModel):
+    id: int
+    id_hex: str
+    name: str | None = Field(None, description="The device type's name; absent for one the schema does not know.")
+    revision: int
+
+
+class SemanticTag(BaseModel):
+    namespace: int
+    tag: int
+    mfg_code: int | None = Field(
+        None, description="The manufacturer code of a manufacturer-specific namespace; absent when null."
+    )
+    label: str | None = None
+
+
+class EndpointLabel(BaseModel):
+    label: str
+    value: str
+    user: bool = Field(..., description="An entry of UserLabel; FixedLabel's otherwise.")
+
+
+class ConformanceViolation(BaseModel):
+    device_type: str
+    device_type_id: int | None = Field(
+        None, description="Absent for Base and where the violation names no device type."
+    )
+    requirement: str
+    kind: str
+    detail: str
+
+
+class ClusterFeature(BaseModel):
+    code: str = Field(..., description='The short name ("LT").')
+    title: str | None = Field(None, description='The long name ("Lighting"); absent where no definition names it.')
+    bit: int
+
+
+class ClusterAttribute(BaseModel):
+    id: int
+    id_hex: str
+    name: str | None = None
+    value: Any | None = Field(
+        None,
+        description="The attribute's value as JSON by field name; absent in a structure-only answer or while unknown.",
+    )
+    status: int | None = Field(
+        None,
+        description="The IM status the attribute was answered with; absent on success. The node family sets it, without a `value`, for an attribute its read path failed (0.5.0).",
+    )
+
+
+class ClusterElement(BaseModel):
+    id: int
+    id_hex: str
+    name: str | None = None
+
+
 class NodePairingSource(_TolerantStrEnum):
     configured = "configured"
     window = "window"
@@ -4225,6 +4329,16 @@ class NodeDiagnosticEventKind(_TolerantStrEnum):
     pairing = "pairing"
     session = "session"
     discovery = "discovery"
+    reachability = "reachability"
+    icd = "icd"
+    ota = "ota"
+    camera = "camera"
+
+
+class NodeSessionTransport(_TolerantStrEnum):
+    udp = "udp"
+    tcp = "tcp"
+    ble = "ble"
 
 
 class NodeDiagnosticEventSeverity(_TolerantStrEnum):
@@ -4267,6 +4381,65 @@ class NodeSurfaceVerdict(_TolerantStrEnum):
     warn = "warn"
     remove = "remove"
     refuse = "refuse"
+
+
+class NodeTopologyFamily(_TolerantStrEnum):
+    node = "node"
+    controller = "controller"
+
+
+class NodeTopologyNodeKind(_TolerantStrEnum):
+    node = "node"
+    aggregator = "aggregator"
+    device = "device"
+    part = "part"
+    fabric = "fabric"
+    session = "session"
+    peer = "peer"
+    thread_router = "thread_router"
+    thread_end_device = "thread_end_device"
+    wifi_ap = "wifi_ap"
+    ethernet = "ethernet"
+    border_router = "border_router"
+
+
+class NodeTopologyNodeState(_TolerantStrEnum):
+    ok = "ok"
+    unreachable = "unreachable"
+    idle = "idle"
+    unknown = "unknown"
+
+
+class NodeTopologyEdgeKind(_TolerantStrEnum):
+    contains = "contains"
+    session = "session"
+    link = "link"
+
+
+class NodeTopologyEdgeStrength(_TolerantStrEnum):
+    strong = "strong"
+    medium = "medium"
+    weak = "weak"
+    none = "none"
+    unknown = "unknown"
+
+
+class NodeConfigSource(_TolerantStrEnum):
+    configuration = "configuration"
+    registry = "registry"
+
+
+class NodeConformanceStatus(_TolerantStrEnum):
+    unknown = "unknown"
+    incomplete = "incomplete"
+    clean = "clean"
+    violated = "violated"
+
+
+class NodeEventPriority(_TolerantStrEnum):
+    debug = "debug"
+    info = "info"
+    critical = "critical"
 
 
 class NodeEndpointsChangedPayload(BaseModel):
@@ -4910,36 +5083,6 @@ class ListSchedulesResponse(BaseModel):
     items: list[ScheduleDeviceSummary]
 
 
-class Status5(BaseModel):
-    enabled: bool
-    listening: bool
-    listen_addr: str | None = None
-    healthy: bool | None = Field(None, description="Absent when the node runs no health probe.")
-    health_note: str | None = None
-    endpoint_count: int
-    fabric_count: int
-    enabled_count: int | None = Field(None, description="Enabled selection items; absent without a selection.")
-    advertising: bool
-    commissioning_window_open: bool
-    commissioning_window_duration_seconds: int | None = None
-    window_kind: NodeWindowKind | None = None
-    window_deadline: AwareDatetime | None = Field(
-        None, description="When the open window's timer closes it, on the node's clock; absent while no window is open."
-    )
-    exposure: bool = Field(..., description="Whether the host serves a selection.")
-    csrf_token: str | None = Field(
-        None, description="The admin token of token mode; absent when the host decides admin rights."
-    )
-    warnings: list[NodeWarning] | None = Field(
-        None,
-        description="The host's findings about its own configuration; absent when the host reports none (no Options.Warnings), empty when it finds nothing.",
-    )
-    surface: Surface | None = Field(
-        None,
-        description="The policies the node's served surface is composed under (go-fabric node.Node.Surface) and the counts that tell whether to look further; absent without a node.",
-    )
-
-
 class Pairing(BaseModel):
     discriminator: int | None = Field(
         None, description="Only for a window this handler opened on fresh credentials; the codes carry it."
@@ -4950,6 +5093,87 @@ class Pairing(BaseModel):
     source: NodePairingSource
     window_open: bool
     duration_seconds: int | None = None
+
+
+class StructuralEndpoint(BaseModel):
+    endpoint_id: int
+    parent_endpoint_id: int | None = Field(
+        None, description="The endpoint whose parts list names this one; absent for the root and top-level endpoints."
+    )
+    name: str = Field(..., description="The endpoint's node label; its first device type's name without one.")
+    device_types: list[EndpointDeviceType] = Field(..., description="The Descriptor's DeviceTypeList in its order.")
+    parts: list[int] = Field(
+        ...,
+        description="The endpoint numbers of its direct children — the endpoints whose parent it is, not every descendant its PartsList names.",
+    )
+
+
+class Session(BaseModel):
+    session_id: int
+    fabric_index: int
+    peer_node_id: int = Field(..., description="Informational; use peer_node_id_hex.")
+    peer_node_id_hex: str
+    local_node_id: int = Field(..., description="Informational; use local_node_id_hex.")
+    local_node_id_hex: str
+    is_pase: bool
+    subscriptions: int
+    last_activity: AwareDatetime
+    last_peer_activity: AwareDatetime
+    idle_seconds: int
+    peer_idle_seconds: int
+    created_at: AwareDatetime | None = Field(
+        None,
+        description="When the session was established (0.9.0); the controller's sessions only, absent on the node.",
+    )
+    resumed: bool | None = Field(
+        None, description="The session came from a CASE resumption (0.9.0); the controller's sessions only."
+    )
+    transport: NodeSessionTransport | None = None
+    peer_lost: bool | None = Field(
+        None,
+        description="The session was given up because the peer is gone or closed it, still listed while it closes (0.9.0); the controller's sessions only.",
+    )
+
+
+class SessionList(BaseModel):
+    sessions: list[Session]
+    occupancy: Occupancy
+    parameters: SessionParameters | None = None
+
+
+class TopologyNode(BaseModel):
+    id: str = Field(
+        ...,
+        description="Unique in the graph: `node`, `ep:<n>`, `fabric:<index>`, `session:<id>`, `peer:<node_id_hex>`.",
+    )
+    kind: NodeTopologyNodeKind
+    label: str
+    state: NodeTopologyNodeState
+    ref: TopologyRef | None = None
+    details: list[TopologyDetail]
+    endpoint: int | None = Field(None, description="aggregator, device, part: the endpoint number.")
+    fabric_index: int | None = Field(None, description="fabric, session: the fabric index; 0 for a PASE session.")
+    session_id: int | None = Field(None, description="session: the local session id.")
+    node_id_hex: str | None = Field(
+        None, description="fabric: our node id on it; session: the peer's; peer: the node's."
+    )
+    reachable: bool | None = Field(None, description="device, part: Reachable as a controller reads it.")
+    is_pase: bool | None = Field(None, description="session: a commissioning (PASE) session.")
+    subscriptions: int | None = Field(None, description="session: the subscriptions riding on it.")
+    role: str | None = Field(None, description="peer: its Thread routing role or network kind.")
+    rloc16: int | None = Field(None, description="peer: its Thread RLOC16.")
+    ssid: str | None = Field(None, description="wifi_ap, peer: the Wi-Fi network.")
+    bssid: str | None = Field(None, description="wifi_ap, peer: the access point's BSSID.")
+
+
+class TopologyEdge(BaseModel):
+    source: str = Field(..., description="A node id.")
+    target: str = Field(..., description="A node id.")
+    kind: NodeTopologyEdgeKind
+    strength: NodeTopologyEdgeStrength | None = None
+    lqi: int | None = Field(None, description="link: Thread link quality indicator.")
+    rssi: int | None = Field(None, description="link: received signal strength, dBm.")
+    label: str | None = None
 
 
 class MdnsFinding(BaseModel):
@@ -4971,6 +5195,24 @@ class DiagnosticEvent(BaseModel):
     severity: NodeDiagnosticEventSeverity
     message: str
     detail: dict[str, str] | None = None
+
+
+class NodeConfig(BaseModel):
+    source: NodeConfigSource
+    source_note: str | None = Field(
+        None,
+        description='The host\'s wording of where a configured node\'s values come from ("add-on options", "the --bridge-* flags"); absent when it gives none.',
+    )
+    label: str | None = Field(None, description="The node's configured name; absent when it has none.")
+    listen: str = Field(..., description='The address the node listens on, as configured ("[::]:5540").')
+    discriminator: int = Field(..., ge=0, le=4095)
+    vendor_id: int = Field(..., ge=0, le=65535)
+    vendor_name: str | None = None
+    product_id: int = Field(..., ge=0, le=65535)
+    product_name: str | None = None
+    store: str | None = Field(
+        None, description="Where the node keeps its state (a file name); absent when the host does not say."
+    )
 
 
 class DiagnosticEventList(BaseModel):
@@ -5053,6 +5295,50 @@ class SurfaceElementChange(BaseModel):
     endpoint: str
     id: str
     kind: NodeSurfaceElementKind
+
+
+class ConformanceVerdict(BaseModel):
+    status: NodeConformanceStatus
+    violations: list[ConformanceViolation]
+    unjudged: list[ClusterElement] = Field(
+        ..., description="The server clusters the ServerList names whose inside was not judged."
+    )
+
+
+class ClusterDetail(BaseModel):
+    id: int
+    id_hex: str
+    name: str | None = Field(None, description="The cluster's name; absent for one no definition names.")
+    revision: int
+    feature_map_hex: str
+    features: list[ClusterFeature] = Field(..., description="The features the feature map sets, in bit order.")
+    data_version: int | None = Field(None, description="The cluster's DataVersion; absent while unknown.")
+    attributes: list[ClusterAttribute] = Field(..., description="The AttributeList in id order.")
+    accepted: list[ClusterElement] = Field(..., description="The AcceptedCommandList.")
+    generated: list[ClusterElement] = Field(..., description="The GeneratedCommandList.")
+    events: list[ClusterElement] = Field(..., description="The EventList where the peer reports one.")
+
+
+class EventRecord(BaseModel):
+    number: int = Field(..., description="The node-wide event number (Matter Core §7.14.2.1).")
+    priority: NodeEventPriority
+    endpoint: int
+    cluster_hex: str
+    event_hex: str
+    name: str | None = Field(
+        None, description="The event's name in go-fabric's schema; absent for one it does not name."
+    )
+    epoch_ms: int | None = Field(
+        None,
+        description="The event's epoch timestamp in milliseconds; absent when the event carries a system timestamp only.",
+    )
+    data: Any | None = Field(
+        None, description="The event's data as JSON by field name; absent without data or when it cannot be rendered."
+    )
+
+
+class EventRecordList(BaseModel):
+    events: list[EventRecord] = Field(..., description="Oldest first.")
 
 
 class RSSIMatrixCentral(BaseModel):
@@ -5178,6 +5464,82 @@ class ListGroupsResponse(BaseModel):
     entries: list[GroupCentralEntry]
 
 
+class Status5(BaseModel):
+    enabled: bool
+    listening: bool
+    listen_addr: str | None = None
+    healthy: bool | None = Field(None, description="Absent when the node runs no health probe.")
+    health_note: str | None = None
+    endpoint_count: int
+    fabric_count: int
+    enabled_count: int | None = Field(None, description="Enabled selection items; absent without a selection.")
+    advertising: bool
+    commissioning_window_open: bool
+    commissioning_window_duration_seconds: int | None = None
+    window_kind: NodeWindowKind | None = None
+    window_deadline: AwareDatetime | None = Field(
+        None, description="When the open window's timer closes it, on the node's clock; absent while no window is open."
+    )
+    exposure: bool = Field(..., description="Whether the host serves a selection.")
+    exposure_reason: str | None = Field(
+        None,
+        description="Why the host serves no selection, in the host's language; absent when it serves one or gives no reason (0.5.0).",
+    )
+    csrf_token: str | None = Field(
+        None, description="The admin token of token mode; absent when the host decides admin rights."
+    )
+    admin: bool | None = Field(
+        None,
+        description="Whether the host's admin check admits this request (0.6.0); present when the host decides admin rights, absent in token mode, where `csrf_token` says it.",
+    )
+    node_registry: bool | None = Field(
+        None,
+        description="Whether the host keeps a node registry (0.6.0): `POST /nodes` creates a node and a `managed` node can be renamed and deleted. Absent without one.",
+    )
+    config: NodeConfig | None = None
+    attestation_error: str | None = Field(
+        None,
+        description="Why the node's attestation files did not load (0.7.0, go-fabric `Node.AttestationError`): the node runs on the test chain and refuses every commissioning until the files are fixed and a new node is built. Absent when the files loaded, named nothing, or without a node.",
+    )
+    boot_reason: int | None = Field(
+        None,
+        description="The GeneralDiagnostics BootReason the node was built with (0.7.0, go-fabric `Node.BootReason`; BootReasonEnum: 0 Unspecified, 1 PowerOnReboot, 2 BrownOutReset, 3 SoftwareWatchdogReset, 4 HardwareWatchdogReset, 5 SoftwareUpdateCompleted, 6 SoftwareReset). Absent without a node.",
+        ge=0,
+        le=6,
+    )
+    erase: bool | None = Field(
+        None,
+        description="Whether the host wires an erase of this node (0.7.0, `Options.Erase` or `NodeEntry.Erase`): `POST /node/maintenance/erase` is served. Absent without one.",
+    )
+    warnings: list[NodeWarning] | None = Field(
+        None,
+        description="The host's findings about its own configuration; absent when the host reports none (no Options.Warnings), empty when it finds nothing.",
+    )
+    counters: list[Counter] | None = Field(
+        None,
+        description="The host's own counters a scraper reads beside the health (0.8.0), e.g. `discards`, commands the host answered with success and acted on nothing; absent when the host reports none (no Options.Counters), empty when it has none to report. Host-wide: every node's status carries the same list.",
+    )
+    surface: Surface | None = Field(
+        None,
+        description="The policies the node's served surface is composed under (go-fabric node.Node.Surface) and the counts that tell whether to look further; absent without a node.",
+    )
+
+
+class EndpointList(BaseModel):
+    endpoints: list[Endpoint]
+    structural: list[StructuralEndpoint] | None = Field(
+        None,
+        description="The root and the Aggregator — the endpoints `endpoints` does not list — root first, then by number (0.5.0).",
+    )
+
+
+class TopologyGraph(BaseModel):
+    as_of: AwareDatetime = Field(..., description="When the graph was read, on the node's or the controller's clock.")
+    family: NodeTopologyFamily
+    nodes: list[TopologyNode]
+    edges: list[TopologyEdge]
+
+
 class SurfaceEffective(BaseModel):
     endpoints: list[SurfaceEndpoint] = Field(..., description="The endpoints other than the root, by key.")
     root: SurfaceEndpoint
@@ -5191,6 +5553,33 @@ class SurfaceChange(BaseModel):
         ..., description="The differences; empty when only the earlier digest was available."
     )
     endpoint: str = Field(..., description="The endpoint's key.")
+
+
+class EndpointDetail(BaseModel):
+    endpoint_id: int
+    parent_endpoint_id: int | None = Field(
+        None, description="The endpoint whose parts list names this one; absent for the root and top-level endpoints."
+    )
+    name: str = Field(..., description="The device type's name as the controller names the endpoint.")
+    reachable: bool = Field(
+        ..., description="BridgedDeviceBasicInformation Reachable where the endpoint serves it; true elsewhere."
+    )
+    device_types: list[EndpointDeviceType] = Field(..., description="The Descriptor's DeviceTypeList in its order.")
+    scope: str | None = Field(
+        None, description="The snapshot scope a node-side endpoint was assembled from; absent on the controller side."
+    )
+    tags: list[SemanticTag] = Field(..., description="The Descriptor's TagList; empty when the endpoint serves none.")
+    labels: list[EndpointLabel] = Field(..., description="The FixedLabel LabelList, then the UserLabel LabelList.")
+    parts: list[int] = Field(
+        ...,
+        description="The endpoint numbers of its direct children — the endpoints whose parent it is, not every descendant its PartsList names.",
+    )
+    clusters: list[ClusterDetail] = Field(..., description="The server clusters in id order.")
+    conformance: ConformanceVerdict | None = None
+    decisions: list[SurfaceDecision] | None = Field(
+        None,
+        description="The node's surface decisions on this endpoint (0.4.1, node family only), as `GET /node/surface` lists them.",
+    )
 
 
 class RSSIMatrixResponse(BaseModel):
