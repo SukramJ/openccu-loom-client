@@ -207,18 +207,28 @@ class HttpTransport:
 
         The reference value is stamped into ``openccu_loom_client.wire``
         at generation time (daemon ADR 0028); equality means the generated
-        wire types match the daemon build exactly. A mismatch is logged as a
-        warning, not raised: the contract may still be compatible —
-        ``api_version`` and the capability set govern hard compatibility.
-        Silently skipped when either side predates the digest (old
-        daemon or unstamped wire layer).
+        wire types match the daemon build exactly. A mismatch is logged, not
+        raised: the contract may still be compatible — ``api_version`` and the
+        capability set govern hard compatibility. It is a WARNING only when the
+        daemon's API major differs from the one this build was generated for
+        (or either version is unparsable), and INFO otherwise: a daemon an
+        additive minor ahead is the ordinary state after a daemon update and
+        must not warn on every connect. The same split as
+        :meth:`_report_api_version`. Silently skipped when either side predates
+        the digest (old daemon or unstamped wire layer).
         """
         daemon_digest = info_payload.get("schema_digest", "") if isinstance(info_payload, dict) else ""
         types_digest = getattr(wire, "SCHEMA_DIGEST", "")
         if not daemon_digest or not types_digest:
             return
         if daemon_digest != types_digest:
-            _LOGGER.warning(
+            built_for = getattr(wire, "DAEMON_API_VERSION", "?")
+            daemon_api = self._info.api_version if self._info else "?"
+            built_mm = self._parse_major_minor(built_for)
+            daemon_mm = self._parse_major_minor(daemon_api)
+            same_major = built_mm is not None and daemon_mm is not None and built_mm[0] == daemon_mm[0]
+            _LOGGER.log(
+                logging.INFO if same_major else logging.WARNING,
                 "this build's wire types were generated from a different daemon build: "
                 "daemon at %s reports schema_digest=%s, this build carries %s "
                 "(built for daemon_api_version=%s, daemon reports api_version=%s) — "
@@ -226,8 +236,8 @@ class HttpTransport:
                 self._config.host,
                 daemon_digest,
                 types_digest,
-                getattr(wire, "DAEMON_API_VERSION", "?"),
-                self._info.api_version if self._info else "?",
+                built_for,
+                daemon_api,
             )
 
     def _assert_capabilities(self) -> None:

@@ -93,18 +93,34 @@ _DIGEST_B = "sha256:" + "b" * 64
 class TestSchemaDigestHandshake:
     """Connect-time digest comparison against openccu-loom-types (daemon ADR 0028)."""
 
-    async def test_digest_mismatch_warns_but_connects(
+    @pytest.mark.parametrize(
+        ("built_for", "daemon_api", "level"),
+        [
+            ("15.2.0", "16.0.0", logging.WARNING),  # a major apart
+            ("15.2.0", "not-a-version", logging.WARNING),  # unparsable: cannot tell
+            ("15.2.0", "15.7.0", logging.INFO),  # an additive minor ahead (#1053)
+            ("15.9.0", "15.7.0", logging.INFO),  # the daemon a minor behind
+        ],
+    )
+    async def test_digest_mismatch_logs_by_major_and_connects(
         self,
         mock_daemon: MockDaemon,
         transport: HttpTransport,
         monkeypatch: pytest.MonkeyPatch,
         caplog: pytest.LogCaptureFixture,
+        built_for: str,
+        daemon_api: str,
+        level: int,
     ) -> None:
         monkeypatch.setattr(wire, "SCHEMA_DIGEST", _DIGEST_A, raising=False)
-        mock_daemon.get("/api/v1/info", payload={**_INFO_RESPONSE, "schema_digest": _DIGEST_B})
-        with caplog.at_level(logging.WARNING):
+        monkeypatch.setattr(wire, "DAEMON_API_VERSION", built_for, raising=False)
+        mock_daemon.get(
+            "/api/v1/info", payload={**_INFO_RESPONSE, "api_version": daemon_api, "schema_digest": _DIGEST_B}
+        )
+        with caplog.at_level(logging.INFO):
             await transport.connect()
-        assert any("different daemon build" in r.message for r in caplog.records)
+        digest = [r for r in caplog.records if "different daemon build" in r.message]
+        assert [r.levelno for r in digest] == [level]
         await transport.close()
 
     async def test_digest_match_is_silent(
