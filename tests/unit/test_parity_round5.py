@@ -519,7 +519,7 @@ class TestCombinedDurationSirenOnly:
         _attach_duration_pair(store, address="VCU1", channel=2)
         adapter = _adapter_for(store)
         await adapter._bootstrap_combined_data_points()
-        assert adapter._extra_data_points == []
+        assert list(adapter._extra_data_points) == []
 
     async def test_sound_player_cdp_spawns_nothing(self) -> None:
         # Sound players declare the DURATION pair too, but aiohomematic's
@@ -537,7 +537,7 @@ class TestCombinedDurationSirenOnly:
         )
         adapter = _adapter_for(store)
         await adapter._bootstrap_combined_data_points()
-        assert adapter._extra_data_points == []
+        assert list(adapter._extra_data_points) == []
 
 
 # ---------------------------------------------------------------------------
@@ -734,14 +734,14 @@ class TestScheduleDiscovery:
         )
         adapter = _adapter_for(store, schedules=schedules)
         await adapter._bootstrap_schedules()
-        assert adapter._extra_data_points == []
+        assert list(adapter._extra_data_points) == []
 
     async def test_climate_404_is_tolerated(self) -> None:
         store = _store_with_device(channels=[_channel(address="VCU1", number=1, name="Thermostat KU:1")])
         store.attach_custom_data_points(device_address="VCU1", cdps=[_cdp_summary()])
         adapter = _adapter_for(store, schedules=_FakeSchedulesOps())
         await adapter._bootstrap_schedules()
-        assert adapter._extra_data_points == []
+        assert list(adapter._extra_data_points) == []
 
 
 # ---------------------------------------------------------------------------
