@@ -1,3 +1,19 @@
+# Version 2026.11.7 (2026-11-12)
+
+- **Incidents read as the array the daemon sends.** `GET /incidents` answers
+  with a JSON array of `Incident`; `DiagnosticsOperations.list_incidents`
+  passed it through `dict()` and raised `ValueError` as soon as the daemon
+  held one incident, which failed Home Assistant's config-entry diagnostics
+  download and the integration panel's incident list. It now returns
+  `list[dict[str, Any]]` — breaking for code that read the result as a dict.
+- **The incident store of the compat central speaks the daemon's schema.**
+  `get_diagnostics` returns `total_incidents`, `incidents_by_severity` and
+  the ten most recent incidents instead of the raw response, and
+  `get_incidents_by_interface` matches the interface id against the
+  incident's `component` (`<central>/<interface id>`); it read an
+  `interface_id` field the schema does not have, so every per-interface
+  list came back empty.
+
 # Version 2026.11.6 (2026-11-12)
 
 - **Wire layer regenerated for daemon 0.100.0 (api 16.2.0).** Api 16.0.0

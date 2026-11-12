@@ -1703,19 +1703,66 @@ class TestIntegrationDashboardSurface:
         assert health["failed_clients"] == ["home:BidCos-RF"]
         assert health["overall_health_score"] == 0.5
 
-    async def test_incidents_by_interface_are_to_dict_able(self) -> None:
-        incident = {"id": "1", "interface_id": "home:HmIP-RF", "severity": "warn", "summary": "s"}
+    # GET /incidents is a JSON array of Incident (id, when, component, severity,
+    # summary, detail). `component` is the central name, plus "/<interface id>"
+    # for an interface-scoped incident — the same interface id GET /interfaces
+    # reports as `id`, which is what `interface_id` carries in this adapter.
+    _HMIP = {
+        "id": "3",
+        "when": "2026-11-12T08:00:00Z",
+        "component": "home/home-HmIP-RF",
+        "severity": "warning",
+        "summary": "ping/pong: pending TTL exceeded",
+        "detail": "",
+    }
+    _WIRED = {
+        "id": "2",
+        "when": "2026-11-12T07:00:00Z",
+        "component": "home/home-HmIP-Wired",
+        "severity": "error",
+        "summary": "circuit_breaker_tripped",
+        "detail": "",
+    }
+    _CENTRAL = {
+        "id": "1",
+        "when": "2026-11-12T06:00:00Z",
+        "component": "home",
+        "severity": "warning",
+        "summary": "callback_timeout",
+        "detail": "",
+    }
 
-        async def list_incidents() -> dict[str, Any]:
-            return {"incidents": [incident, {"id": "2", "interface_id": "other"}]}
+    def _store(self) -> _IncidentStore:
+        async def list_incidents() -> list[dict[str, Any]]:
+            return [self._HMIP, self._WIRED, self._CENTRAL]
 
-        store = _IncidentStore(
+        return _IncidentStore(
             client=SimpleNamespace(diagnostics=SimpleNamespace(list_incidents=list_incidents)),
             looper=SimpleNamespace(),
         )
-        incidents = await store.get_incidents_by_interface(interface_id="home:HmIP-RF")
+
+    async def test_incidents_by_interface_match_the_component(self) -> None:
+        incidents = await self._store().get_incidents_by_interface(interface_id="home-HmIP-RF")
         # The handler does [i.to_dict() for i in incidents] — plain dicts raised AttributeError.
-        assert [i.to_dict() for i in incidents] == [incident]
+        # The filter read an `interface_id` field the Incident schema does not carry,
+        # so every interface's list came back empty.
+        assert [i.to_dict() for i in incidents] == [self._HMIP]
+
+    async def test_recent_incidents_keep_the_daemon_order(self) -> None:
+        assert await self._store().get_recent_incidents(limit=2) == [self._HMIP, self._WIRED]
+
+    async def test_diagnostics_summarise_the_array(self) -> None:
+        """
+        HA's diagnostics download stores this dict; the panel reads the counts from it.
+
+        Passing the daemon's array through ``dict()`` raised ValueError and
+        failed the whole config-entry diagnostics download.
+        """
+        assert await self._store().get_diagnostics() == {
+            "total_incidents": 3,
+            "incidents_by_severity": {"warning": 2, "error": 1},
+            "recent_incidents": [self._HMIP, self._WIRED, self._CENTRAL],
+        }
 
     async def test_clear_incidents_reaches_the_daemon(self) -> None:
         """A client-side no-op left the list unchanged and the panel button dead."""
