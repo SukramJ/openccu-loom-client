@@ -147,6 +147,10 @@ class SystemOperations(_OperationsBase):
         whether the safety net exists. Callers on a tight timeout budget
         must raise :attr:`LoomConfig.request_timeout_seconds` accordingly.
         Requires daemon api ≥ 3.11.0; older daemons ignore the body.
+
+        An openccu-lite box runs one system update at a time; while one
+        is in flight the daemon answers 409 (api ≥ 16.2.0), raised as
+        :class:`~openccu_loom_client.exceptions.LoomConflictError`.
         """
         await self._transport.request(
             method="POST",

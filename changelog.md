@@ -1,3 +1,23 @@
+# Version 2026.11.6 (2026-11-12)
+
+- **Wire layer regenerated for daemon 0.100.0 (api 16.2.0).** Api 16.0.0
+  removes the embedded measurement history: `GET /history`,
+  `GET` / `PUT /history/recording`, `GET /energy` and the `/diagrams`
+  routes are gone with their models, and `/measurements/recording` takes
+  the recording switch. 16.1.0 adds `origin` and `box_owns` to
+  `GET /ui/surfaces`, 16.2.0 the box's `lite.interfaces` on the probe.
+  None of these routes is served by this client. `DAEMON_API_VERSION` and
+  `SCHEMA_DIGEST` move to 16.2.0.
+- **`Capability.MEASUREMENTS` replaces `Capability.HISTORY` and
+  `Capability.DIAGRAMS`.** A daemon from 0.100.0 on emits
+  `measurements.v1` while measurement forwarding is on and never emits
+  `history.v1` or `diagrams.v1`, so a caller requiring either could not
+  connect to it. Breaking for code that names the two removed members.
+- **`install_system_update` documents the 409 of a busy box.** An
+  openccu-lite box answers a second system update with a conflict; the
+  daemon passes it on as 409 instead of 502, raised as
+  `LoomConflictError`.
+
 # Version 2026.11.5 (2026-11-11)
 
 - **A re-bootstrap waits for the daemon's readiness.** After a daemon restart

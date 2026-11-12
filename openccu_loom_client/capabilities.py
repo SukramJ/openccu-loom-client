@@ -58,12 +58,15 @@ class Capability(StrEnum):
     CDP_BOUNDED_ON = "cdp.bounded_on.v1"
     # Emitted when the matching subsystem is configured.
     ALARM = "alarm.v1"
-    HISTORY = "history.v1"
+    #: Measurement forwarding to a time-series store is switched on, and
+    #: ``/measurements/recording`` is mounted (from api 16.0.0 on; it
+    #: replaces ``history.v1`` and ``diagrams.v1``, which no daemon from
+    #: 0.100.0 on emits).
+    MEASUREMENTS = "measurements.v1"
     MATTER_BRIDGE = "matter.bridge.v1"
     MQTT_DISCOVERY = "mqtt.discovery.v1"
     MQTT_RAW = "mqtt.raw.v1"
     WEBHOOK_INBOUND = "webhook.inbound.v1"
-    DIAGRAMS = "diagrams.v1"
     #: The database behind stored users, tokens, centrals, config
     #: sections, preferences and areas. Without it those routes are
     #: mounted and every write is refused, which a caller cannot tell

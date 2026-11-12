@@ -278,10 +278,10 @@ class TestWiringManifest:
             "/api/v1/diagnostics/wiring",
             payload=[
                 {
-                    "name": "history.recorder",
-                    "collaborator": "*history.Recorder",
+                    "name": "measurements.forwarder",
+                    "collaborator": "*measurements.Forwarder",
                     "phase": "per-central",
-                    "why": "no value change is ever recorded",
+                    "why": "no value change is ever forwarded",
                 },
                 {
                     "name": "webhook.alarm_bus",
@@ -293,7 +293,7 @@ class TestWiringManifest:
             ],
         )
         seams = await DiagnosticsOperations(transport=http).get_wiring()
-        assert [s["name"] for s in seams] == ["history.recorder", "webhook.alarm_bus"]
+        assert [s["name"] for s in seams] == ["measurements.forwarder", "webhook.alarm_bus"]
         assert seams[1]["before"] == ["northbridges.started"]
 
     async def test_get_wiring_reports_a_violation_verbatim(self, mock_daemon: MockDaemon, http: HttpTransport) -> None:

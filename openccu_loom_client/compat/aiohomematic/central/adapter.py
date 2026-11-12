@@ -139,7 +139,7 @@ _LOGGER: Final = logging.getLogger(__name__)
 #
 # NOT declared, on purpose, because this layer degrades cleanly without them:
 # alarm.v1 (the alarm panels stay an empty list and no panel entity spawns),
-# history.v1, diagrams.v1, admin.persistence.v1, mqtt.*, matter.bridge.v1,
+# measurements.v1, admin.persistence.v1, mqtt.*, matter.bridge.v1,
 # webhook.inbound.v1, mcp.*, auth.oidc.v1 / auth.ccu.v1 (this layer sends its
 # own bearer or basic credential), system.restart.supervised.v1 and
 # addon_self_update (read as optional features, never as preconditions).
