@@ -54,8 +54,7 @@ class _OperationsBase:
 
         ``by_alias=True`` is not cosmetic: the generator renames every
         field colliding with a Python keyword, so ``AlarmOutput``'s
-        ``class`` becomes ``class_`` and ``EnergyResponse``'s ``from``
-        becomes ``from_``. Dumping by field name sent the daemon
+        ``class`` becomes ``class_``, and a ``from`` becomes ``from_``. Dumping by field name sent the daemon
         ``{"class_": …}`` for a property its schema requires as
         ``class`` — the wire name is the alias, always.
         """

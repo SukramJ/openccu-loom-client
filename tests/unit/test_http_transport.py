@@ -295,7 +295,7 @@ class TestCapabilityGate:
         monkeypatch.setattr(wire, "DAEMON_API_VERSION", _TYPES_API_VERSION, raising=False)
         mock_daemon.get("/api/v1/info", payload={**_INFO_RESPONSE, "api_version": _TYPES_API_VERSION})
         with pytest.raises(LoomIncompatibleVersionError, match="missing required capabilities"):
-            await transport.connect(required_capabilities=[Capability.HISTORY])
+            await transport.connect(required_capabilities=[Capability.MEASUREMENTS])
         await transport.close()
 
     async def test_present_capability_connects_across_a_major_difference(

@@ -69,8 +69,8 @@ _HTTP_METHODS = frozenset({"get", "post", "put", "patch", "delete", "head", "opt
 # Absent on purpose: `matter`, `auth`, `central-admin`, `config-admin`,
 # `user-admin` and `token-admin` are the admin façades removed in #118 — the
 # daemon serves them and node-red drives five of them, but nothing that goes
-# through this package does. `core`, `history`, `webhook` and `setup` were
-# never served here.
+# through this package does. `core`, `measurements`, `webhook` and `setup`
+# were never served here.
 _FULLY_SERVED_TAGS: frozenset[str] = frozenset(
     {
         "System",
