@@ -849,6 +849,45 @@ class RxMode(BaseModel):
     )
 
 
+class ProjectionPlaneState(_TolerantStrEnum):
+    active = "active"
+    inactive = "inactive"
+
+
+class ProjectionVerdict(_TolerantStrEnum):
+    published = "published"
+    folded = "folded"
+    withheld = "withheld"
+
+
+class ProjectionEntry(BaseModel):
+    channel: int = Field(
+        ...,
+        description="The channel number the subject belongs to; `-1` for a\nsubject of the device itself (the firmware-update entity).\n",
+    )
+    kind: str | None = Field(
+        None,
+        description="The kind of subject in the plane's vocabulary. Absent for an\nentry about the whole channel. On `matter`: `custom`,\n`calculated`, `combined`, `generic`. Absent on\n`measurements`, whose subjects are the data points of the\nVALUES paramset. On `ha_discovery`: `data_point`,\n`channel_entity` (the entity of the channel's custom data\npoint), `event`, `schedule`, `schedule_switch`, `combined`,\n`update`, and `companion` (an entity announced alongside\nanother: the press button of a writable press, the notify\nentity of a text display). On `mqtt_raw`: `device`,\n`data_point`, `channel_state` (the aggregate state of the\nchannel's custom data point), `week_profile`, `schedule`,\n`schedule_switch`, `combined`. Absent on `rest`, whose\nsubjects are the data points of the VALUES paramset.\n",
+    )
+    key: str | None = Field(
+        None,
+        description="The subject's key in the plane's vocabulary. On `matter` the\nparameter or data-point key, or the key of a consolidated\nendpoint (`BUTTON`, `ELECTRICAL`). On `measurements` the\nparameter. On `ha_discovery` the parameter of a data point\n(`MASTER:<parameter>` for one of the MASTER paramset), the\nkey of a schedule switch, the kind of a combined entity, or\n`<component>/<object_id>` of a companion. On `mqtt_raw` the\nparameter of a data point (`MASTER:<parameter>` for the\nMASTER paramset), `online`, `info`, `diagnostics` or\n`update` for a topic of the device, `active_entries` or\n`attributes` of a schedule, the key of a schedule switch, the\nkind of a channel state or a combined data point. On `rest`\nthe parameter.\n",
+    )
+    verdict: ProjectionVerdict
+    reason: str | None = Field(
+        None,
+        description="Set when `verdict` is `withheld`: one value of the plane's\nclosed set, named after the rule. On `matter`:\n`channel_hidden`, `secondary_channel`, `usage_ignored`,\n`consumed_by_parent`, `secondary_member`, `no_matter_mapping`,\n`not_on_allow_list`, `measurements_not_included`. On\n`measurements`: `not_numeric`, `pattern_excludes`,\n`override_off`, and `no_live_value` (the daemon has observed\nno value on the wire since it started; it passes with the\nnext one). On `ha_discovery`: `hidden_parameter`,\n`not_visible`, `channel_hidden`, `part_of_channel_entity`,\n`usage_no_create`, `usage_ignored`, `event_only_press`,\n`event_suppressed_for_model`, `no_component`,\n`no_scoped_identity`, `render_failed`, `no_entity`,\n`no_custom_data_point`, `builder_declined`,\n`device_not_released`. On `mqtt_raw`: `hidden_parameter`,\n`not_visible`, `device_not_released`, and two that describe\nnow and pass by themselves: `not_observed_yet` (the topic is\nwritten with a value of the channel, and none has arrived\nsince the daemon started) and `empty_value` (there is no\nvalue to write). On `rest`: `channel_hidden` and\n`hidden_parameter`, the two rules of the default data-point\nlist; `?include=all` on that list bypasses them. A later\ndaemon may state a reason this list does not have; show it\nas it is.\n",
+    )
+    folded_into: str | None = Field(
+        None,
+        description="Set when `verdict` is `folded`: the `key` of the entry that\ncarries the subject. On `matter` also `POWER_SOURCE`, the\npower source cluster on one of the device's endpoints. On\n`ha_discovery` `<component>/<object_id>` of the channel's\nentity.\n",
+    )
+    identity: dict[str, str] | None = Field(
+        None,
+        description="Set for a published entry: what the subject is called on the\nplane. On `matter`: `source_key`, and `endpoint_id` and\n`device_type` once the bridge has assigned the endpoint. On\n`measurements` the measurement and the tags the samples are\nwritten under: `measurement`, `central`, `interface_id`,\n`channel`, `parameter`. On `ha_discovery`: `component`,\n`node_id`, `object_id`, and `discovery_topic` unless the\nbridge publishes one document per device. On `mqtt_raw`:\n`topic`, the retained topic the state is written to. On\n`rest`: `path`, the data point's REST path.\n",
+    )
+
+
 class ChannelFlags(BaseModel):
     hidden: bool = Field(..., description="Channel hidden from the operation surfaces.")
     locked: bool = Field(..., description="Channel locked against control writes.")
@@ -4491,7 +4530,7 @@ class Info(BaseModel):
     )
     capabilities: list[str] = Field(
         ...,
-        description='Runtime feature set. Always-on entries:\n`rest.v1`, `ws.broadcasts.v1`, `errors.problem_details.v1`,\n`central.features.v1` (each central reports what it offers in\n`features` on `GET /system/ccu`, and an operation a central\ndoes not offer answers the `feature_unavailable` problem),\n`south.openccu_lite.v1` (a central can be an openccu-lite\nsystem: `system_type: openccu-lite`), `cdp.bounded_on.v1`\n(every custom-data-point switch-on that can be bounded takes\nthe duration in the same command as `seconds`: switch\n`turn_on_for`, valve `open`, light `turn_on` and `set_level`).\nConditional entries surface only when configured:\n`mqtt.discovery.v1`, `mqtt.raw.v1`, `matter.bridge.v1`,\n`auth.oidc.v1`, `auth.ccu.v1`, `auth.basic.v1`,\n`auth.bearer.v1`, `auth.pairing.v1`, `auth.occulite_token.v1`,\n`auth.occulite_sso.v1`, `auth.ha_ingress.v1`,\n`webhook.inbound.v1`,\n`admin.persistence.v1`, `measurements.v1`,\n`mcp.v1`, `mcp.write.v1`, `system.restart.supervised.v1`,\n`addon_self_update`, `alarm.v1` (the `/alarm` surface is\nmounted — absent, the alarm subsystem is off and every\n`/alarm` route answers 404).\n\nThe `auth.*` tokens are the login paths this daemon accepts:\n`auth.basic.v1` (HTTP Basic with a daemon user),\n`auth.bearer.v1` (a daemon API token as `Authorization:\nBearer`), `auth.pairing.v1` (`POST /pairing` mints such a\ntoken after an administrator confirms), `auth.oidc.v1`,\n`auth.ccu.v1` (a CCU account, delegated),\n`auth.occulite_token.v1` (an openccu-lite box API token that\nthe box\'s gate accepted in front of `deployment.ingress_path`),\n`auth.occulite_sso.v1` (a box-shell session through the same\ngate) and `auth.ha_ingress.v1` (Home Assistant Ingress\nrequests from the Supervisor). A client offers a person only\nthe paths listed here.\n\n`mcp.write.v1` implies `mcp.v1`; `addon_self_update` predates\nthe `<area>.<feature>.v<n>` convention and keeps its spelling\nbecause renaming a token a client already matches on is a\nbreaking change.\n\nA token means the daemon is CONFIGURED for that capability,\nnot that the subsystem is working at this instant. It answers\n"may I use this path at all", which is what a client needs to\nbuild its feature set; a broker that is briefly unreachable is\nnot a missing capability, and a token that came and went with\nconnectivity would force every client to re-derive its\nsurface on each poll. For what is running right now, read\n`/health`, whose components report liveness.\n\nOpen-ended on purpose: the daemon may advertise additional\ncapabilities (e.g. `system.restart.supervised.v1`, `mcp.v1`)\nas features are added. Clients MUST treat this as a forward-\ncompatible string set and ignore values they do not recognise\n— never reject an `Info` payload because of an unknown entry.\n',
+        description='Runtime feature set. Always-on entries:\n`rest.v1`, `ws.broadcasts.v1`, `errors.problem_details.v1`,\n`projection.v1` (`GET /devices/{addr}/projection` answers how\na device stands on the north-bound planes),\n`central.features.v1` (each central reports what it offers in\n`features` on `GET /system/ccu`, and an operation a central\ndoes not offer answers the `feature_unavailable` problem),\n`south.openccu_lite.v1` (a central can be an openccu-lite\nsystem: `system_type: openccu-lite`), `cdp.bounded_on.v1`\n(every custom-data-point switch-on that can be bounded takes\nthe duration in the same command as `seconds`: switch\n`turn_on_for`, valve `open`, light `turn_on` and `set_level`).\nConditional entries surface only when configured:\n`mqtt.discovery.v1`, `mqtt.raw.v1`, `matter.bridge.v1`,\n`auth.oidc.v1`, `auth.ccu.v1`, `auth.basic.v1`,\n`auth.bearer.v1`, `auth.pairing.v1`, `auth.occulite_token.v1`,\n`auth.occulite_sso.v1`, `auth.ha_ingress.v1`,\n`webhook.inbound.v1`,\n`admin.persistence.v1`, `measurements.v1`,\n`mcp.v1`, `mcp.write.v1`, `system.restart.supervised.v1`,\n`addon_self_update`, `alarm.v1` (the `/alarm` surface is\nmounted — absent, the alarm subsystem is off and every\n`/alarm` route answers 404).\n\nThe `auth.*` tokens are the login paths this daemon accepts:\n`auth.basic.v1` (HTTP Basic with a daemon user),\n`auth.bearer.v1` (a daemon API token as `Authorization:\nBearer`), `auth.pairing.v1` (`POST /pairing` mints such a\ntoken after an administrator confirms), `auth.oidc.v1`,\n`auth.ccu.v1` (a CCU account, delegated),\n`auth.occulite_token.v1` (an openccu-lite box API token that\nthe box\'s gate accepted in front of `deployment.ingress_path`),\n`auth.occulite_sso.v1` (a box-shell session through the same\ngate) and `auth.ha_ingress.v1` (Home Assistant Ingress\nrequests from the Supervisor). A client offers a person only\nthe paths listed here.\n\n`mcp.write.v1` implies `mcp.v1`; `addon_self_update` predates\nthe `<area>.<feature>.v<n>` convention and keeps its spelling\nbecause renaming a token a client already matches on is a\nbreaking change.\n\nA token means the daemon is CONFIGURED for that capability,\nnot that the subsystem is working at this instant. It answers\n"may I use this path at all", which is what a client needs to\nbuild its feature set; a broker that is briefly unreachable is\nnot a missing capability, and a token that came and went with\nconnectivity would force every client to re-derive its\nsurface on each poll. For what is running right now, read\n`/health`, whose components report liveness.\n\nOpen-ended on purpose: the daemon may advertise additional\ncapabilities (e.g. `system.restart.supervised.v1`, `mcp.v1`)\nas features are added. Clients MUST treat this as a forward-\ncompatible string set and ignore values they do not recognise\n— never reject an `Info` payload because of an unknown entry.\n',
     )
 
 
@@ -4587,6 +4626,19 @@ class DeviceList(BaseModel):
     page: int
     per_page: int
     total: int
+
+
+class ProjectionPlane(BaseModel):
+    plane: str = Field(
+        ...,
+        description="The plane's name. An open set that grows with the daemon;\ntoday `matter`, `measurements`, `ha_discovery`, `mqtt_raw`\nand `rest`.\n",
+    )
+    state: ProjectionPlaneState
+    reason: str | None = Field(
+        None,
+        description="Set when `state` is `inactive`: `plane_disabled`, or on\n`measurements` `central_excluded` when forwarding runs but\nnot for the device's central, or on `ha_discovery` and\n`mqtt_raw` `central_not_ready` while the device's central is\nstill coming up.\n",
+    )
+    entries: list[ProjectionEntry]
 
 
 class ChannelSummary(BaseModel):
@@ -5330,6 +5382,12 @@ class TaxonomyCentral(BaseModel):
     )
     tree: bool = Field(..., description="Whether nodes can nest (feature `taxonomy.tree`); a CCU's enums are flat.")
     enums: list[TaxonomyEnum]
+
+
+class DeviceProjection(BaseModel):
+    address: str
+    central: str
+    planes: list[ProjectionPlane]
 
 
 class DeviceDetail(DeviceSummary):
