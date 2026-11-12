@@ -1,5 +1,17 @@
 # Version 2026.11.7 (2026-11-12)
 
+- **Wire layer regenerated for daemon 0.101.0 (api 16.3.4).** Api 16.3.0
+  adds `GET /devices/{addr}/projection`, which answers how one device
+  stands on the daemon's north-bound planes, with the models
+  `DeviceProjection`, `ProjectionPlane`, `ProjectionEntry` and the enums
+  `ProjectionPlaneState` and `ProjectionVerdict`; 16.3.1 to 16.3.4 name
+  further planes in the descriptions only. Additive: no model was
+  removed and no existing response changed. This client serves no
+  operation for the route. `DAEMON_API_VERSION` and `SCHEMA_DIGEST` move
+  to 16.3.4.
+- **`Capability.PROJECTION`** names the token `projection.v1`, which a
+  daemon from 0.101.0 on always emits. It is not part of `ALWAYS_ON`: an
+  older daemon does not send it.
 - **Incidents read as the array the daemon sends.** `GET /incidents` answers
   with a JSON array of `Incident`; `DiagnosticsOperations.list_incidents`
   passed it through `dict()` and raised `ValueError` as soon as the daemon

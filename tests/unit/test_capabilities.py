@@ -60,6 +60,16 @@ class TestCapabilityTokens:
         assert Capability.CENTRAL_FEATURES not in ALWAYS_ON
         assert Capability.SOUTH_OPENCCU_LITE not in ALWAYS_ON
 
+    def test_the_projection_token_is_not_always_on(self) -> None:
+        """
+        openccu-loom v0.101.0 (api 16.3.0) always emits it, an older daemon never does.
+
+        A caller that requires it must be refused by a 0.100.0 daemon, which is
+        what keeping it out of ``ALWAYS_ON`` documents.
+        """
+        assert Capability.PROJECTION == "projection.v1"
+        assert Capability.PROJECTION not in ALWAYS_ON
+
     def test_tokens_are_unique(self) -> None:
         """No two names may wrap the same token — that would make one of them dead."""
         values = [c.value for c in Capability]
