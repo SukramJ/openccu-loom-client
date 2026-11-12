@@ -1,3 +1,16 @@
+# Version 2026.11.8 (2026-11-12)
+
+- **Incidents reach Home Assistant in aiohomematic's shape.** The incident
+  list of the integration panel and of the system-health card reads `type`,
+  `message`, `timestamp` and `severity`; the compat incident store handed on
+  the daemon's `summary` and `when`, so every row was blank but for its
+  colour. The store now maps each incident onto the keys of aiohomematic's
+  `Incident.to_dict` and returns the newest ones oldest first, as
+  aiohomematic does; the diagnostics summary carries `incidents_by_type`
+  again. Type and interface come from the fields `type` and `interface_id`
+  of daemon API 16.4.0 (openccu-loom#1094); against an older daemon both
+  stay empty and the interface filter falls back to `component`.
+
 # Version 2026.11.7 (2026-11-12)
 
 - **Wire layer regenerated for daemon 0.101.0 (api 16.3.4).** Api 16.3.0
