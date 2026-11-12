@@ -1703,53 +1703,110 @@ class TestIntegrationDashboardSurface:
         assert health["failed_clients"] == ["home:BidCos-RF"]
         assert health["overall_health_score"] == 0.5
 
-    # GET /incidents is a JSON array of Incident (id, when, component, severity,
-    # summary, detail). `component` is the central name, plus "/<interface id>"
-    # for an interface-scoped incident — the same interface id GET /interfaces
-    # reports as `id`, which is what `interface_id` carries in this adapter.
+    # GET /incidents is a JSON array of Incident, newest first: id, when,
+    # component, severity, summary, detail, and from daemon API 16.4.0 on
+    # type and interface_id — the interface id GET /interfaces reports as
+    # `id`, which is what `interface_id` carries in this adapter.
     _HMIP = {
         "id": "3",
         "when": "2026-11-12T08:00:00Z",
         "component": "home/home-HmIP-RF",
         "severity": "warning",
         "summary": "ping/pong: pending TTL exceeded",
-        "detail": "",
+        "type": "pingpong_mismatch",
+        "interface_id": "home-HmIP-RF",
     }
     _WIRED = {
         "id": "2",
         "when": "2026-11-12T07:00:00Z",
         "component": "home/home-HmIP-Wired",
         "severity": "error",
-        "summary": "circuit_breaker_tripped",
-        "detail": "",
+        "summary": "circuit breaker opened",
+        "detail": "5 failures",
+        "type": "circuit_breaker_tripped",
+        "interface_id": "home-HmIP-Wired",
     }
     _CENTRAL = {
         "id": "1",
         "when": "2026-11-12T06:00:00Z",
         "component": "home",
         "severity": "warning",
-        "summary": "callback_timeout",
-        "detail": "",
+        "summary": "callback error",
+        "type": "callback_timeout",
+    }
+    # The same HmIP incident from a daemon before API 16.4.0: no type, no interface_id.
+    _HMIP_PRE_16_4 = {k: v for k, v in _HMIP.items() if k not in ("type", "interface_id")}
+
+    # aiohomematic's Incident.to_dict keys — what the panel and the health card read.
+    _HMIP_AIO = {
+        "incident_id": "3",
+        "timestamp": "2026-11-12T08:00:00Z",
+        "type": "pingpong_mismatch",
+        "severity": "warning",
+        "interface_id": "home-HmIP-RF",
+        "message": "ping/pong: pending TTL exceeded",
+        "context": {"component": "home/home-HmIP-RF"},
+        "journal_excerpt": [],
+    }
+    _WIRED_AIO = {
+        "incident_id": "2",
+        "timestamp": "2026-11-12T07:00:00Z",
+        "type": "circuit_breaker_tripped",
+        "severity": "error",
+        "interface_id": "home-HmIP-Wired",
+        "message": "circuit breaker opened",
+        "context": {"component": "home/home-HmIP-Wired", "detail": "5 failures"},
+        "journal_excerpt": [],
+    }
+    _CENTRAL_AIO = {
+        "incident_id": "1",
+        "timestamp": "2026-11-12T06:00:00Z",
+        "type": "callback_timeout",
+        "severity": "warning",
+        "interface_id": None,
+        "message": "callback error",
+        "context": {"component": "home"},
+        "journal_excerpt": [],
     }
 
-    def _store(self) -> _IncidentStore:
+    @staticmethod
+    def _store(*incidents: dict[str, Any]) -> _IncidentStore:
         async def list_incidents() -> list[dict[str, Any]]:
-            return [self._HMIP, self._WIRED, self._CENTRAL]
+            return list(incidents)
 
         return _IncidentStore(
             client=SimpleNamespace(diagnostics=SimpleNamespace(list_incidents=list_incidents)),
             looper=SimpleNamespace(),
         )
 
-    async def test_incidents_by_interface_match_the_component(self) -> None:
-        incidents = await self._store().get_incidents_by_interface(interface_id="home-HmIP-RF")
-        # The handler does [i.to_dict() for i in incidents] — plain dicts raised AttributeError.
-        # The filter read an `interface_id` field the Incident schema does not carry,
-        # so every interface's list came back empty.
-        assert [i.to_dict() for i in incidents] == [self._HMIP]
+    def _daemon_store(self) -> _IncidentStore:
+        return self._store(self._HMIP, self._WIRED, self._CENTRAL)
 
-    async def test_recent_incidents_keep_the_daemon_order(self) -> None:
-        assert await self._store().get_recent_incidents(limit=2) == [self._HMIP, self._WIRED]
+    async def test_recent_incidents_carry_aiohomematic_keys_oldest_first(self) -> None:
+        """
+        The panel and the health card read type, message, timestamp and severity.
+
+        The daemon's own keys (summary, when) left every row blank but for its
+        colour. aiohomematic returns the newest ``limit`` incidents oldest first;
+        the daemon sends newest first, so the adapter turns the order around.
+        """
+        assert await self._daemon_store().get_recent_incidents(limit=2) == [self._WIRED_AIO, self._HMIP_AIO]
+        assert await self._daemon_store().get_recent_incidents(limit=0) == [
+            self._CENTRAL_AIO,
+            self._WIRED_AIO,
+            self._HMIP_AIO,
+        ]
+
+    async def test_incidents_by_interface_match_the_interface_id(self) -> None:
+        incidents = await self._daemon_store().get_incidents_by_interface(interface_id="home-HmIP-RF")
+        # The handler does [i.to_dict() for i in incidents] — plain dicts raised AttributeError.
+        assert [i.to_dict() for i in incidents] == [self._HMIP_AIO]
+
+    async def test_incidents_by_interface_on_a_daemon_before_16_4(self) -> None:
+        """Without interface_id the component suffix still selects the interface; the record leaves it None."""
+        store = self._store(self._HMIP_PRE_16_4, self._CENTRAL)
+        incidents = await store.get_incidents_by_interface(interface_id="home-HmIP-RF")
+        assert [i.to_dict() for i in incidents] == [{**self._HMIP_AIO, "type": None, "interface_id": None}]
 
     async def test_diagnostics_summarise_the_array(self) -> None:
         """
@@ -1758,10 +1815,11 @@ class TestIntegrationDashboardSurface:
         Passing the daemon's array through ``dict()`` raised ValueError and
         failed the whole config-entry diagnostics download.
         """
-        assert await self._store().get_diagnostics() == {
+        assert await self._daemon_store().get_diagnostics() == {
             "total_incidents": 3,
+            "incidents_by_type": {"callback_timeout": 1, "circuit_breaker_tripped": 1, "pingpong_mismatch": 1},
             "incidents_by_severity": {"warning": 2, "error": 1},
-            "recent_incidents": [self._HMIP, self._WIRED, self._CENTRAL],
+            "recent_incidents": [self._CENTRAL_AIO, self._WIRED_AIO, self._HMIP_AIO],
         }
 
     async def test_clear_incidents_reaches_the_daemon(self) -> None:

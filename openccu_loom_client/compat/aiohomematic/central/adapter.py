@@ -618,6 +618,28 @@ def _to_aio_interface(*, value: Any) -> AioInterface | None:
         return None
 
 
+def _to_aio_incident(*, payload: dict[str, Any]) -> dict[str, Any]:
+    """
+    Map one daemon ``Incident`` onto the keys of aiohomematic's ``Incident.to_dict``.
+
+    The integration panel and the system-health card read ``type``,
+    ``message``, ``timestamp`` and ``severity``. ``type`` and ``interface_id``
+    come from daemon API 16.4.0 on and stay ``None`` before it. The daemon
+    folds its details and journal excerpt into one ``detail`` text, so it goes
+    into ``context`` next to ``component`` rather than into ``journal_excerpt``.
+    """
+    return {
+        "incident_id": payload.get("id"),
+        "timestamp": payload.get("when"),
+        "type": payload.get("type"),
+        "severity": payload.get("severity"),
+        "interface_id": payload.get("interface_id"),
+        "message": payload.get("summary"),
+        "context": {key: payload[key] for key in ("component", "detail") if payload.get(key)},
+        "journal_excerpt": [],
+    }
+
+
 @dataclass(frozen=True, slots=True)
 class _Incident:
     """One recorded incident. The HA handler calls ``to_dict()`` on each."""
@@ -640,33 +662,43 @@ class _IncidentStore:
         """
         Return the incident summary in the keys aiohomematic's store uses.
 
-        The daemon's ``Incident`` carries no incident type, so there is no
-        ``incidents_by_type``; the counts cover what ``GET /incidents``
-        returns, which the daemon caps at its default limit.
+        The counts cover what ``GET /incidents`` returns, which the daemon
+        caps at its default limit; ``incidents_by_type`` counts only incidents
+        that carry a type (daemon API 16.4.0 on).
         """
-        incidents = await self._client.diagnostics.list_incidents()
+        incidents = await self._oldest_first()
         return {
             "total_incidents": len(incidents),
-            "incidents_by_severity": dict(Counter(str(i.get("severity", "")) for i in incidents)),
-            "recent_incidents": incidents[:10],
+            "incidents_by_type": dict(Counter(str(i["type"]) for i in incidents if i["type"])),
+            "incidents_by_severity": dict(Counter(str(i["severity"] or "") for i in incidents)),
+            "recent_incidents": incidents[-10:],
         }
 
     async def get_incidents_by_interface(self, *, interface_id: str) -> list[_Incident]:
         """
         Return one interface's incidents as records — the handler calls ``to_dict()`` on each.
 
-        An interface-scoped incident's ``component`` is ``<central>/<interface id>``,
-        with the interface id ``GET /interfaces`` reports — the one this adapter
-        hands out as ``interface_id``.
+        The daemon names the interface in ``interface_id`` from API 16.4.0 on —
+        the id ``GET /interfaces`` reports, which is the one this adapter hands
+        out. Before it, an interface-scoped incident's ``component`` ends in
+        ``/<interface id>``.
         """
         suffix = f"/{interface_id}"
-        incidents = await self._client.diagnostics.list_incidents()
-        return [_Incident(payload=i) for i in incidents if str(i.get("component", "")).endswith(suffix)]
+        return [
+            _Incident(payload=i)
+            for i in await self._oldest_first()
+            if i["interface_id"] == interface_id or str(i["context"].get("component", "")).endswith(suffix)
+        ]
 
     async def get_recent_incidents(self, *, limit: int) -> list[dict[str, Any]]:
-        """Return the most recent incidents as plain dicts (the handler forwards these verbatim)."""
+        """Return the newest ``limit`` incidents oldest first, as aiohomematic does (forwarded verbatim)."""
+        incidents = await self._oldest_first()
+        return incidents[-limit:] if limit > 0 else incidents
+
+    async def _oldest_first(self) -> list[dict[str, Any]]:
+        """Return the daemon's incidents in aiohomematic's keys and order (the daemon sends newest first)."""
         incidents = await self._client.diagnostics.list_incidents()
-        return incidents[:limit] if limit > 0 else incidents
+        return [_to_aio_incident(payload=i) for i in reversed(incidents)]
 
     def clear_incidents(self) -> None:
         """
