@@ -56,6 +56,14 @@ class Capability(StrEnum):
     #: the light's ``turn_on`` / ``set_level``. Without it, a light has only
     #: the daemon-side ``set_timer_on_time`` stage.
     CDP_BOUNDED_ON = "cdp.bounded_on.v1"
+    #: Always emitted from openccu-loom v0.101.0 (api 16.3.0) on.
+    #: ``GET /devices/{addr}/projection`` answers how one device stands on
+    #: the daemon's north-bound planes (Matter, Home Assistant discovery,
+    #: the raw MQTT topics, measurement forwarding, REST): what is
+    #: published under which identifiers, and what is left out with a
+    #: named reason. This client serves no operation for the route yet;
+    #: the models are ``wire.DeviceProjection`` and its parts.
+    PROJECTION = "projection.v1"
     # Emitted when the matching subsystem is configured.
     ALARM = "alarm.v1"
     #: Measurement forwarding to a time-series store is switched on, and
