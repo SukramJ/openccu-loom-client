@@ -110,6 +110,41 @@ class TestDiagnosticsOperations:
         raw = await DiagnosticsOperations(transport=t).get_metrics()
         assert raw == b"# HELP up\nup 1\n"
 
+    async def test_list_incidents_returns_the_array(self, http) -> None:
+        """
+        GET /incidents is a JSON array of Incident, newest first.
+
+        ``dict(payload)`` over that array raised "dictionary update sequence
+        element #0 has length 6" as soon as the daemon held one incident,
+        which broke Home Assistant's config-entry diagnostics.
+        """
+        t, mock = http
+        incidents = [
+            {
+                "id": "2",
+                "when": "2026-11-12T07:00:00Z",
+                "component": "home/home-HmIP-RF",
+                "severity": "warning",
+                "summary": "ping/pong: pending TTL exceeded",
+                "detail": "x",
+            },
+            {
+                "id": "1",
+                "when": "2026-11-12T06:00:00Z",
+                "component": "home",
+                "severity": "error",
+                "summary": "circuit_breaker_tripped",
+                "detail": "",
+            },
+        ]
+        mock.get("/api/v1/incidents", payload=incidents)
+        assert await DiagnosticsOperations(transport=t).list_incidents() == incidents
+
+    async def test_list_incidents_tolerates_a_non_array(self, http) -> None:
+        t, mock = http
+        mock.get("/api/v1/incidents", payload={})
+        assert await DiagnosticsOperations(transport=t).list_incidents() == []
+
 
 class TestBackupOperations:
     async def test_list_backups_returns_entries(self, http) -> None:

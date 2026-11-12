@@ -39,6 +39,7 @@ Scope of this adapter:
 from __future__ import annotations
 
 import asyncio
+from collections import Counter
 import contextlib
 import dataclasses
 from dataclasses import dataclass
@@ -628,18 +629,6 @@ class _Incident:
         return dict(self.payload)
 
 
-def _incident_list(*, payload: Any) -> list[dict[str, Any]]:
-    """Pull the incident list out of the daemon's ``GET /incidents`` envelope."""
-    if isinstance(payload, list):
-        return payload
-    if isinstance(payload, dict):
-        for key in ("incidents", "items", "entries"):
-            value = payload.get(key)
-            if isinstance(value, list):
-                return value
-    return []
-
-
 class _IncidentStore:
     """``cache_coordinator.incident_store`` surface over ``client.diagnostics``."""
 
@@ -648,16 +637,35 @@ class _IncidentStore:
         self._looper = looper
 
     async def get_diagnostics(self) -> dict[str, Any]:
-        return await self._client.diagnostics.list_incidents()
+        """
+        Return the incident summary in the keys aiohomematic's store uses.
+
+        The daemon's ``Incident`` carries no incident type, so there is no
+        ``incidents_by_type``; the counts cover what ``GET /incidents``
+        returns, which the daemon caps at its default limit.
+        """
+        incidents = await self._client.diagnostics.list_incidents()
+        return {
+            "total_incidents": len(incidents),
+            "incidents_by_severity": dict(Counter(str(i.get("severity", "")) for i in incidents)),
+            "recent_incidents": incidents[:10],
+        }
 
     async def get_incidents_by_interface(self, *, interface_id: str) -> list[_Incident]:
-        """Return one interface's incidents as records — the handler calls ``to_dict()`` on each."""
-        incidents = _incident_list(payload=await self._client.diagnostics.list_incidents())
-        return [_Incident(payload=i) for i in incidents if i.get("interface_id") == interface_id]
+        """
+        Return one interface's incidents as records — the handler calls ``to_dict()`` on each.
+
+        An interface-scoped incident's ``component`` is ``<central>/<interface id>``,
+        with the interface id ``GET /interfaces`` reports — the one this adapter
+        hands out as ``interface_id``.
+        """
+        suffix = f"/{interface_id}"
+        incidents = await self._client.diagnostics.list_incidents()
+        return [_Incident(payload=i) for i in incidents if str(i.get("component", "")).endswith(suffix)]
 
     async def get_recent_incidents(self, *, limit: int) -> list[dict[str, Any]]:
         """Return the most recent incidents as plain dicts (the handler forwards these verbatim)."""
-        incidents = _incident_list(payload=await self._client.diagnostics.list_incidents())
+        incidents = await self._client.diagnostics.list_incidents()
         return incidents[:limit] if limit > 0 else incidents
 
     def clear_incidents(self) -> None:

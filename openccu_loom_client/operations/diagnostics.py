@@ -225,10 +225,15 @@ class DiagnosticsOperations(_OperationsBase):
         """
         await self._transport.request(method="DELETE", path="/incidents", allow_retry=True)
 
-    async def list_incidents(self) -> dict[str, Any]:
-        """Diagnostic incidents. Wire: ``GET /incidents``."""
+    async def list_incidents(self) -> list[dict[str, Any]]:
+        """
+        Diagnostic incidents, newest first. Wire: ``GET /incidents``.
+
+        The daemon answers with a JSON array of ``Incident`` (at most its
+        default limit of 500); any other body reads as no incidents.
+        """
         payload = await self._transport.request(method="GET", path="/incidents")
-        return dict(payload or {})
+        return payload if isinstance(payload, list) else []
 
     async def get_metrics(self) -> bytes:
         """Prometheus metrics (text exposition). Wire: ``GET /metrics``."""
