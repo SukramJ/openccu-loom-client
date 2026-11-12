@@ -1197,18 +1197,6 @@ class SysvarSetRequest(BaseModel):
     value: Any
 
 
-class HistoryBucket(BaseModel):
-    ts: AwareDatetime = Field(..., description="Start of the bucket's time span (UTC).")
-    avg: float = Field(..., description="Mean of the raw samples in this bucket.")
-    min: float = Field(..., description="Minimum raw sample in this bucket.")
-    max: float = Field(..., description="Maximum raw sample in this bucket.")
-    count: int = Field(..., description="Number of raw samples aggregated into this bucket.")
-    covered_ms: int | None = Field(
-        None,
-        description="The millisecond span `avg` is weighted over. Omitted (or zero) when the span is unknown — a bucket built entirely from rows the daemon recorded before it stored the span — in which case `avg` is the plain mean over `count`.\n",
-    )
-
-
 class Source1(_TolerantStrEnum):
     override = "override"
     policy = "policy"
@@ -1216,7 +1204,7 @@ class Source1(_TolerantStrEnum):
 
 class RecordingState(BaseModel):
     record: bool = Field(
-        ..., description="Whether this data point's live values are currently persisted to measurement history.\n"
+        ..., description="Whether this data point's live values are currently forwarded to the measurement target.\n"
     )
     source: Source1 = Field(
         ...,
@@ -1230,56 +1218,6 @@ class RecordingWriteRequest(BaseModel):
     channel: str
     parameter: str
     record: bool | None = Field(None, description="true/false forces recording on/off; null clears the override.")
-
-
-class EnergyBucket(BaseModel):
-    ts: AwareDatetime = Field(
-        ...,
-        description="Start of the bucket's time span, serialised as an RFC3339 instant. For `group=day` / `group=month` this instant is the local midnight respectively local first-of-month of the daemon's timezone, so rendering it with a local date format names the calendar day or month the bucket covers.\n",
-    )
-    consumed_wh: float = Field(
-        ..., description="ENERGY_COUNTER delta over the bucket, in Wh. Never negative — see `reset`.\n"
-    )
-    feed_in_wh: float = Field(
-        ..., description="ENERGY_COUNTER_FEED_IN delta over the bucket, in Wh. Never negative — see `reset`.\n"
-    )
-    avg_power_w: float = Field(..., description="Mean POWER sample over the bucket, in W.")
-    peak_power_w: float = Field(..., description="Maximum POWER sample over the bucket, in W.")
-    reset: bool = Field(
-        ...,
-        description="True when a cumulative counter went backwards within this bucket (meter reset on re-pair / firmware event); the reported delta is the counter's value at the end of the bucket (energy accumulated since the reset), not a negative delta.\n",
-    )
-
-
-class EnergyDevice(BaseModel):
-    address: str = Field(..., description="Bare device address.")
-    name: str = Field(..., description="Device display name (falls back to the address when unknown).")
-    buckets: list[EnergyBucket]
-    total_consumed_wh: float = Field(..., description="Sum of `consumed_wh` across every bucket, in Wh.")
-    total_feed_in_wh: float = Field(..., description="Sum of `feed_in_wh` across every bucket, in Wh.")
-
-
-class Group(_TolerantStrEnum):
-    hour = "hour"
-    day = "day"
-    month = "month"
-
-
-class EnergyResponse(BaseModel):
-    group: Group = Field(..., description="Bucket granularity actually used.")
-    from_: AwareDatetime = Field(..., alias="from", description="Inclusive lower bound of the requested range (UTC).")
-    to: AwareDatetime = Field(..., description="Exclusive upper bound of the requested range (UTC).")
-    devices: list[EnergyDevice]
-    total_consumed_wh: float = Field(..., description="Sum of every device's `total_consumed_wh`, in Wh.")
-    total_feed_in_wh: float = Field(..., description="Sum of every device's `total_feed_in_wh`, in Wh.")
-    price_per_kwh: float | None = Field(
-        None,
-        description="Configured electricity tariff (`persistence.history.energy_price_per_kwh`), echoed so the client can derive costs. Absent or zero means no tariff is configured — a client must then show no cost at all rather than a misleading 0. The daemon does not compute the amounts: rounding and money formatting are locale decisions the client owns.\n",
-    )
-    currency: str | None = Field(
-        None,
-        description="Free-text label for amounts derived from `price_per_kwh` (symbol or ISO code; defaults to the euro sign). Never used for conversion. Only present together with a non-zero tariff.\n",
-    )
 
 
 class Change(BaseModel):
@@ -2232,7 +2170,7 @@ class SchemaResponse(BaseModel):
     fields: list[SchemaField]
 
 
-class Group1(_TolerantStrEnum):
+class Group(_TolerantStrEnum):
     overview = "overview"
     automation = "automation"
     diagnose = "diagnose"
@@ -2249,7 +2187,6 @@ class Floor(_TolerantStrEnum):
 
 class Gate(_TolerantStrEnum):
     matter = "matter"
-    history = "history"
     feature_hub_programs = "feature:hub.programs"
     feature_hub_sysvars = "feature:hub.sysvars"
     feature_hub_inbox = "feature:hub.inbox"
@@ -2269,9 +2206,11 @@ class SurfaceInfo(BaseModel):
         description="Stable identifier. The prefix names the kind: `nav.` for a\nnavigation item, `settings.` for a settings tab, `device.`\nfor a device-detail tab.\n",
         examples=["nav.alarm"],
     )
-    group: Group1 = Field(..., description="Editor bucket, mirroring the navigation clusters.")
+    group: Group = Field(..., description="Editor bucket, mirroring the navigation clusters.")
     defaults: dict[str, bool] = Field(
-        ..., description="Shipped visibility per profile name.", examples=[{"standalone": True, "embedded": False}]
+        ...,
+        description="Shipped visibility per profile name, one entry for every\nprofile (`standalone`, `embedded`, `lite`).\n",
+        examples=[{"standalone": True, "embedded": False, "lite": True}],
     )
     floor: Floor | None = Field(
         None, description="Where the surface can never be hidden. Absent when the\noperator may hide it anywhere.\n"
@@ -2296,9 +2235,19 @@ class SurfaceInfo(BaseModel):
     role_admin: bool | None = Field(None, description="Only ever shown to admins, independent of the profile.")
     multi_central_visible: bool | None = Field(
         None,
-        description="The embedded default of this surface flips back to visible\nwhen the daemon serves more than one CCU. A Home Assistant\nconfig entry addresses one CCU, so on a multi-CCU daemon HA\ncannot own the config surface of the CCUs it has no entry\nfor — hiding these would leave their devices without an\neditor anywhere. The `defaults` above already reflect the\ncurrent fleet; this flag only explains why.\n",
+        description="The hidden default of this surface (in the `embedded` and\nthe `lite` profile) flips back to visible when the daemon\nserves more than one CCU. A Home Assistant config entry\naddresses one CCU and an openccu-lite box knows only itself,\nso on a multi-CCU daemon neither can own the administration\nof the other CCUs — hiding it would leave those CCUs without\na place to edit them. The `defaults` above already reflect the\ncurrent fleet; this flag only explains why.\n",
     )
     ha_owns: bool | None = Field(None, description="Home Assistant provides this surface itself.")
+    box_owns: bool | None = Field(
+        None,
+        description="The openccu-lite box provides this surface in its own shell —\nthe reason it is hidden by default in the `lite` profile.\n",
+    )
+
+
+class UIOrigin(_TolerantStrEnum):
+    direct = "direct"
+    home_assistant = "home_assistant"
+    lite_shell = "lite_shell"
 
 
 class EmbeddedScope(_TolerantStrEnum):
@@ -2309,6 +2258,7 @@ class EmbeddedScope(_TolerantStrEnum):
 class Profile(_TolerantStrEnum):
     standalone = "standalone"
     embedded = "embedded"
+    lite = "lite"
 
 
 class Profiles(_TolerantStrEnum):
@@ -2326,9 +2276,13 @@ class SurfacesResponse(BaseModel):
     )
     inside_ha: bool = Field(
         ...,
-        description="Whether THIS request reached the daemon through Home\nAssistant, decided by the Supervisor's `X-Ingress-Path`\nheader (the remote proxy add-on forwards it). With the\ndefault scope it is what selects `profile`, so the same\nconfiguration answers differently on the other door.\n",
+        description='Whether THIS request reached the daemon through Home\nAssistant, decided by the Supervisor\'s `X-Ingress-Path`\nheader (the remote proxy add-on forwards it). With the\ndefault scope it is what selects `profile`, so the same\nconfiguration answers differently on the other door.\nEqual to `origin == "home_assistant"`. A daemon older than\n16.1.0 sends no `origin`; read this field there.\n',
     )
-    profile: Profile = Field(..., description="The profile served to this request.")
+    origin: UIOrigin | None = None
+    profile: Profile = Field(
+        ...,
+        description="The profile served to this request. `lite` is served to a\n`lite_shell` request and hides what the box's own shell\nprovides; it needs no declaration. `embedded` with scope\n`always` outranks it.\n",
+    )
     profiles: dict[str, dict[str, Profiles]] = Field(..., description="Stored, sparse overrides per profile name.")
     effective: dict[str, bool] = Field(
         ...,
@@ -2728,30 +2682,6 @@ class Link(BaseModel):
         None,
         description="Owning interface (wire interface id). Populated only by the global overview (`GET /links`); empty on the per-device listing.\n",
     )
-
-
-class Visibility(_TolerantStrEnum):
-    private = "private"
-    shared = "shared"
-
-
-class DiagramConfig(BaseModel):
-    id: str
-    name: str
-    visibility: Visibility
-    owner: str = Field(..., description="Owner subject.")
-    config: dict[str, Any] = Field(
-        ...,
-        description="SPA-owned diagram document (series list + default range). Opaque to the daemon except a non-empty central per series.\n",
-    )
-    created_at_ms: int
-    updated_at_ms: int
-
-
-class DiagramWriteRequest(BaseModel):
-    name: str
-    visibility: Visibility | None = Field(None, description="Defaults to private.")
-    config: dict[str, Any] | None = Field(None, description="SPA-owned diagram document (series list + default range).")
 
 
 class AddLinkRequest(BaseModel):
@@ -3669,10 +3599,6 @@ class ListDeviceReplaceCandidatesResponse(BaseModel):
     candidates: list[ReplaceCandidate]
 
 
-class ListDiagramsResponse(BaseModel):
-    diagrams: list[DiagramConfig]
-
-
 class ListGroupTypesResponse(BaseModel):
     types: list[GroupTypeEntry]
 
@@ -3768,7 +3694,7 @@ class PatchSysvarRequest(BaseModel):
     )
     is_logged: bool | None = Field(
         None,
-        description="Toggle the archive flag (CCU DPArchive) that records value changes to the measurement history. Omit to leave it unchanged.\n",
+        description="Toggle the archive flag (CCU DPArchive) that makes the CCU record value changes in its own archive. Omit to leave it unchanged.\n",
     )
     channel_address: str | None = Field(
         None,
@@ -3970,8 +3896,8 @@ class Phase2(_TolerantStrEnum):
 
 
 class WiringSeam(BaseModel):
-    name: str = Field(..., description="Stable identifier, `<subsystem>.<what>`.", examples=["history.recorder"])
-    collaborator: str = Field(..., description="The thing that was attached.", examples=["*history.Recorder"])
+    name: str = Field(..., description="Stable identifier, `<subsystem>.<what>`.", examples=["measurements.forwarder"])
+    collaborator: str = Field(..., description="The thing that was attached.", examples=["*measurements.Forwarder"])
     phase: Phase2 = Field(
         ...,
         description="`per-central` for an observer replayed over every central, `ordered` for a once-only attachment whose position in the boot sequence matters.\n",
@@ -4565,7 +4491,7 @@ class Info(BaseModel):
     )
     capabilities: list[str] = Field(
         ...,
-        description='Runtime feature set. Always-on entries:\n`rest.v1`, `ws.broadcasts.v1`, `errors.problem_details.v1`,\n`central.features.v1` (each central reports what it offers in\n`features` on `GET /system/ccu`, and an operation a central\ndoes not offer answers the `feature_unavailable` problem),\n`south.openccu_lite.v1` (a central can be an openccu-lite\nsystem: `system_type: openccu-lite`), `cdp.bounded_on.v1`\n(every custom-data-point switch-on that can be bounded takes\nthe duration in the same command as `seconds`: switch\n`turn_on_for`, valve `open`, light `turn_on` and `set_level`).\nConditional entries surface only when configured:\n`mqtt.discovery.v1`, `mqtt.raw.v1`, `matter.bridge.v1`,\n`auth.oidc.v1`, `auth.ccu.v1`, `auth.basic.v1`,\n`auth.bearer.v1`, `auth.pairing.v1`, `auth.occulite_token.v1`,\n`auth.occulite_sso.v1`, `auth.ha_ingress.v1`,\n`webhook.inbound.v1`,\n`diagrams.v1`, `admin.persistence.v1`, `history.v1`,\n`mcp.v1`, `mcp.write.v1`, `system.restart.supervised.v1`,\n`addon_self_update`, `alarm.v1` (the `/alarm` surface is\nmounted — absent, the alarm subsystem is off and every\n`/alarm` route answers 404).\n\nThe `auth.*` tokens are the login paths this daemon accepts:\n`auth.basic.v1` (HTTP Basic with a daemon user),\n`auth.bearer.v1` (a daemon API token as `Authorization:\nBearer`), `auth.pairing.v1` (`POST /pairing` mints such a\ntoken after an administrator confirms), `auth.oidc.v1`,\n`auth.ccu.v1` (a CCU account, delegated),\n`auth.occulite_token.v1` (an openccu-lite box API token that\nthe box\'s gate accepted in front of `deployment.ingress_path`),\n`auth.occulite_sso.v1` (a box-shell session through the same\ngate) and `auth.ha_ingress.v1` (Home Assistant Ingress\nrequests from the Supervisor). A client offers a person only\nthe paths listed here.\n\n`mcp.write.v1` implies `mcp.v1`; `addon_self_update` predates\nthe `<area>.<feature>.v<n>` convention and keeps its spelling\nbecause renaming a token a client already matches on is a\nbreaking change.\n\nA token means the daemon is CONFIGURED for that capability,\nnot that the subsystem is working at this instant. It answers\n"may I use this path at all", which is what a client needs to\nbuild its feature set; a broker that is briefly unreachable is\nnot a missing capability, and a token that came and went with\nconnectivity would force every client to re-derive its\nsurface on each poll. For what is running right now, read\n`/health`, whose components report liveness.\n\nOpen-ended on purpose: the daemon may advertise additional\ncapabilities (e.g. `system.restart.supervised.v1`, `mcp.v1`)\nas features are added. Clients MUST treat this as a forward-\ncompatible string set and ignore values they do not recognise\n— never reject an `Info` payload because of an unknown entry.\n',
+        description='Runtime feature set. Always-on entries:\n`rest.v1`, `ws.broadcasts.v1`, `errors.problem_details.v1`,\n`central.features.v1` (each central reports what it offers in\n`features` on `GET /system/ccu`, and an operation a central\ndoes not offer answers the `feature_unavailable` problem),\n`south.openccu_lite.v1` (a central can be an openccu-lite\nsystem: `system_type: openccu-lite`), `cdp.bounded_on.v1`\n(every custom-data-point switch-on that can be bounded takes\nthe duration in the same command as `seconds`: switch\n`turn_on_for`, valve `open`, light `turn_on` and `set_level`).\nConditional entries surface only when configured:\n`mqtt.discovery.v1`, `mqtt.raw.v1`, `matter.bridge.v1`,\n`auth.oidc.v1`, `auth.ccu.v1`, `auth.basic.v1`,\n`auth.bearer.v1`, `auth.pairing.v1`, `auth.occulite_token.v1`,\n`auth.occulite_sso.v1`, `auth.ha_ingress.v1`,\n`webhook.inbound.v1`,\n`admin.persistence.v1`, `measurements.v1`,\n`mcp.v1`, `mcp.write.v1`, `system.restart.supervised.v1`,\n`addon_self_update`, `alarm.v1` (the `/alarm` surface is\nmounted — absent, the alarm subsystem is off and every\n`/alarm` route answers 404).\n\nThe `auth.*` tokens are the login paths this daemon accepts:\n`auth.basic.v1` (HTTP Basic with a daemon user),\n`auth.bearer.v1` (a daemon API token as `Authorization:\nBearer`), `auth.pairing.v1` (`POST /pairing` mints such a\ntoken after an administrator confirms), `auth.oidc.v1`,\n`auth.ccu.v1` (a CCU account, delegated),\n`auth.occulite_token.v1` (an openccu-lite box API token that\nthe box\'s gate accepted in front of `deployment.ingress_path`),\n`auth.occulite_sso.v1` (a box-shell session through the same\ngate) and `auth.ha_ingress.v1` (Home Assistant Ingress\nrequests from the Supervisor). A client offers a person only\nthe paths listed here.\n\n`mcp.write.v1` implies `mcp.v1`; `addon_self_update` predates\nthe `<area>.<feature>.v<n>` convention and keeps its spelling\nbecause renaming a token a client already matches on is a\nbreaking change.\n\nA token means the daemon is CONFIGURED for that capability,\nnot that the subsystem is working at this instant. It answers\n"may I use this path at all", which is what a client needs to\nbuild its feature set; a broker that is briefly unreachable is\nnot a missing capability, and a token that came and went with\nconnectivity would force every client to re-derive its\nsurface on each poll. For what is running right now, read\n`/health`, whose components report liveness.\n\nOpen-ended on purpose: the daemon may advertise additional\ncapabilities (e.g. `system.restart.supervised.v1`, `mcp.v1`)\nas features are added. Clients MUST treat this as a forward-\ncompatible string set and ignore values they do not recognise\n— never reject an `Info` payload because of an unknown entry.\n',
     )
 
 
@@ -4869,6 +4795,10 @@ class LiteProbeInfo(BaseModel):
     implementation: str | None = None
     api_majors: dict[str, int] | None = None
     pairing_available: bool
+    interfaces: list[str] | None = Field(
+        None,
+        description="The interfaces the box offers (`BidCos-RF`, `HmIP-RF`, …),\nsorted, as it names them without a credential. A client\nproposes exactly these when the box is added. Absent on a box\nthat does not name them — the client then keeps its own\ndefault; an empty list says the box offers none.\n",
+    )
     hmip_key_mode: HMIPKeyMode | None = None
 
 
