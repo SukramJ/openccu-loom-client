@@ -2822,6 +2822,14 @@ class Incident(BaseModel):
     severity: str
     summary: str
     detail: str | None = None
+    type: str | None = Field(
+        None,
+        description="Incident type the entry was recorded under (`rpc_fault`,\n`pingpong_mismatch`, …). Vocabulary: the IncidentType enum in\n`assets/schemas/enums.json`.\n",
+    )
+    interface_id: str | None = Field(
+        None,
+        description="Interface of an interface-scoped incident, the same id\n`GET /interfaces` reports as `id`. Absent for a central-level\nincident.\n",
+    )
 
 
 class InboxDevice(BaseModel):
