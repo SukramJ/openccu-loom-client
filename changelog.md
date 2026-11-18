@@ -1,3 +1,20 @@
+# Version 2026.11.9 (2026-11-18)
+
+- **A timed switch-on reaches a generic switch that is already on.** The
+  generic `DpSwitch` stages an on-time like aiohomematic 2026.11.6 does:
+  `set_timer_on_time()` stores it, `turn_on()` writes the sibling `ON_TIME`
+  and then `STATE`, and `turn_off()` drops it. `set_timer_on_time()` was a
+  no-op on the generic twin, so once `homematicip_local` stages the on-time
+  for every switch, `switch_set_on_time` on a generic switch would have been
+  lost (homematicip_local#1378, #248).
+- **Breaking: `DpSwitch.set_on_time()` is removed**, as in aiohomematic
+  2026.11.6. Stage with `set_timer_on_time(on_time=…)` or pass
+  `turn_on(on_time=…)`.
+- **aiohomematic 2026.11.6.** `requirements.txt` pins it, the floor in
+  `pyproject.toml` follows. Test and hook tools updated (ruff 0.17.5,
+  pylint 4.1.4, prek 0.5.11, pytest-asyncio 1.5.0, coverage 7.17.3;
+  python-slugify ≥ 9.2.0).
+
 # Version 2026.11.8 (2026-11-12)
 
 - **Incidents reach Home Assistant in aiohomematic's shape.** The incident

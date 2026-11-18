@@ -216,39 +216,65 @@ class _GenericEntitySurface(_GenericProtocolSurface):
 
 
 class DpSwitch(_GenericEntitySurface, DataPoint):
-    """BOOL parameter HA exposes as a switch."""
+    """
+    BOOL parameter HA exposes as a switch.
+
+    An on-time is staged like on aiohomematic's ``DpSwitch``:
+    ``homematicip_local`` calls ``set_timer_on_time`` without ``await`` and
+    then issues a separate ``turn_on``, which writes the sibling ``ON_TIME``
+    parameter and then ``STATE`` (homematicip_local#1378).
+    """
 
     _category: ClassVar[DataPointCategory] = DataPointCategory.Switch
+    _pending_on_time: float | None = None
 
-    async def turn_on(self, **_kwargs: Any) -> None:
-        """Send ``True`` to switch the parameter on."""
+    @property
+    def timer_on_time(self) -> float | None:
+        """Return the on-time staged for the next switch-on."""
+        return self._pending_on_time
+
+    def reset_timer_on_time(self, *_args: Any, **_kwargs: Any) -> None:
+        """Drop a staged on-time."""
+        self._pending_on_time = None
+
+    def set_timer_on_time(self, *, on_time: float) -> None:
+        """Stage ``on_time`` (seconds) for the next switch-on; sends nothing."""
+        self._pending_on_time = on_time
+
+    async def turn_on(self, *, on_time: float | None = None, **_kwargs: Any) -> None:
+        """
+        Switch on, bounded by an explicit or staged on-time.
+
+        An explicit ``on_time`` wins over a staged one. A positive on-time is
+        written to the sibling ``ON_TIME`` parameter first (skipped with a
+        debug log when the channel has none); ``STATE`` is written in any
+        case, also when the switch is already on.
+        """
+        staged, self._pending_on_time = self._pending_on_time, None
+        seconds = on_time if on_time is not None else staged
+        if seconds is not None and seconds > 0:
+            await self._write_on_time(seconds=float(seconds))
         await self.send_value(value=True)
 
     async def turn_off(self, **_kwargs: Any) -> None:
-        """Send ``False`` to switch the parameter off."""
+        """Drop a staged on-time and send ``False`` to switch the parameter off."""
+        self._pending_on_time = None
         await self.send_value(value=False)
 
-    async def set_on_time(self, *, on_time: float) -> None:
-        """
-        Timed-on for a generic switch: write the sibling ``ON_TIME`` parameter.
-
-        aiohomematic writes a sibling ``ON_TIME`` parameter; the daemon serves
-        a generic value write for every parameter, so this routes to ``ON_TIME``
-        on the same channel. No-op (with a debug log) when the channel exposes
-        no ``ON_TIME`` parameter.
-        """
+    async def _write_on_time(self, *, seconds: float) -> None:
+        """Write ``seconds`` to the channel's ``ON_TIME`` parameter, if it has one."""
         store: LoomStore = self._store
         address: str = self.device_address
         channel: int = self.channel_number
         if store.get_data_point(address=address, channel=channel, parameter="ON_TIME") is None:
             _LOGGER.debug(
-                "set_on_time(%s): channel %s:%s exposes no ON_TIME parameter — skipping",
-                on_time,
+                "turn_on(on_time=%s): channel %s:%s exposes no ON_TIME parameter — skipping",
+                seconds,
                 address,
                 channel,
             )
             return
-        await store.set_value(address=address, channel=channel, parameter="ON_TIME", value=on_time)
+        await store.set_value(address=address, channel=channel, parameter="ON_TIME", value=seconds)
 
 
 # ENUM value lists that HA reads as a binary sensor, mapped to the option
