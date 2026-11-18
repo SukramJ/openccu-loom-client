@@ -549,7 +549,7 @@ class TestTextDisplaySendText:
 
 
 class TestGenericSetOnTime:
-    """G7: generic switch set_on_time writes the sibling ON_TIME parameter."""
+    """G7: a staged on-time reaches a generic switch as ON_TIME, then STATE (homematicip_local#1378)."""
 
     def _switch_store(self, *, with_on_time: bool) -> tuple[LoomStore, _FakeTransport]:
         transport = _FakeTransport()
@@ -560,7 +560,7 @@ class TestGenericSetOnTime:
                 {
                     "parameter": "STATE",
                     "type": "BOOL",
-                    "value": False,
+                    "value": True,
                     "observed": True,
                     "operations": {"read": True, "write": True, "event": True},
                     "unique_id": "loom_test_state",
@@ -583,22 +583,54 @@ class TestGenericSetOnTime:
         store.attach_channel_data_points(device_address="VCU1", channel_number=1, data_points=dps)
         return store, transport
 
-    async def test_set_on_time_writes_on_time_value(self) -> None:
+    async def test_staged_on_time_writes_on_time_then_state_when_already_on(self) -> None:
         store, transport = self._switch_store(with_on_time=True)
         dp = store.get_data_point(address="VCU1", channel=1, parameter="STATE")
         assert isinstance(dp, DpSwitch)
-        await dp.set_on_time(on_time=5)
-        method, path, body = transport.calls[-1]
-        assert method == "PUT"
-        assert path.endswith("/channels/1/data-points/ON_TIME/value")
-        assert body == {"value": 5}
+        assert dp.value is True
+        assert dp.set_timer_on_time(on_time=5) is None
+        assert dp.timer_on_time == 5
+        await dp.turn_on()
+        assert [(method, path.rsplit("/data-points/", 1)[1], body) for method, path, body in transport.calls] == [
+            ("PUT", "ON_TIME/value", {"value": 5.0}),
+            ("PUT", "STATE/value", {"value": True}),
+        ]
+        assert dp.timer_on_time is None
 
-    async def test_set_on_time_noop_when_channel_lacks_on_time(self) -> None:
+    async def test_explicit_on_time_wins_over_staged(self) -> None:
+        store, transport = self._switch_store(with_on_time=True)
+        dp = store.get_data_point(address="VCU1", channel=1, parameter="STATE")
+        assert isinstance(dp, DpSwitch)
+        dp.set_timer_on_time(on_time=5)
+        await dp.turn_on(on_time=60)
+        assert transport.calls[0][2] == {"value": 60.0}
+        assert dp.timer_on_time is None
+
+    async def test_staged_on_time_skipped_when_channel_lacks_on_time(self) -> None:
         store, transport = self._switch_store(with_on_time=False)
         dp = store.get_data_point(address="VCU1", channel=1, parameter="STATE")
         assert isinstance(dp, DpSwitch)
-        await dp.set_on_time(on_time=5)
-        assert transport.calls == []  # no write attempted
+        dp.set_timer_on_time(on_time=5)
+        await dp.turn_on()
+        assert [path.rsplit("/data-points/", 1)[1] for _method, path, _body in transport.calls] == ["STATE/value"]
+
+    async def test_turn_off_drops_staged_on_time(self) -> None:
+        store, transport = self._switch_store(with_on_time=True)
+        dp = store.get_data_point(address="VCU1", channel=1, parameter="STATE")
+        assert isinstance(dp, DpSwitch)
+        dp.set_timer_on_time(on_time=5)
+        await dp.turn_off()
+        assert dp.timer_on_time is None
+        await dp.turn_on()
+        assert [path.rsplit("/data-points/", 1)[1] for _method, path, _body in transport.calls] == [
+            "STATE/value",
+            "STATE/value",
+        ]
+
+    async def test_set_on_time_is_gone(self) -> None:
+        store, _transport = self._switch_store(with_on_time=True)
+        dp = store.get_data_point(address="VCU1", channel=1, parameter="STATE")
+        assert not hasattr(dp, "set_on_time")
 
 
 class TestProtocolSurfacePresentation:
