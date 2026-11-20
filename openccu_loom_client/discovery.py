@@ -12,7 +12,9 @@ daemon; from api 13.5.0 on also ``txtvers``, ``deploy`` (the vocabulary of
 ``deployment.kind``), ``ingress`` (only when there is an ingress path) and
 ``auth`` (comma-separated login-path names, as
 :func:`~openccu_loom_client.capabilities.login_paths` derives them; absent
-when there are none).
+when there are none); from api 16.6.0 on also ``id``, the installation's
+identity that ``/info`` serves as ``instance_id`` (absent when the daemon runs
+without its database).
 
 The TXT rules are RFC 6763's: keys are case-insensitive (section 6.4), a key
 that occurs more than once counts by its first occurrence (section 6.4), and
@@ -72,6 +74,17 @@ class DiscoveredDaemon:
     login_paths: frozenset[str] = field(default_factory=frozenset)
     """The short names of the login paths the daemon accepts, unknown names kept."""
 
+    instance_id: str | None = None
+    """
+    The installation's identity (TXT ``id``), the value ``/info`` serves as ``instance_id``.
+
+    It tells two daemons serving the same CCU apart, where the CCU serials in
+    :attr:`ccus` cannot. It is no proof of identity: anyone on the network can
+    announce it, so a known id is never a reason to send credentials to a new
+    address. ``None`` on a daemon older than api 16.6.0 or one without its
+    database.
+    """
+
 
 def parse_txt_record(*, properties: Mapping[str, str | bytes | None]) -> DiscoveredDaemon:
     """
@@ -92,6 +105,7 @@ def parse_txt_record(*, properties: Mapping[str, str | bytes | None]) -> Discove
         deploy=values.get("deploy"),
         ingress=values.get("ingress"),
         login_paths=frozenset(_items(value=values.get("auth"))),
+        instance_id=values.get("id"),
     )
 
 

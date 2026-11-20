@@ -62,6 +62,22 @@ def test_an_old_style_record_leaves_the_new_keys_absent() -> None:
     assert parsed.deploy is None
     assert parsed.ingress is None
     assert parsed.login_paths == frozenset()
+    assert parsed.instance_id is None
+
+
+def test_a_16_6_record_carries_the_installation_identity() -> None:
+    """``id`` is the identity, ``instance`` the display name; two daemons on one CCU differ in ``id``."""
+    parsed = parse_txt_record(
+        properties={
+            "txtvers": b"1",
+            "instance": b"loom",
+            "ccus": b"1234567",
+            "id": b"0123456789abcdef0123456789abcdef",
+        }
+    )
+
+    assert parsed.instance_id == "0123456789abcdef0123456789abcdef"
+    assert parsed.instance == "loom"
 
 
 def test_bytes_values_are_decoded_as_utf8() -> None:

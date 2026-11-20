@@ -47,6 +47,8 @@ _INFO_13_5 = {
     "deployment": {"kind": "lite-addon", "ingress_path": "/addons/loom/"},
 }
 
+_INFO_16_6 = {**_INFO_13_5, "api_version": "16.6.0", "instance_id": "0123456789abcdef0123456789abcdef"}
+
 _INFO_OLD = {
     "version": "0.80.0",
     "api_version": "12.1.0",
@@ -96,6 +98,15 @@ async def test_an_older_daemon_has_no_deployment(mock_daemon: MockDaemon) -> Non
     assert probe.deployment_kind is None
     assert probe.ingress_path is None
     assert probe.login_paths == frozenset({"oidc"})
+    assert probe.instance_id is None
+
+
+async def test_a_16_6_daemon_names_its_installation(mock_daemon: MockDaemon) -> None:
+    mock_daemon.get(_INFO_PATH, payload=_INFO_16_6)
+
+    probe = await _probe(mock_daemon)
+
+    assert probe.instance_id == "0123456789abcdef0123456789abcdef"
 
 
 async def test_an_unknown_deployment_kind_is_kept_verbatim(mock_daemon: MockDaemon) -> None:

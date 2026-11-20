@@ -1,3 +1,26 @@
+# Version 2026.11.10 (2026-11-20)
+
+- **Light effects reach Home Assistant.** `effects` reads the list from the
+  custom data point's `config` block, where the daemon publishes it for
+  effect, RGBW and signal lights; the state key stays as a fallback. Home
+  Assistant showed no effect list for any of them (#250,
+  homematicip_local#1385).
+- **`turn_on` with brightness, colour, colour temperature or effect is one
+  `set_level` call** in Home Assistant's JSON-schema light shape: `state`
+  `ON` plus whichever of `brightness`, `color` (`h`, `s`),
+  `color_temp_kelvin`, `effect` and `seconds` apply. An effect alone used to
+  go out as `set_effect` only, which sends no switch-on; a signal light that
+  is switched on now takes LEVEL, COLOR and COLOR_BEHAVIOUR in one write. A plain
+  `turn_on` is unchanged, and `seconds` still travels only to a daemon that
+  advertises `cdp.bounded_on.v1`.
+- **The daemon's installation identity.** `DiscoveredDaemon.instance_id`
+  reads the TXT key `id` and `DaemonProbe.instance_id` reads `instance_id`
+  from `/info` (daemon api 16.6.0); both are `None` on an older daemon. It
+  tells two daemons serving the same CCU apart and is no proof of identity
+  (#250, openccu-loom#1131).
+- **Wire layer regenerated from openccu-loom v0.106.0** (api 16.6.0, #251):
+  `Info.instance_id`, `EditorComponentManifest`.
+
 # Version 2026.11.9 (2026-11-18)
 
 - **A timed switch-on reaches a generic switch that is already on.** The

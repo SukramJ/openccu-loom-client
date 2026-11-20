@@ -92,6 +92,9 @@ class DaemonProbe:
     ingress_path: str | None = None
     """``deployment.ingress_path``, ``None`` when there is none."""
 
+    instance_id: str | None = None
+    """``instance_id``, the installation's identity; ``None`` before daemon api 16.6.0 or without its database."""
+
 
 async def probe_daemon(
     *,
@@ -180,6 +183,7 @@ def _from_info(*, payload: Any, url: str) -> DaemonProbe:
     deployment = payload.get("deployment")
     kind = deployment.get("kind") if isinstance(deployment, dict) else None
     ingress = deployment.get("ingress_path") if isinstance(deployment, dict) else None
+    instance_id = payload.get("instance_id")
     return DaemonProbe(
         reached=ProbeOutcome.DAEMON,
         api_version=api_version,
@@ -188,4 +192,5 @@ def _from_info(*, payload: Any, url: str) -> DaemonProbe:
         login_paths=login_paths(capabilities=capabilities),
         deployment_kind=kind if isinstance(kind, str) and kind else None,
         ingress_path=ingress if isinstance(ingress, str) and ingress else None,
+        instance_id=instance_id if isinstance(instance_id, str) and instance_id else None,
     )
