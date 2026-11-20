@@ -318,7 +318,7 @@ class _FakeTransport:
         self.calls.append((method, path, json_body))
 
 
-def _cdp_instance(*, kind, category, capabilities=None, state=None, supported=("turn_on", "turn_off")):
+def _cdp_instance(*, kind, category, capabilities=None, state=None, config=None, supported=("turn_on", "turn_off")):
     transport = _FakeTransport()
     store = LoomStore(transport=transport)  # type: ignore[arg-type]
     store.set_custom_data_point_factory(factory=make_custom_data_point)
@@ -334,6 +334,7 @@ def _cdp_instance(*, kind, category, capabilities=None, state=None, supported=("
                     "kind": kind,
                     "capabilities": capabilities or {},
                     "unique_id": f"loom_test_{category}",
+                    **({"config": config} if config is not None else {}),
                 }
             )
         ],
@@ -409,7 +410,59 @@ class TestCustomDeepParity:
         method, path, body = transport.calls[-1]
         assert method == "POST"
         assert path.endswith("/cdps/light/set_level")
-        assert body == {"params": {"brightness": 200}}
+        assert body == {"params": {"state": "ON", "brightness": 200}}
+
+    def test_light_effects_come_from_the_config_block(self) -> None:
+        """The daemon publishes ``effects`` in the CDP config; the state carries only the active ``effect``."""
+        dp, _ = _cdp_instance(
+            kind="light_fixed_color",
+            category="light",
+            capabilities={"effects": True},
+            config={"effects": ["ON", "BLINKING_SLOW", "BILLOW_FAST"]},
+            state={"state": "OFF", "effect": "ON"},
+        )
+        assert dp.effects == ("ON", "BLINKING_SLOW", "BILLOW_FAST")
+        assert dp.effect == "ON"
+
+    def test_light_effects_fall_back_to_the_state_key(self) -> None:
+        dp, _ = _cdp_instance(
+            kind="light_effect",
+            category="light",
+            capabilities={"effects": True},
+            state={"state": "ON", "effects": ["RAINBOW"]},
+        )
+        assert dp.effects == ("RAINBOW",)
+
+    async def test_light_turn_on_with_an_effect_is_one_set_level_that_switches_on(self) -> None:
+        """``set_effect`` alone leaves an off light off; the effect travels with the switch-on."""
+        dp, transport = _cdp_instance(kind="light_fixed_color", category="light", state={"state": "OFF"})
+        await dp.turn_on(effect="BLINKING_SLOW")
+        assert [(c[1].rsplit("/", 1)[-1], c[2]) for c in transport.calls] == [
+            ("set_level", {"params": {"state": "ON", "effect": "BLINKING_SLOW"}})
+        ]
+
+    async def test_light_turn_on_with_brightness_colour_and_effect_is_one_set_level(self) -> None:
+        dp, transport = _cdp_instance(kind="light_rgbw", category="light", state={"state": "OFF"})
+        await dp.turn_on(brightness=128, hs_color=(210.0, 80.0), color_temp_kelvin=3000, effect="RAINBOW")
+        assert [(c[1].rsplit("/", 1)[-1], c[2]) for c in transport.calls] == [
+            (
+                "set_level",
+                {
+                    "params": {
+                        "state": "ON",
+                        "brightness": 128,
+                        "color": {"h": 210.0, "s": 80.0},
+                        "color_temp_kelvin": 3000,
+                        "effect": "RAINBOW",
+                    }
+                },
+            )
+        ]
+
+    async def test_light_plain_turn_on_stays_turn_on(self) -> None:
+        dp, transport = _cdp_instance(kind="light", category="light", state={"state": "OFF"})
+        await dp.turn_on()
+        assert [c[1].rsplit("/", 1)[-1] for c in transport.calls] == ["turn_on"]
 
     async def test_blind_set_position_with_tilt(self) -> None:
         dp, transport = _cdp_instance(

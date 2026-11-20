@@ -422,8 +422,15 @@ class CustomDpDimmer(_CustomEntitySurface):
 
     @property
     def effects(self) -> tuple[str, ...]:
-        """Return the available effect names from the ``effects`` state key."""
-        raw = self._state.get("effects") or ()
+        """
+        Return the available effect names.
+
+        The daemon publishes the list in the static ``config`` block
+        (``config.effects``) for every light that has one — effect, RGBW and
+        signal lights alike — and not in the state. The state key is read
+        only as a fallback.
+        """
+        raw = self._config_value(key="effects") or self._state.get("effects") or ()
         return tuple(str(e) for e in raw)
 
     @property
@@ -458,70 +465,52 @@ class CustomDpDimmer(_CustomEntitySurface):
         """
         Turn the light on, optionally setting brightness, colour, kelvin, or effect.
 
-        A staged or explicit on-time travels with the switch-on as ``seconds``
-        on a daemon that advertises ``cdp.bounded_on.v1``: colour, kelvin and
-        effect go first, and the final ``turn_on`` / ``set_level`` writes the
-        on-time together with the level. An older daemon has only its own
-        ``set_timer_on_time`` stage, which its ``turn_on`` consumes and its
-        ``set_level`` ignores; there the on-time reaches only a plain
-        switch-on, and the two calls go back to back.
+        A switch-on that names any of them is one ``set_level`` call in Home
+        Assistant's JSON-schema light shape — ``{"state": "ON",
+        "brightness"?, "color"?: {"h", "s"}, "color_temp_kelvin"?, "effect"?,
+        "seconds"?}`` — so the daemon sees the whole command at once and owns
+        the order of the writes; when the command switches a signal light on,
+        it takes LEVEL, COLOR and COLOR_BEHAVIOUR in one put_paramset that
+        way. ``set_effect`` or ``set_color`` on its own sends no switch-on.
+
+        A plain switch-on stays ``turn_on``. A staged or explicit on-time
+        travels with the switch-on as ``seconds`` on a daemon that advertises
+        ``cdp.bounded_on.v1``. An older daemon has only its own
+        ``set_timer_on_time`` stage, consumed by its ``turn_on`` and by a
+        ``set_level`` switch-on without ``brightness``; this client stages it
+        only for a plain switch-on, where the two calls go back to back.
         """
         seconds = self._consume_timer_on_time(on_time=_kwargs.pop("on_time", None))
-        if seconds is not None and self._store.has_capability(capability=Capability.CDP_BOUNDED_ON):
-            await self._turn_on_bounded(
-                seconds=seconds,
-                brightness=brightness,
-                hs_color=hs_color,
-                color_temp_kelvin=color_temp_kelvin,
-                effect=effect,
-            )
+        bounded = seconds is not None and self._store.has_capability(capability=Capability.CDP_BOUNDED_ON)
+        if hs_color is None and color_temp_kelvin is None and effect is None and brightness is None:
+            if seconds is None:
+                await self.invoke(operation="turn_on")
+            elif bounded:
+                await self.invoke(operation="turn_on", params={"seconds": seconds})
+            else:
+                await self.invoke(operation="set_timer_on_time", params={"seconds": seconds})
+                await self.invoke(operation="turn_on")
             return
-        plain = hs_color is None and color_temp_kelvin is None and effect is None and brightness is None
-        if seconds is not None and plain:
-            await self.invoke(operation="set_timer_on_time", params={"seconds": seconds})
-            await self.invoke(operation="turn_on")
-            return
+        params: dict[str, Any] = {"state": "ON"}
+        if brightness is not None:
+            params["brightness"] = int(brightness)
+        if hs_color is not None:
+            params["color"] = {"h": hs_color[0], "s": hs_color[1]}
+        if color_temp_kelvin is not None:
+            params["color_temp_kelvin"] = int(color_temp_kelvin)
+        if effect is not None:
+            params["effect"] = effect
         if seconds is not None:
-            _LOGGER.warning(
-                "%s: on-time %.1f s not applied — the daemon cannot bound a light switch-on that also sets "
-                "brightness, colour or effect",
-                self.full_name,
-                seconds,
-            )
-        if hs_color is not None:
-            await self.invoke(
-                operation="set_color",
-                params={"hue": hs_color[0], "saturation": hs_color[1]},
-            )
-        if color_temp_kelvin is not None:
-            await self.invoke(operation="set_kelvin", params={"kelvin": int(color_temp_kelvin)})
-        if effect is not None:
-            await self.invoke(operation="set_effect", params={"effect": effect})
-        if brightness is not None:
-            await self.invoke(operation="set_level", params={"brightness": int(brightness)})
-        elif hs_color is None and color_temp_kelvin is None and effect is None:
-            await self.invoke(operation="turn_on")
-
-    async def _turn_on_bounded(
-        self,
-        *,
-        seconds: float,
-        brightness: int | None,
-        hs_color: tuple[float, float] | None,
-        color_temp_kelvin: int | None,
-        effect: str | None,
-    ) -> None:
-        """Set colour, kelvin and effect, then switch on bounded by ``seconds`` in one write."""
-        if hs_color is not None:
-            await self.invoke(operation="set_color", params={"hue": hs_color[0], "saturation": hs_color[1]})
-        if color_temp_kelvin is not None:
-            await self.invoke(operation="set_kelvin", params={"kelvin": int(color_temp_kelvin)})
-        if effect is not None:
-            await self.invoke(operation="set_effect", params={"effect": effect})
-        if brightness is not None:
-            await self.invoke(operation="set_level", params={"brightness": int(brightness), "seconds": seconds})
-            return
-        await self.invoke(operation="turn_on", params={"seconds": seconds})
+            if bounded:
+                params["seconds"] = seconds
+            else:
+                _LOGGER.warning(
+                    "%s: on-time %.1f s not applied — the daemon takes no on-time with a light switch-on that "
+                    "also sets brightness, colour or effect",
+                    self.full_name,
+                    seconds,
+                )
+        await self.invoke(operation="set_level", params=params)
 
     async def turn_off(self, **_kwargs: Any) -> None:
         """Turn the light off and drop a staged on-time."""

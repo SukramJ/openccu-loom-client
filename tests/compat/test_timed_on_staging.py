@@ -178,7 +178,7 @@ async def test_light_on_an_older_daemon_reports_an_on_time_it_cannot_carry(
 
     # Staging it on the daemon here would leave it pending for some later
     # switch-on: the daemon's `set_level` does not consume it.
-    assert calls == [("set_level", {"brightness": 128})]
+    assert calls == [("set_level", {"state": "ON", "brightness": 128})]
     assert "on-time 120.0 s not applied" in caplog.text
     assert dp.timer_on_time is None
 
@@ -211,17 +211,17 @@ async def test_light_turn_on_with_brightness_carries_seconds(monkeypatch: pytest
     _stage_like_the_integration(dp, on_time=120)
     await dp.turn_on(brightness=128)
 
-    assert calls == [("set_level", {"brightness": 128, "seconds": 120.0})]
+    assert calls == [("set_level", {"state": "ON", "brightness": 128, "seconds": 120.0})]
 
 
-async def test_light_bounded_switch_on_comes_after_the_colour(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_light_bounded_switch_on_carries_the_colour(monkeypatch: pytest.MonkeyPatch) -> None:
     dp, calls = _twin("CustomDpDimmer", DataPointCategory.Light, monkeypatch, capabilities=(_BOUNDED_ON,))
 
     await dp.turn_on(on_time=30, hs_color=(120.0, 50.0))
 
-    # The colour write may switch the light on itself; the bound has to be in
-    # the last write, or that switch-on stays unbounded.
-    assert calls == [("set_color", {"hue": 120.0, "saturation": 50.0}), ("turn_on", {"seconds": 30.0})]
+    # One command: the bound and the colour reach the daemon together, and
+    # the daemon orders the writes.
+    assert calls == [("set_level", {"state": "ON", "color": {"h": 120.0, "s": 50.0}, "seconds": 30.0})]
 
 
 def test_store_reports_a_capability_only_with_evidence() -> None:
