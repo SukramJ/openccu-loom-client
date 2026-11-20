@@ -2289,6 +2289,16 @@ class UIOrigin(_TolerantStrEnum):
     lite_shell = "lite_shell"
 
 
+class EditorComponentManifest(BaseModel):
+    module_url: str = Field(
+        ...,
+        description="Daemon path of the module; the file name carries the hash.",
+        examples=["/app/component/editor-3f9a.js"],
+    )
+    hash: str = Field(..., description="Hex SHA-256 of the module's bytes.")
+    routes: list[str] = Field(..., description="Path prefixes below /api/v1 the editor calls.")
+
+
 class EmbeddedScope(_TolerantStrEnum):
     inside_ha = "inside_ha"
     always = "always"
@@ -4522,6 +4532,12 @@ class Info(BaseModel):
     deployment: Deployment
     uptime: str
     started_at: AwareDatetime
+    instance_id: str | None = Field(
+        None,
+        description="Identity of this installation: created once on the first start\nand kept in the daemon's database, so it survives restarts,\nupdates and a backup restored on new hardware. Two daemons\nserving the same CCU have different ids — that, not the CCU\nserial, is what tells them apart. The same value is announced\nover mDNS as the TXT key `id` (ADR 0058). Absent when the daemon\nruns without its database.\n\nNot a secret and no proof of identity: anyone on the network can\nread and repeat it. A client must not send credentials to a new\naddress because an announcement carries a known id.\n",
+        examples=["0123456789abcdef0123456789abcdef"],
+        pattern="^[0-9a-f]{32}$",
+    )
     config_ui_url: str = Field(
         ...,
         description="Externally-reachable address of this daemon's Config UI,\nderived from `north.rest.public_url` with the SPA mount\nappended. Empty when no public URL is configured.\n\nIt answers a question a client cannot answer for itself: the\naddress a client uses to TALK to the daemon (a container\nnetwork, a LAN address behind a reverse proxy) is not\nnecessarily one a browser can follow. Only the operator knows\nthat, and `public_url` is where they record it. A client that\nwants to link a person at the Config UI reads this and falls\nback to guessing from its own connection address when empty.\n\nThe mount path is appended by the daemon on purpose — a\nclient that had to know where the SPA is mounted would break\non the next mount change.\n",
