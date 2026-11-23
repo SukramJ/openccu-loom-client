@@ -15,6 +15,9 @@
   `volume` and `ramp_time` reached the device before; the sound file,
   duration and repetitions were dropped (#253).
 - `Capability.CDP_TRANSITION` names the new token.
+- **Wire layer regenerated from openccu-loom v0.107.0** (api 17.0.0, #255):
+  `AddonUpdateStatus.error_code` (`AddonUpdateErrorCode.rate_limited`) and
+  `retry_at`.
 
 # Version 2026.11.10 (2026-11-20)
 
