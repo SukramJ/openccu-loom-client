@@ -56,6 +56,14 @@ class Capability(StrEnum):
     #: the light's ``turn_on`` / ``set_level``. Without it, a light has only
     #: the daemon-side ``set_timer_on_time`` stage.
     CDP_BOUNDED_ON = "cdp.bounded_on.v1"
+    #: Always emitted from api 17.0.0 on. Every custom-data-point
+    #: transition is ``transition``, in seconds (absent or ``0`` is an
+    #: instant change): a light's ``turn_on`` and ``set_level``, on a
+    #: switch-on and on the switch-off ``{"state": "OFF"}``, and the sound
+    #: player's ``turn_on`` fade-in, which an older daemon reads as
+    #: ``ramp_time``. A light takes it only when its ``capabilities``
+    #: report ``transition``; one reporting none refuses it.
+    CDP_TRANSITION = "cdp.transition.v1"
     #: Always emitted from openccu-loom v0.101.0 (api 16.3.0) on.
     #: ``GET /devices/{addr}/projection`` answers how one device stands on
     #: the daemon's north-bound planes (Matter, Home Assistant discovery,

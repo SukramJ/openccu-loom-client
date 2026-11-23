@@ -1,3 +1,21 @@
+# Version 2026.11.11 (2026-11-23)
+
+- **Light transitions reach the daemon.** On a daemon that advertises
+  `cdp.transition.v1` (api 17.0.0), the integration's `ramp_time` travels
+  as `transition`: with a plain `turn_on`, inside the one `set_level`
+  switch-on, and on a switch-off as
+  `set_level {"state": "OFF", "transition": …}`. It is sent only for a
+  light whose capabilities report `transition` and dropped otherwise,
+  because the daemon refuses it there and the integration offers a
+  transition on every light. It used to be dropped on every light (#253).
+- **`play_sound` reaches the sound player with every field.** `soundfile`
+  goes out as `soundfile_index` (a number) or `tone` (a label), `on_time`
+  as `duration`, `repetitions` as `repetitions_index` and `ramp_time` as
+  `transition` (`ramp_time` on a daemon without `cdp.transition.v1`). Only
+  `volume` and `ramp_time` reached the device before; the sound file,
+  duration and repetitions were dropped (#253).
+- `Capability.CDP_TRANSITION` names the new token.
+
 # Version 2026.11.10 (2026-11-20)
 
 - **Light effects reach Home Assistant.** `effects` reads the list from the
