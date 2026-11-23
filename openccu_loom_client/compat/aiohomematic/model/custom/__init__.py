@@ -50,6 +50,14 @@ _LOGGER: Final = logging.getLogger(__name__)
 _CLIMATE_MODE_VALUES: Final = {m.value for m in ClimateMode}
 _CLIMATE_PROFILE_VALUES: Final = {p.value for p in ClimateProfile}
 
+# ``play_sound`` service fields the sound player's ``turn_on`` reads under
+# another key; ``soundfile`` and ``ramp_time`` depend on the value and on the
+# daemon and are mapped in :meth:`CustomDpSoundPlayer.play_sound`.
+_PLAY_SOUND_KEYS: Final[dict[str, str]] = {
+    "on_time": "duration",
+    "repetitions": "repetitions_index",
+}
+
 
 def custom_unique_id(*, serial_suffix: str, device_address: str, channel_no: int) -> str:
     """
@@ -479,17 +487,23 @@ class CustomDpDimmer(_CustomEntitySurface):
         ``set_timer_on_time`` stage, consumed by its ``turn_on`` and by a
         ``set_level`` switch-on without ``brightness``; this client stages it
         only for a plain switch-on, where the two calls go back to back.
+
+        The integration's ``ramp_time`` (Home Assistant's ``transition``)
+        travels with either form as ``transition`` — see :meth:`_transition`
+        for when it is sent at all.
         """
         seconds = self._consume_timer_on_time(on_time=_kwargs.pop("on_time", None))
         bounded = seconds is not None and self._store.has_capability(capability=Capability.CDP_BOUNDED_ON)
+        transition = self._transition(ramp_time=_kwargs.pop("ramp_time", None))
         if hs_color is None and color_temp_kelvin is None and effect is None and brightness is None:
-            if seconds is None:
-                await self.invoke(operation="turn_on")
-            elif bounded:
-                await self.invoke(operation="turn_on", params={"seconds": seconds})
-            else:
+            plain: dict[str, Any] = {}
+            if bounded:
+                plain["seconds"] = seconds
+            elif seconds is not None:
                 await self.invoke(operation="set_timer_on_time", params={"seconds": seconds})
-                await self.invoke(operation="turn_on")
+            if transition is not None:
+                plain["transition"] = transition
+            await self.invoke(operation="turn_on", params=plain or None)
             return
         params: dict[str, Any] = {"state": "ON"}
         if brightness is not None:
@@ -510,12 +524,43 @@ class CustomDpDimmer(_CustomEntitySurface):
                     self.full_name,
                     seconds,
                 )
+        if transition is not None:
+            params["transition"] = transition
         await self.invoke(operation="set_level", params=params)
 
     async def turn_off(self, **_kwargs: Any) -> None:
-        """Turn the light off and drop a staged on-time."""
+        """
+        Turn the light off and drop a staged on-time.
+
+        A fade-out is the switch-off ``set_level {"state": "OFF",
+        "transition": …}``; the daemon's ``turn_off`` takes no parameters.
+        """
         self.reset_timer_on_time()
+        if (transition := self._transition(ramp_time=_kwargs.get("ramp_time"))) is not None:
+            await self.invoke(operation="set_level", params={"state": "OFF", "transition": transition})
+            return
         await self.invoke(operation="turn_off")
+
+    def _transition(self, *, ramp_time: Any) -> float | None:
+        """
+        Return the transition to send with a light command, or ``None``.
+
+        It is sent only to a daemon that advertises ``cdp.transition.v1`` and
+        only for a light whose ``capabilities`` report ``transition``: the
+        integration declares ``LightEntityFeature.TRANSITION`` for every
+        light, and the daemon refuses a transition on a light that has none,
+        which would fail the whole switch. A transition of ``0`` is an
+        instant change and needs no key; a negative one, which the daemon
+        refuses, is dropped as well.
+        """
+        if (value := _as_float(value=ramp_time)) is None or value <= 0:
+            return None
+        if not self._store.has_capability(capability=Capability.CDP_TRANSITION):
+            return None
+        if not self.capabilities.transition:
+            _LOGGER.debug("%s: transition %.1f s dropped — this light has no transition", self.full_name, value)
+            return None
+        return value
 
     async def set_brightness(self, *, brightness: int) -> None:
         """Set the light brightness (0-255)."""
@@ -1040,8 +1085,29 @@ class CustomDpSoundPlayer(BaseCustomDpSiren):
         return str(val) if val is not None else None
 
     async def play_sound(self, **params: Any) -> None:
-        """Play a sound, passing through any sound/duration params."""
-        await self.invoke(operation="turn_on", params=params or None)
+        """
+        Play a sound, with the ``play_sound`` service's fields renamed to the daemon's keys.
+
+        ``soundfile`` is ``soundfile_index`` when it is a number and ``tone``
+        (the label, verbatim) otherwise; ``on_time`` is ``duration``;
+        ``repetitions`` is ``repetitions_index``, which counts the same way
+        (``-1`` endless, ``0`` none, ``N`` repeats) up to the daemon's
+        ceiling of 14 — a larger count, which the service offers up to 18,
+        the daemon leaves unwritten; ``ramp_time`` is
+        ``transition``, or ``ramp_time`` on a daemon without
+        ``cdp.transition.v1``. ``volume`` and any other key pass unchanged.
+        """
+        ramp_key = "transition" if self._store.has_capability(capability=Capability.CDP_TRANSITION) else "ramp_time"
+        wire: dict[str, Any] = {}
+        for key, value in params.items():
+            if key == "soundfile":
+                is_index = isinstance(value, int) and not isinstance(value, bool)
+                wire["soundfile_index" if is_index else "tone"] = value
+            elif key == "ramp_time":
+                wire[ramp_key] = value
+            else:
+                wire[_PLAY_SOUND_KEYS.get(key, key)] = value
+        await self.invoke(operation="turn_on", params=wire or None)
 
     async def stop_sound(self) -> None:
         """Stop sound playback."""
