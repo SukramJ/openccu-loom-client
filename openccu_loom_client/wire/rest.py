@@ -4150,6 +4150,9 @@ class UpdateList(BaseModel):
 
 class Applied(BaseModel):
     applied: int
+    reassembled: bool | None = Field(
+        None, description="False: the selection is stored, the rebuild failed and it is not in effect (0.10.0)."
+    )
 
 
 class FactoryResetRequest(BaseModel):
@@ -5108,6 +5111,15 @@ class Pairing(BaseModel):
     source: NodePairingSource
     window_open: bool
     duration_seconds: int | None = None
+    window_remaining_seconds: int | None = Field(
+        None,
+        description="As on `Status` (0.10.0): seconds until the open window's timer closes it; absent while no window is open.",
+        ge=0,
+    )
+    window_match: bool | None = Field(
+        None,
+        description="True: the open window admits the codes of this answer; false: a window is open on other credentials (0.10.0). Absent while no window is open.",
+    )
 
 
 class StructuralEndpoint(BaseModel):
@@ -5336,6 +5348,9 @@ class ClusterDetail(BaseModel):
 
 class EventRecord(BaseModel):
     number: int = Field(..., description="The node-wide event number (Matter Core §7.14.2.1).")
+    number_str: str | None = Field(
+        None, description="The event number in decimal, exact (0.10.0).", pattern="^(0|[1-9][0-9]{0,19})$"
+    )
     priority: NodeEventPriority
     endpoint: int
     cluster_hex: str
@@ -5500,6 +5515,11 @@ class Status5(BaseModel):
     window_kind: NodeWindowKind | None = None
     window_deadline: AwareDatetime | None = Field(
         None, description="When the open window's timer closes it, on the node's clock; absent while no window is open."
+    )
+    window_remaining_seconds: int | None = Field(
+        None,
+        description="Seconds until the open window's timer closes it, on the node's clock when the answer was written (0.10.0); absent while no window is open.",
+        ge=0,
     )
     exposure: bool = Field(..., description="Whether the host serves a selection.")
     exposure_reason: str | None = Field(
