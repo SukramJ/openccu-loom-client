@@ -1,3 +1,14 @@
+# Version 2026.11.12 (2026-11-26)
+
+- **Wire layer regenerated from openccu-loom v0.108.0** (api 18.0.0, #257).
+  The build is stamped for api 18, so a client connected to a 0.108.0
+  daemon no longer logs the major and schema-digest mismatch warnings on
+  every connect. The new fields are all optional and belong to the Matter
+  node routes (`/node/…`), which this client does not call:
+  `Applied.reassembled`, `Pairing.window_remaining_seconds` and
+  `window_match`, `EventRecord.number_str`, and the node status's
+  `window_remaining_seconds`.
+
 # Version 2026.11.11 (2026-11-23)
 
 - **Light transitions reach the daemon.** On a daemon that advertises
