@@ -18,6 +18,7 @@ from openccu_loom_client.operations.custom_data_points import CustomDataPointsOp
 from openccu_loom_client.operations.datapoints import DataPointsOperations
 from openccu_loom_client.operations.devices import DevicesOperations
 from openccu_loom_client.operations.diagnostics import DiagnosticsOperations
+from openccu_loom_client.operations.editor import EditorOperations, EditorRelayResponse, route_allowed
 from openccu_loom_client.operations.hub import HubOperations
 from openccu_loom_client.operations.i18n import I18nOperations
 from openccu_loom_client.operations.links import LinksOperations
@@ -36,6 +37,8 @@ __all__ = [
     "DataPointsOperations",
     "DevicesOperations",
     "DiagnosticsOperations",
+    "EditorOperations",
+    "EditorRelayResponse",
     "HubOperations",
     "I18nOperations",
     "LinksOperations",
@@ -45,4 +48,5 @@ __all__ = [
     "SystemOperations",
     "VisibilityOperations",
     "WarningsOperations",
+    "route_allowed",
 ]

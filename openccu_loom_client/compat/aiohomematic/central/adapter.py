@@ -120,6 +120,7 @@ if TYPE_CHECKING:
     from openccu_loom_client.client import LoomClient
     from openccu_loom_client.events import EventBus
     from openccu_loom_client.model import Device
+    from openccu_loom_client.operations import EditorOperations
 
 _LOGGER: Final = logging.getLogger(__name__)
 
@@ -1383,6 +1384,18 @@ class LoomCentralAdapter:
         self.json_rpc_client: Final = _JsonRpcClient(client=client)
         self.link: Final = _LinkCoordinator(client=client)
         self.configuration: Final = _Configuration(client=client)
+
+    # ---- device editor relay ----
+
+    @property
+    def editor(self) -> EditorOperations:
+        """
+        Return the daemon's device editor relay (manifest, routes, relay, module).
+
+        The integration that serves the editor component reaches the daemon
+        through this rather than through the private client.
+        """
+        return self._client.editor
 
     # ---- identity ----
 

@@ -38,9 +38,10 @@ from http import HTTPStatus
 import json
 import logging
 from typing import TYPE_CHECKING, Any, Final, Self
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 import aiohttp
+import yarl
 
 from openccu_loom_client import wire
 from openccu_loom_client.boxgate import gate_refusal
@@ -95,6 +96,16 @@ _DEFAULT_MAX_DOWNLOAD_BYTES: Final = 512 * 1024 * 1024
 # ``.sbk`` is a tar, but the daemon inspects the bytes rather than trusting
 # the label, so the generic octet-stream is the honest one to send.
 _UPLOAD_CONTENT_TYPE: Final = "application/octet-stream"
+
+# Statuses ``request_with_status`` retries on an idempotent verb: the
+# daemon's ``upstream_unavailable`` (502) and ``service_unready`` (503), the
+# two ``request`` retries as exceptions.
+_RETRYABLE_STATUSES: Final = frozenset({HTTPStatus.BAD_GATEWAY, HTTPStatus.SERVICE_UNAVAILABLE})
+
+# What ``request_with_status`` leaves unencoded in a caller's path: RFC 3986
+# ``pchar`` plus ``/``, and ``%`` so an existing percent-escape is kept
+# rather than encoded a second time.
+_RAW_PATH_SAFE: Final = "/%:@!$&'()*+,;=-._~"
 
 # The query parameter a device-addressed route reads its central from
 # (openccu-loom ``middleware.DeviceCentralQuery``).
@@ -546,6 +557,142 @@ class HttpTransport:
         msg = f"request to {url}: no time budget ({self._config.request_timeout_seconds}s)"
         raise LoomTransportError(msg)
 
+    async def request_with_status(
+        self,
+        *,
+        method: str,
+        path: str,
+        params: dict[str, Any] | None = None,
+        json_body: Any | None = None,
+        headers: dict[str, str] | None = None,
+        allow_retry: bool | None = None,
+    ) -> tuple[int, Any]:
+        """
+        Run one REST request and return the daemon's status with its decoded body.
+
+        Unlike :meth:`request`, no HTTP status raises: a 409, a 423 or a 500
+        answer is returned as ``(status, body)`` exactly like a 200 or a 204,
+        because a relay hands the daemon's answer on rather than judging it.
+        ``body`` is the decoded JSON, the text of a body that is not JSON, or
+        ``None`` for an empty one. Only a call that did not reach the daemon
+        raises — :class:`LoomTransportError` and its subclasses, the box gate's
+        refusal among them.
+
+        ``path`` is appended to ``config.http_base_url`` as given, so a
+        percent-encoded segment (``A%3A1``) reaches the daemon unchanged rather
+        than being decoded or encoded a second time. Characters a URL path
+        cannot carry raw are encoded; an existing ``%XX`` is kept.
+
+        Retry follows :meth:`request`: on for idempotent verbs, off for
+        POST / PATCH unless ``allow_retry`` says otherwise. A retried 502 / 503
+        that stays a 502 / 503 is returned, not raised.
+        """
+        if not self.is_connected:
+            msg = "HttpTransport not connected — call connect() first"
+            raise LoomTransportError(msg)
+
+        url = yarl.URL(self._config.http_base_url + quote(path, safe=_RAW_PATH_SAFE), encoded=True)
+        params = self._bound_params(path=path, params=params)
+        merged_headers = self._build_headers(extra=headers)
+        retry = allow_retry if allow_retry is not None else method.upper() in _RETRY_SAFE_METHODS
+
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self._config.request_timeout_seconds
+        attempt_delays = (0.0, *self._backoff_sequence) if retry else (0.0,)
+        last_exc: LoomTransportError | None = None
+        last_answer: tuple[int, Any] | None = None
+        for delay in attempt_delays:
+            remaining = deadline - loop.time()
+            if remaining <= 0 or (delay and delay >= remaining):
+                break
+            if delay:
+                await asyncio.sleep(delay)
+                remaining = deadline - loop.time()
+            try:
+                answer = await self._status_once(
+                    method=method,
+                    url=url,
+                    params=params,
+                    json_body=json_body,
+                    headers=merged_headers,
+                    client_timeout=aiohttp.ClientTimeout(total=remaining),
+                )
+            except LoomBoxGateError:
+                raise
+            except LoomTransportError as exc:
+                last_exc, last_answer = exc, None
+                _LOGGER.debug("retryable failure on %s %s: %s", method, url, exc)
+                continue
+            if answer[0] not in _RETRYABLE_STATUSES:
+                return answer
+            last_exc, last_answer = None, answer
+        if last_answer is not None:
+            return last_answer
+        if last_exc is not None:
+            raise last_exc
+        msg = f"request to {url}: no time budget ({self._config.request_timeout_seconds}s)"
+        raise LoomTransportError(msg)
+
+    async def _status_once(
+        self,
+        *,
+        method: str,
+        url: yarl.URL,
+        params: dict[str, Any] | None,
+        json_body: Any | None,
+        headers: dict[str, str],
+        client_timeout: aiohttp.ClientTimeout,
+    ) -> tuple[int, Any]:
+        """Run one attempt of :meth:`request_with_status`."""
+        assert self._session is not None  # noqa: S101 — narrowed by the connected-state guard above
+        try:
+            async with self._session.request(
+                method,
+                url,
+                params=params,
+                json=json_body,
+                headers=headers,
+                timeout=client_timeout,
+                # Same reasoning as ``_do_once``: a 3xx would carry the
+                # credential to wherever the daemon points.
+                allow_redirects=False,
+            ) as resp:
+                self._raise_on_gate_bounce(status=resp.status, content_type=resp.headers.get("Content-Type", ""))
+                raw = await resp.read()
+                return resp.status, self._decode_body(raw)
+        except aiohttp.ClientError as exc:
+            msg = f"transport error talking to {url}: {exc}"
+            raise LoomTransportError(msg) from exc
+        except TimeoutError as exc:
+            msg = f"request to {url} timed out after {self._config.request_timeout_seconds}s"
+            raise LoomTransportError(msg) from exc
+
+    async def request_origin_bytes(self, *, path: str, max_bytes: int | None = _DEFAULT_MAX_DOWNLOAD_BYTES) -> bytes:
+        """
+        ``GET`` a file the daemon serves at its origin, outside ``/api/v1``.
+
+        The URL is :meth:`LoomConfig.create_central_url` (scheme, authority
+        and, behind an openccu-lite box, the ingress prefix) plus ``path``.
+        Such files are served without a session, so the daemon credential is
+        not sent; behind a box the box token is, because the box's gate fronts
+        every path. Errors raise like :meth:`request_bytes`, and the body is
+        read under the same ``max_bytes`` ceiling.
+        """
+        if not self.is_connected:
+            msg = "HttpTransport not connected — call connect() first"
+            raise LoomTransportError(msg)
+        url = self._config.create_central_url() + path
+        headers: dict[str, str] = {"User-Agent": self._config.user_agent, **self._config.extra_headers}
+        if self._config.box_ingress is not None:
+            self._config.box_ingress.apply_to_headers(headers=headers)
+        timeout = aiohttp.ClientTimeout(
+            sock_connect=self._config.request_timeout_seconds,
+            sock_read=self._config.request_timeout_seconds,
+        )
+        return await self._bytes_once(
+            method="GET", url=url, params=None, headers=headers, client_timeout=timeout, max_bytes=max_bytes
+        )
+
     async def request_bytes(
         self,
         *,
@@ -838,6 +985,17 @@ class HttpTransport:
                 raise LoomTransportError(msg)
             chunks.append(chunk)
         return b"".join(chunks)
+
+    @staticmethod
+    def _decode_body(raw: bytes) -> Any:
+        """Decode a body to JSON, to its text when it is not JSON, or to ``None`` when empty."""
+        if not raw:
+            return None
+        text = raw.decode("utf-8", errors="replace")
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            return text
 
     @staticmethod
     def _decode_json(raw: bytes) -> Any:

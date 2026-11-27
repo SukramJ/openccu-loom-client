@@ -72,6 +72,7 @@ from openccu_loom_client.operations import (
     DataPointsOperations,
     DevicesOperations,
     DiagnosticsOperations,
+    EditorOperations,
     HubOperations,
     I18nOperations,
     LinksOperations,
@@ -281,6 +282,9 @@ class LoomClient:
         # Operator warnings and the calling user's silences (daemon ≥ 0.80.0,
         # api 12.2.0; an older one answers 404).
         self.warnings: Final = WarningsOperations(transport=self._http)
+        # The device editor relay an embedding integration runs (daemon ADR
+        # 0089; api 19, an older daemon answers the manifest with 404).
+        self.editor: Final = EditorOperations(transport=self._http)
 
     # ---- public state access ----
 

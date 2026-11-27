@@ -43,6 +43,8 @@ class RecordedRequest:
     query: dict[str, str]
     headers: dict[str, str]
     body: bytes
+    # The path as it arrived on the wire, percent-escapes kept (``path`` is decoded).
+    raw_path: str = ""
 
     def json(self) -> Any:
         """Decode the recorded request body as JSON."""
@@ -158,6 +160,7 @@ class MockDaemon:
                 query=dict(request.query),
                 headers=dict(request.headers),
                 body=body,
+                raw_path=request.raw_path.split("?", 1)[0],
             )
         )
         queue = self._responses.get((request.method, request.path))
