@@ -1272,11 +1272,15 @@ class AuditEntry(BaseModel):
     )
     central: str | None = Field(
         None,
-        description="CCU this entry belongs to, derived best-effort from the device\naddress. Omitted for daemon-wide entries (e.g. CCU management).\n",
+        description="CCU this entry belongs to: the central the change was made on,\nrecorded with the row (the central the request was bound to,\nor the one the daemon resolved the device on). Device addresses\nrepeat across CCUs, so the address alone cannot say which.\nA row recorded before the central was is attributed best-effort\nfrom its device address — on a central-bound device history, to\nthe bound central. Omitted for daemon-wide entries (e.g. CCU\nmanagement).\n",
     )
     timestamp: AwareDatetime = Field(..., description="UTC time at which the change was recorded.")
     user: str | None = Field(
         None, description="Authenticated user who triggered the change (empty if unauthenticated)."
+    )
+    on_behalf_of: str | None = Field(
+        None,
+        description="Who the principal in `user` asserted it acted for (the\n`X-On-Behalf-Of` header of an entry credential). Recorded as\nasserted, never verified. Omitted when the request named no one.\n",
     )
     action: str = Field(
         ...,
@@ -2289,14 +2293,25 @@ class UIOrigin(_TolerantStrEnum):
     lite_shell = "lite_shell"
 
 
-class EditorComponentManifest(BaseModel):
-    module_url: str = Field(
+class AuditExportFormat(_TolerantStrEnum):
+    csv = "csv"
+
+
+class EditorRouteMethod(_TolerantStrEnum):
+    GET = "GET"
+    PUT = "PUT"
+    POST = "POST"
+    PATCH = "PATCH"
+    DELETE = "DELETE"
+
+
+class EditorRoute(BaseModel):
+    method: EditorRouteMethod
+    prefix: str = Field(
         ...,
-        description="Daemon path of the module; the file name carries the hash.",
-        examples=["/app/component/editor-3f9a.js"],
+        description="Absolute path prefix below /api/v1, without a trailing slash. It\ncovers itself and every path below it, segment by segment; a `*`\nsegment matches exactly one non-empty segment.\n",
+        examples=["/devices/*/paramsets"],
     )
-    hash: str = Field(..., description="Hex SHA-256 of the module's bytes.")
-    routes: list[str] = Field(..., description="Path prefixes below /api/v1 the editor calls.")
 
 
 class EmbeddedScope(_TolerantStrEnum):
@@ -4564,6 +4579,10 @@ class DeviceSummary(BaseModel):
         None,
         description="CCU this device belongs to (multi-central grouping). Omitted\nfor backends that report no owning central.\n",
     )
+    released: bool | None = Field(
+        None,
+        description="Whether the device has finished onboarding and may be\nadopted; `false` means accepted and configurable but not yet\npublished to the ecosystems. A read bound to a central\n(`?central=`) answers from that central's hold alone; an\nunbound read is `false` when any CCU holding the address\nstill withholds it.\n",
+    )
     interface: str
     interface_id: str
     ise_id: int | None = Field(
@@ -4849,6 +4868,19 @@ class HubDataPoints(BaseModel):
     metrics: list[HubMetricDataPoint] | None = None
     connectivity: list[HubConnectivityDataPoint] | None = None
     install_mode: list[HubInstallModeDataPoint] | None = None
+
+
+class EditorComponentManifest(BaseModel):
+    module_url: str = Field(
+        ...,
+        description="Daemon path of the module; the file name carries the hash.",
+        examples=["/app/component/editor-3f9a.js"],
+    )
+    hash: str = Field(..., description="Hex SHA-256 of the module's bytes.")
+    routes: list[EditorRoute] = Field(
+        ...,
+        description="The calls the editor makes. A relay forwards a call only when one\nentry covers it: the method matches and the prefix covers the\npath below /api/v1.\n",
+    )
 
 
 class LiteProbeInfo(BaseModel):
