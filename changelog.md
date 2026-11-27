@@ -1,3 +1,29 @@
+# Version 2026.11.13 (2026-11-27)
+
+- **Wire layer regenerated from openccu-loom v0.109.0** (api 19.1.0, #260).
+  `AuditEntry.on_behalf_of` names the person an integration acted for;
+  `EditorComponentManifest.routes` is now a list of `EditorRoute`
+  (`method` + `prefix`), so a manifest from a daemon before api 19 no
+  longer parses; `DeviceSummary.released` is new and optional.
+- **Device calls are bound to this client's central.** Once the client
+  has resolved its central, every call on `/devices/{address}/…` carries
+  `?central=<name>`, so a daemon mediating several CCUs answers from
+  that central or with 404, never with another CCU's device of the same
+  address. The binding applies to calls made through the transport as
+  well; a `central` the caller passes itself is kept. Before the central
+  is resolved, and on the static routes (`/devices`, `/devices/refresh`,
+  `/devices/firmware/refresh`, `/devices/values:batch`), calls go out
+  unbound as before (#259).
+- `diagnostics.list_device_audit(address=…)` reads one device's change
+  history (`GET /devices/{address}/audit`, operator role), with the
+  `op`, `since`, `until`, `limit` and `offset` filters. `since` and
+  `until` must be timezone-aware (#259).
+- `ON_BEHALF_OF_HEADER` and `on_behalf_of_label(name=…, user_id=…)` build
+  an `X-On-Behalf-Of` value the daemon accepts: control and format
+  characters are dropped, and the label is cut to 128 UTF-8 bytes, the
+  name before the id. Without it, a display name breaking the daemon's
+  rule turns the user's save into a 400 (#259).
+
 # Version 2026.11.12 (2026-11-26)
 
 - **Wire layer regenerated from openccu-loom v0.108.0** (api 18.0.0, #257).

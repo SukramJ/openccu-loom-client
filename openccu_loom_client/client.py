@@ -228,6 +228,11 @@ class LoomClient:
         # Ensure the store always has the transport reference — important
         # when the caller injects a pre-built store built without one.
         self._store.set_transport(transport=self._http)
+        # Every device-addressed call names this client's central, once it is
+        # resolved (_pin_central_id, or the snapshot's interface list): on a
+        # daemon mediating several CCUs an address can repeat, and an unbound
+        # call would resolve on whichever central the daemon finds first.
+        self._http.bind_device_central(source=lambda: self._store.central_id)
         self._bus: Final = bus or EventBus()
         self._ws_transport_external: Final = ws_transport
         self._ws: WsTransport | None = ws_transport
