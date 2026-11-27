@@ -32,6 +32,9 @@ from openccu_loom_client.exceptions import (
     LoomBoxPairingError,
     LoomBoxTokenError,
     LoomConflictError,
+    LoomEditorCentralUnresolvedError,
+    LoomEditorModuleUrlError,
+    LoomEditorRouteRefusedError,
     LoomFeatureUnavailableError,
     LoomForbiddenError,
     LoomHttpError,
@@ -50,6 +53,7 @@ from openccu_loom_client.exceptions import (
     LoomValidationError,
 )
 from openccu_loom_client.on_behalf_of import ON_BEHALF_OF_HEADER, on_behalf_of_label
+from openccu_loom_client.operations.editor import EditorRelayResponse, route_allowed
 from openccu_loom_client.pairing import PairingFingerprintMismatchError, PairingSession, start_pairing
 from openccu_loom_client.probe import DaemonProbe, ProbeOutcome, probe_daemon
 from openccu_loom_client.store import LoomStore
@@ -66,6 +70,7 @@ __all__ = [
     "Capability",
     "DaemonProbe",
     "DiscoveredDaemon",
+    "EditorRelayResponse",
     "LoomAuthError",
     "LoomBadRequestError",
     "LoomBoxGateError",
@@ -74,6 +79,9 @@ __all__ = [
     "LoomClient",
     "LoomConfig",
     "LoomConflictError",
+    "LoomEditorCentralUnresolvedError",
+    "LoomEditorModuleUrlError",
+    "LoomEditorRouteRefusedError",
     "LoomFeatureUnavailableError",
     "LoomForbiddenError",
     "LoomHttpError",
@@ -102,6 +110,7 @@ __all__ = [
     "on_behalf_of_label",
     "parse_txt_record",
     "probe_daemon",
+    "route_allowed",
     "start_box_pairing",
     "start_pairing",
 ]

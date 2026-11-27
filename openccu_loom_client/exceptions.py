@@ -136,6 +136,36 @@ class LoomUnsupportedOperationError(BaseLoomException):
     """
 
 
+class LoomEditorRouteRefusedError(BaseLoomException):
+    """
+    The device editor asked for a call its manifest's routes do not cover.
+
+    Not an HTTP failure — the request is never sent. The daemon publishes the
+    routes its editor component calls (``GET /ui/editor-component``), and a
+    relay forwards nothing outside them.
+    """
+
+
+class LoomEditorModuleUrlError(BaseLoomException):
+    """
+    A manifest named an editor module this client will not fetch.
+
+    The module must be a ``.js`` file below ``/app/component/`` on the
+    daemon's origin; anything else is refused before a request is made.
+    """
+
+
+class LoomEditorCentralUnresolvedError(BaseLoomException):
+    """
+    No daemon central could be named for an editor call.
+
+    Raised for an empty CCU serial, a serial no central of the daemon
+    reports, and a relay asked to run without a central. The editor's calls
+    are device-addressed, and an unbound one could resolve on another CCU's
+    device of the same address.
+    """
+
+
 class LoomHttpError(BaseLoomException):
     """
     The daemon answered with a non-2xx status.

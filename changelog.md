@@ -1,3 +1,21 @@
+# Version 2026.11.14 (2026-11-27)
+
+- **Device editor relay.** `LoomClient.editor` (also
+  `LoomCentralAdapter.editor`) carries what an integration needs to serve
+  the daemon's device editor component (openccu-loom ADR 0089):
+  `manifest()` reads `GET /ui/editor-component` (`None` on 404);
+  `route_allowed(routes=…, method=…, path=…)` is the daemon's route rule;
+  `relay(...)` forwards a call a manifest route covers and returns the
+  daemon's status and body for every status, 409 / 422 / 423 included,
+  raising only when the daemon was not reached — it sets `?central=` and
+  `X-On-Behalf-Of` itself and drops the credential headers a caller sent;
+  `fetch_module(module_url=…)` reads the module from the daemon's origin,
+  through the box ingress with the box token where one is configured;
+  `resolve_central(serial=…)` names the daemon central of a CCU serial.
+  New errors: `LoomEditorRouteRefusedError`, `LoomEditorModuleUrlError`,
+  `LoomEditorCentralUnresolvedError`. The transport gains
+  `request_with_status(...)` and `request_origin_bytes(...)` (#261).
+
 # Version 2026.11.13 (2026-11-27)
 
 - **Wire layer regenerated from openccu-loom v0.109.0** (api 19.1.0, #260).
