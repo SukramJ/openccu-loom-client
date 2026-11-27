@@ -49,6 +49,7 @@ from openccu_loom_client.exceptions import (
     LoomUpstreamUnavailableError,
     LoomValidationError,
 )
+from openccu_loom_client.on_behalf_of import ON_BEHALF_OF_HEADER, on_behalf_of_label
 from openccu_loom_client.pairing import PairingFingerprintMismatchError, PairingSession, start_pairing
 from openccu_loom_client.probe import DaemonProbe, ProbeOutcome, probe_daemon
 from openccu_loom_client.store import LoomStore
@@ -91,12 +92,14 @@ __all__ = [
     "LoomUpstreamUnavailableError",
     "LoomValidationError",
     "NoAuth",
+    "ON_BEHALF_OF_HEADER",
     "PairingFingerprintMismatchError",
     "PairingSession",
     "ProbeOutcome",
     "SessionAuth",
     "__version__",
     "login_paths",
+    "on_behalf_of_label",
     "parse_txt_record",
     "probe_daemon",
     "start_box_pairing",

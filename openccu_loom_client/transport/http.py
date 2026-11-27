@@ -38,6 +38,7 @@ from http import HTTPStatus
 import json
 import logging
 from typing import TYPE_CHECKING, Any, Final, Self
+from urllib.parse import unquote
 
 import aiohttp
 
@@ -56,7 +57,7 @@ from openccu_loom_client.exceptions import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
     from types import TracebackType
 
     from openccu_loom_client.config import LoomConfig
@@ -95,6 +96,28 @@ _DEFAULT_MAX_DOWNLOAD_BYTES: Final = 512 * 1024 * 1024
 # the label, so the generic octet-stream is the honest one to send.
 _UPLOAD_CONTENT_TYPE: Final = "application/octet-stream"
 
+# The query parameter a device-addressed route reads its central from
+# (openccu-loom ``middleware.DeviceCentralQuery``).
+DEVICE_CENTRAL_QUERY: Final = "central"
+
+# ``/devices/<segment>`` paths that are not a device address: the daemon
+# routes them as static siblings of ``/devices/{addr}`` and they take no
+# central binding (``internal/north/rest/router.go``, ``"/devices/refresh"``,
+# ``"/devices/firmware/refresh"``, ``"/devices/values:batch"``).
+_DEVICE_STATIC_SEGMENTS: Final = frozenset({"refresh", "firmware", "values:batch"})
+
+
+def is_device_addressed(*, path: str) -> bool:
+    """
+    Report whether ``path`` names one device: ``/devices/{addr}`` or below it.
+
+    These are exactly the routes on which the daemon honours ``?central=``.
+    """
+    if not path.startswith("/devices/"):
+        return False
+    segment = path.removeprefix("/devices/").split("/", 1)[0].split("?", 1)[0]
+    return bool(segment) and unquote(segment) not in _DEVICE_STATIC_SEGMENTS
+
 
 class HttpTransport:
     """
@@ -123,6 +146,38 @@ class HttpTransport:
         # can re-apply the same gate to a daemon swapped underneath a live
         # session — the version numbers no longer catch that for us.
         self._required_capabilities: tuple[str, ...] = ()
+        # Where the central every device-addressed call is bound to comes
+        # from; see bind_device_central().
+        self._device_central: Callable[[], str] | None = None
+
+    # ---- central binding ----
+
+    def bind_device_central(self, *, source: Callable[[], str] | None) -> None:
+        """
+        Bind every device-addressed call to the central ``source()`` names.
+
+        Device addresses repeat across CCUs, and a daemon mediating several
+        resolves an unbound ``/devices/{addr}`` on the first central that
+        holds the address. With a binding, each such call carries
+        ``?central=<name>``, so the daemon answers from that central or with
+        404 — never with another CCU's device.
+
+        ``source`` is read per request, so a central resolved after connect
+        applies from then on; while it returns ``""`` calls go out unbound.
+        A ``central`` the caller passes itself is kept. ``None`` removes the
+        binding.
+        """
+        self._device_central = source
+
+    def _bound_params(self, *, path: str, params: dict[str, Any] | None) -> dict[str, Any] | None:
+        """Return ``params`` with the bound central added to a device-addressed call."""
+        if self._device_central is None or not is_device_addressed(path=path):
+            return params
+        if not (central := self._device_central()):
+            return params
+        if params is not None and DEVICE_CENTRAL_QUERY in params:
+            return params
+        return {**(params or {}), DEVICE_CENTRAL_QUERY: central}
 
     # ---- context manager ----
 
@@ -445,6 +500,7 @@ class HttpTransport:
             raise LoomTransportError(msg)
 
         url = self._config.http_base_url + path
+        params = self._bound_params(path=path, params=params)
         merged_headers = self._build_headers(extra=headers)
         retry = allow_retry if allow_retry is not None else method.upper() in _RETRY_SAFE_METHODS
 
@@ -528,6 +584,7 @@ class HttpTransport:
             msg = "HttpTransport not connected — call connect() first"
             raise LoomTransportError(msg)
         url = self._config.http_base_url + path
+        params = self._bound_params(path=path, params=params)
         merged = self._build_headers(extra=headers)
         merged.setdefault("Accept", "application/octet-stream")
         timeout = aiohttp.ClientTimeout(
@@ -618,6 +675,7 @@ class HttpTransport:
             msg = "HttpTransport not connected — call connect() first"
             raise LoomTransportError(msg)
         url = self._config.http_base_url + path
+        params = self._bound_params(path=path, params=params)
         merged = self._build_headers(extra=headers)
         timeout = aiohttp.ClientTimeout(
             total=total_timeout_seconds,

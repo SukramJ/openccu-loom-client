@@ -293,3 +293,36 @@ def test_an_int_enum_is_made_tolerant_of_unknown_integers(monkeypatch: pytest.Mo
 
     again, _ = script.rewrite(text, Path("generated.py"))  # type: ignore[attr-defined]
     assert again == text, "the rewrite must be idempotent"
+
+
+class TestEditorComponentManifest:
+    """API 19.0.0 lists the editor's calls as method + prefix (openccu-loom #1119)."""
+
+    def test_method_and_prefix_routes_parse(self) -> None:
+        from openccu_loom_client.wire.rest import EditorComponentManifest, EditorRouteMethod
+
+        manifest = EditorComponentManifest.model_validate(
+            {
+                "module_url": "/app/component/editor-3f9a.js",
+                "hash": "3f9a",
+                "routes": [
+                    {"method": "GET", "prefix": "/devices"},
+                    {"method": "POST", "prefix": "/devices/*/paramsets"},
+                ],
+            }
+        )
+        assert [(r.method, r.prefix) for r in manifest.routes] == [
+            (EditorRouteMethod.GET, "/devices"),
+            (EditorRouteMethod.POST, "/devices/*/paramsets"),
+        ]
+
+    def test_pre_19_prefix_list_is_refused(self) -> None:
+        """A bare prefix list would let a relay forward any method, unpairing included."""
+        from pydantic import ValidationError
+
+        from openccu_loom_client.wire.rest import EditorComponentManifest
+
+        with pytest.raises(ValidationError):
+            EditorComponentManifest.model_validate(
+                {"module_url": "/app/component/editor-3f9a.js", "hash": "3f9a", "routes": ["/devices", "/audit"]}
+            )

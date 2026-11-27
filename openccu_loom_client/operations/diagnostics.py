@@ -22,10 +22,13 @@ Binary archive downloads use :meth:`HttpTransport.request_bytes`.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from openccu_loom_client.operations._base import _OperationsBase
 from openccu_loom_client.wire.rest import AuditEntry, MQTTReloadResponse, ValuesCacheStats
+
+if TYPE_CHECKING:
+    from datetime import datetime
 
 
 class DiagnosticsOperations(_OperationsBase):
@@ -282,3 +285,49 @@ class DiagnosticsOperations(_OperationsBase):
     async def list_audit(self) -> list[AuditEntry]:
         """Recent change history (FIFO buffer). Wire: ``GET /audit``."""
         return await self._request_list(method="GET", path="/audit", model=AuditEntry)
+
+    async def list_device_audit(
+        self,
+        *,
+        address: str,
+        op: str | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+    ) -> list[AuditEntry]:
+        """
+        Change history of one device and its channels, newest first.
+
+        Wire: ``GET /devices/{address}/audit``. Open to the operator role,
+        where :meth:`list_audit` is admin-only. The address matches exactly
+        (the device address, or one of its channels). ``op`` filters by
+        action substring; ``since`` is inclusive and ``until`` exclusive;
+        ``limit`` (daemon default 1000, cap 10000) and ``offset`` page the
+        durable history. ``since`` / ``until`` must be timezone-aware: the
+        daemon reads RFC 3339 and refuses a time without an offset. Bound to this client's central like every
+        device-addressed call, so rows another CCU recorded for a repeated
+        address are left out.
+        """
+        params: dict[str, Any] = {}
+        if op is not None:
+            params["op"] = op
+        if since is not None:
+            params["since"] = _rfc3339(value=since, name="since")
+        if until is not None:
+            params["until"] = _rfc3339(value=until, name="until")
+        if limit is not None:
+            params["limit"] = limit
+        if offset is not None:
+            params["offset"] = offset
+        return await self._request_list(
+            method="GET", path=f"/devices/{address}/audit", model=AuditEntry, params=params or None
+        )
+
+
+def _rfc3339(*, value: datetime, name: str) -> str:
+    """Render an aware ``datetime`` as RFC 3339; refuse a naive one before it reaches the wire."""
+    if value.tzinfo is None or value.utcoffset() is None:
+        msg = f"{name} must be timezone-aware (the daemon reads RFC 3339)"
+        raise ValueError(msg)
+    return value.isoformat()

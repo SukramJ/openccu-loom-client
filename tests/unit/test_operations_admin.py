@@ -14,6 +14,7 @@ contract.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 
 import pytest
 
@@ -93,6 +94,47 @@ class TestDiagnosticsOperations:
         )
         stats = await DiagnosticsOperations(transport=t).get_values_cache_stats()
         assert stats.rows == 10
+
+    async def test_list_device_audit(self, http) -> None:
+        t, mock = http
+        mock.get(
+            "/api/v1/devices/0001D3C99C3C93/audit",
+            payload=[
+                {
+                    "id": 7,
+                    "central": "ccu-a",
+                    "timestamp": "2026-11-27T10:00:00Z",
+                    "user": "token:ha",
+                    "on_behalf_of": "Alex (ha:1f2e)",
+                    "action": "paramset_write",
+                    "device_address": "0001D3C99C3C93:1",
+                }
+            ],
+        )
+        since = datetime(2026, 11, 1, tzinfo=UTC)
+        until = datetime(2026, 11, 28, tzinfo=UTC)
+        rows = await DiagnosticsOperations(transport=t).list_device_audit(
+            address="0001D3C99C3C93", op="paramset", since=since, until=until, limit=50, offset=10
+        )
+        assert [(r.id, r.on_behalf_of, r.central) for r in rows] == [(7, "Alex (ha:1f2e)", "ccu-a")]
+        assert mock.requests[-1].query == {
+            "op": "paramset",
+            "since": "2026-11-01T00:00:00+00:00",
+            "until": "2026-11-28T00:00:00+00:00",
+            "limit": "50",
+            "offset": "10",
+        }
+
+    async def test_list_device_audit_sends_no_filters_by_default(self, http) -> None:
+        t, mock = http
+        mock.get("/api/v1/devices/A1/audit", payload=[])
+        assert await DiagnosticsOperations(transport=t).list_device_audit(address="A1") == []
+        assert mock.requests[-1].query == {}
+
+    async def test_list_device_audit_refuses_a_naive_time(self, http) -> None:
+        t, _ = http
+        with pytest.raises(ValueError, match="since must be timezone-aware"):
+            await DiagnosticsOperations(transport=t).list_device_audit(address="A1", since=datetime(2026, 11, 1))
 
     async def test_set_log_level(self, http) -> None:
         t, mock = http
